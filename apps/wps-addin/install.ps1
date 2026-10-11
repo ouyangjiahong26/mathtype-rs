@@ -17,7 +17,9 @@
     loads an add-in that has none).
 
     Existing entries for other add-ins are preserved; only the entry for this
-    add-in is added or replaced.
+    add-in is added or replaced. A manifest that exists but cannot be parsed is
+    never overwritten — the script stops and asks you to fix or move it, so the
+    other add-ins it lists are not lost.
 #>
 [CmdletBinding()]
 param(
@@ -70,10 +72,16 @@ function Get-OrCreatePluginXml([string]$Path) {
         try {
             $doc = New-Object System.Xml.XmlDocument
             $doc.Load($Path)
-            if ($doc.DocumentElement -and $doc.DocumentElement.Name -eq 'jsplugins') { return $doc }
         } catch {
-            Write-Warning "[install] could not parse ${Path}: $($_.Exception.Message); recreating"
+            # The file exists but cannot be read. Rebuilding it would silently throw away the
+            # entries of every other add-in it lists, so stop and say so instead.
+            throw "refusing to overwrite the manifest ${Path}: it is not valid XML ($($_.Exception.Message)). Fix or move the file, then run this script again."
         }
+        if (-not ($doc.DocumentElement -and $doc.DocumentElement.Name -eq 'jsplugins')) {
+            $rootName = if ($doc.DocumentElement) { $doc.DocumentElement.Name } else { '<none>' }
+            throw "refusing to overwrite the manifest ${Path}: its root element is '$rootName', not 'jsplugins'. Fix or move the file, then run this script again."
+        }
+        return $doc
     }
     $doc = New-Object System.Xml.XmlDocument
     $decl = $doc.CreateXmlDeclaration('1.0', 'UTF-8', $null)
@@ -86,6 +94,7 @@ function Get-OrCreatePluginXml([string]$Path) {
 function Set-PluginEntry([string]$Path, [hashtable]$Attrs) {
     $doc = Get-OrCreatePluginXml $Path
     $root = $doc.DocumentElement
+    $before = @($root.SelectNodes("jsplugin[@name='$AddinName']")).Count
     foreach ($n in @($root.SelectNodes("jsplugin[@name='$AddinName']"))) {
         $null = $root.RemoveChild($n)
     }
@@ -93,7 +102,8 @@ function Set-PluginEntry([string]$Path, [hashtable]$Attrs) {
     foreach ($k in $Attrs.Keys) { $el.SetAttribute($k, [string]$Attrs[$k]) }
     $null = $root.AppendChild($el)
     $doc.Save($Path)
-    Write-Host "[install] registered '$AddinName' in $Path"
+    # Self-check: the other add-ins' entries have to still be there after this write.
+    Write-Host "[install] registered '$AddinName' in $Path (replaced $before own entry(ies); the file now lists $(@($root.SelectNodes('jsplugin')).Count) add-in entry(ies))"
 }
 
 Set-PluginEntry (Join-Path $JsAddonsDir 'jsplugins.xml') @{

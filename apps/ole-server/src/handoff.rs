@@ -2,8 +2,10 @@
 //!
 //! Activating an object writes its LaTeX to a file in a per-user temporary directory, starts the
 //! editor on that file, and returns without waiting. The server then polls the process: when it
-//! exits, the file is read back and, if the text changed, the object stores the new equation,
-//! commits it and tells the host to save it.
+//! exits successfully, the file is read back and, if the text changed, the object stores the new
+//! equation, commits it and tells the host to save it. An editor that failed is not believed: its
+//! file may be half written, so the object keeps the equation it already had and the failure is
+//! reported.
 //!
 //! Everything the verification script needs to find its way around the directory:
 //!
@@ -75,9 +77,10 @@ impl Session {
         self.child.is_some()
     }
 
-    /// Poll for the editor having exited, and read the file back when it has.
+    /// Poll for the editor having exited, and read the file back when it exited successfully.
     ///
-    /// `None` while the editor is still running.
+    /// `None` while the editor is still running. A failed exit is reported as an error instead of
+    /// the file being read, because what a failed editor left may be truncated.
     pub fn poll(&mut self) -> Option<Result<String, String>> {
         let child = self.child.as_mut()?;
         match child.try_wait() {
@@ -85,8 +88,23 @@ impl Session {
             Ok(Some(status)) => {
                 self.child = None;
                 self.record(Path::new(""), &format!("exited {status}"));
+                // A failed editor may have died half-way through writing the file, so nothing it
+                // left behind is trusted: the object keeps the equation it already had and the
+                // failure is reported instead of the file being read back.
+                if !status.success() {
+                    let message = format!(
+                        "editor pid={} exited with {status}; the equation was not changed",
+                        self.editor_pid
+                    );
+                    trace::log(&message);
+                    return Some(Err(message));
+                }
+                trace::log(&format!(
+                    "editor pid={} exited successfully, reading {}",
+                    self.editor_pid,
+                    self.path.display()
+                ));
                 let text = std::fs::read(&self.path);
-                trace::log(&format!("editor pid={} exited, reading {}", self.editor_pid, self.path.display()));
                 Some(match text {
                     Ok(bytes) => Ok(crate::storage::text_of(&bytes)),
                     Err(error) => Err(format!("cannot read {}: {error}", self.path.display())),
@@ -157,7 +175,9 @@ pub fn editor_path() -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{LOG_FILE, POINTER_FILE, editor_path};
+    use super::{EDITOR_VARIABLE, LOG_FILE, POINTER_FILE, Session, editor_path};
+    use std::path::PathBuf;
+    use std::time::Duration;
 
     #[test]
     fn the_editor_is_looked_up_next_to_this_binary() {
@@ -174,5 +194,41 @@ mod tests {
     fn the_discovery_files_have_the_documented_names() {
         assert_eq!(POINTER_FILE, "current-handoff.txt");
         assert_eq!(LOG_FILE, "handoff-log.txt");
+    }
+
+    #[test]
+    fn a_failed_editor_is_not_accepted() {
+        // A stand-in editor that exits non-zero without touching the hand-off file: `where.exe`
+        // rejects `--edit`. That is what an editor that crashed half-way through writing looks like
+        // to the server, whose file may then be truncated, so its text must not be adopted.
+        let Some(editor) = failing_editor() else {
+            return;
+        };
+        // SAFETY: the variable is set and cleared around the session. The other test that reads it
+        // accepts either result, so setting it here cannot make that test fail.
+        unsafe { std::env::set_var(EDITOR_VARIABLE, &editor) };
+        let started = Session::start("x");
+        unsafe { std::env::remove_var(EDITOR_VARIABLE) };
+        let mut session = started.expect("the stand-in editor starts");
+
+        let outcome = loop {
+            if let Some(outcome) = session.poll() {
+                break outcome;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+
+        let error = outcome.expect_err("a failed editor's hand-off file is not adopted");
+        assert!(error.contains("exited with"), "{error}");
+    }
+
+    /// A Windows tool that exits non-zero when handed `--edit <file>`, or `None` when there is no
+    /// such tool on this machine.
+    fn failing_editor() -> Option<PathBuf> {
+        let root = std::env::var_os("SystemRoot")
+            .or_else(|| std::env::var_os("windir"))
+            .map(PathBuf::from)?;
+        let editor = root.join("System32").join("where.exe");
+        editor.is_file().then_some(editor)
     }
 }

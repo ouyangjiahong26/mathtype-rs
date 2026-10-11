@@ -21,6 +21,23 @@ const FACE: &[u8] = include_bytes!("../../../assets/fonts/latinmodern-math.otf")
 /// The size used when the host reports no usable font size for the selection.
 const DEFAULT_SIZE: f64 = 11.0;
 
+/// The smallest font size, in points, the host is believed about.
+const MIN_SIZE: f64 = 4.0;
+
+/// The largest font size, in points, the host is believed about.
+const MAX_SIZE: f64 = 200.0;
+
+/// The font size to render at: the host's value when it is a usable size, the default otherwise.
+///
+/// `Selection.Font.Size` is `wdUndefined` (9999999) when the selection mixes sizes, and that is not
+/// a size: handing it to the layout engine asks it to lay an equation out that many points tall
+/// and, at that magnitude, to allocate until the process aborts. Anything outside the range a font
+/// size can have — including `NaN`, which compares false against every bound — falls back to the
+/// default instead.
+fn render_size(size: Option<f64>) -> f64 {
+    size.filter(|size| size.is_finite() && (MIN_SIZE..=MAX_SIZE).contains(size)).unwrap_or(DEFAULT_SIZE)
+}
+
 /// What a command reports: the message for the status bar, or why it could not run.
 pub type Outcome = Result<String, String>;
 
@@ -76,11 +93,9 @@ pub fn export_png(application: &Object) -> Outcome {
     let document = word::active_document(application).map_err(failed("the document could not be read"))?;
     let directory = document.get_string("Path").map_err(failed("the document could not be read"))?;
     let name = document.get_string("Name").map_err(failed("the document could not be read"))?;
-    let size = selection
-        .get_object("Font")
-        .and_then(|font| font.get("Size"))
-        .and_then(|size| size.number())
-        .unwrap_or(DEFAULT_SIZE);
+    let size = render_size(
+        selection.get_object("Font").and_then(|font| font.get("Size")).and_then(|size| size.number()).ok(),
+    );
 
     let face = ttf_parser::Face::parse(FACE, 0).map_err(|error| format!("the bundled font could not be read: {error}"))?;
     let style = LayoutStyle::display(size);
@@ -124,37 +139,70 @@ pub fn insert_object(application: &Object) -> Outcome {
     let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
     let latex = selected_latex(&selection)?;
     // The object is created before anything can be handed to it, so the source is left on the
-    // clipboard for its server to pick up as it starts; it is given the source properly below.
+    // clipboard for its server to pick up as it starts; it is given the source properly below. It
+    // is also what puts the source back when a step below fails, so it is filled before the source
+    // can be cleared.
     clipboard::put_latex(&latex).map_err(failed("the clipboard could not be filled"))?;
     // The object takes the place of the source text.
     selection.call("Delete", Vec::new()).map_err(failed("the selection could not be cleared"))?;
     let shapes = selection.get_object("InlineShapes").map_err(failed("the selection could not be reached"))?;
-    let shape = shapes
-        .call_object(
-            "AddOLEObject",
-            vec![Variant::bstr(OBJECT_SERVER), Variant::missing(), Variant::boolean(false), Variant::boolean(false)],
-        )
-        .map_err(|error| {
-            format!(
-                "the {OBJECT_SERVER} object server could not be started: {error}; run install.ps1 in apps/ole-server"
-            )
-        })?;
-    hand_over(&shape, &latex)?;
+    let shape = match shapes.call_object(
+        "AddOLEObject",
+        vec![Variant::bstr(OBJECT_SERVER), Variant::missing(), Variant::boolean(false), Variant::boolean(false)],
+    ) {
+        Ok(shape) => shape,
+        Err(error) => {
+            // The source was cleared before the object could be created, so it has to be put back
+            // before the error is reported.
+            return Err(format!(
+                "the {OBJECT_SERVER} object server could not be started: {error}; run install.ps1 in apps/ole-server{}",
+                restore_source(&selection)
+            ));
+        }
+    };
+    // Only an object that took and stored the equation counts as inserted; otherwise the object is
+    // removed and the source put back, so the document is not left with an empty object in place of
+    // the equation.
+    if let Err(error) = hand_over(&shape, &latex) {
+        let _ = shape.call("Delete", Vec::new());
+        return Err(format!("{error}{}", restore_source(&selection)));
+    }
     Ok(format!("equation object inserted: {latex}"))
+}
+
+/// Puts the source text back from the clipboard after a failure, and says what happened.
+///
+/// The LaTeX was left on the clipboard before the source was cleared, so pasting it restores the
+/// user's text. The message records whether that worked, because a failure that could not be undone
+/// has to be told apart from one that was.
+fn restore_source(selection: &Object) -> String {
+    match selection.call("Paste", Vec::new()) {
+        Ok(_) => "; the source text was put back".to_string(),
+        Err(error) => format!("; the source text could not be put back and is still on the clipboard ({error})"),
+    }
 }
 
 /// Hands the source to the object server and asks it to store it.
 ///
 /// Until this happens the object holds no equation, so it is part of inserting one rather than a
-/// later step.
+/// later step. Both steps have to succeed and both members have to exist: an object that cannot
+/// take the source, or has nowhere to store it, is not handed the source at all, so a failure here
+/// is told apart from a success instead of being reported as one.
 fn hand_over(shape: &Object, latex: &str) -> Result<(), String> {
     let format = shape.get_object("OLEFormat").map_err(failed("the equation object could not be reached"))?;
     let server = format.get_object("Object").map_err(failed("the equation object has no server"))?;
-    server.call("SetLatex", vec![Variant::bstr(latex)]).map_err(failed("the equation object did not take the LaTeX"))?;
+    match server.call("SetLatex", vec![Variant::bstr(latex)]) {
+        Ok(_) => {}
+        Err(error) if absent_member(&error) => {
+            return Err("the equation object does not accept LaTeX (no SetLatex member)".to_string())
+        }
+        Err(error) => return Err(failed("the equation object did not take the LaTeX")(error)),
+    }
     match server.call("Save", Vec::new()) {
         Ok(_) => Ok(()),
-        // A server whose object has no `Save` has nothing to store into.
-        Err(error) if absent_member(&error) => Ok(()),
+        Err(error) if absent_member(&error) => {
+            Err("the equation object has nowhere to store the equation (no Save member)".to_string())
+        }
         Err(error) => Err(failed("the equation object could not be stored")(error)),
     }
 }
@@ -256,7 +304,7 @@ fn image_path(directory: &str, name: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::image_path;
+    use super::{DEFAULT_SIZE, image_path, render_size};
 
     #[test]
     fn the_image_sits_next_to_the_document() {
@@ -269,5 +317,33 @@ mod tests {
         let path = image_path("", "Document1");
         assert!(path.starts_with(std::env::temp_dir()));
         assert_eq!(path.file_name().unwrap(), "Document1-equation.png");
+    }
+
+    #[test]
+    fn an_undefined_font_size_falls_back_to_the_default() {
+        // `wdUndefined` is what Word reports for `Font.Size` when the selection mixes sizes.
+        assert_eq!(render_size(Some(9_999_999.0)), DEFAULT_SIZE);
+    }
+
+    #[test]
+    fn a_nonsensical_font_size_falls_back_to_the_default() {
+        assert_eq!(render_size(Some(f64::NAN)), DEFAULT_SIZE);
+        assert_eq!(render_size(Some(f64::INFINITY)), DEFAULT_SIZE);
+        assert_eq!(render_size(Some(-1.0)), DEFAULT_SIZE);
+        assert_eq!(render_size(Some(0.0)), DEFAULT_SIZE);
+        assert_eq!(render_size(None), DEFAULT_SIZE);
+    }
+
+    #[test]
+    fn a_size_within_the_usable_range_is_kept() {
+        assert_eq!(render_size(Some(4.0)), 4.0);
+        assert_eq!(render_size(Some(11.0)), 11.0);
+        assert_eq!(render_size(Some(200.0)), 200.0);
+    }
+
+    #[test]
+    fn a_size_outside_the_usable_range_falls_back_to_the_default() {
+        assert_eq!(render_size(Some(3.9)), DEFAULT_SIZE);
+        assert_eq!(render_size(Some(201.0)), DEFAULT_SIZE);
     }
 }

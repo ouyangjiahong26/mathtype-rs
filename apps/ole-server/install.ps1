@@ -1,24 +1,30 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Registers the MathType Rs equation object for the current user.
+    Registers the MathType Rs equation object under the hive named by -Scope.
 
 .DESCRIPTION
-    Everything is written under HKCU\Software\Classes, so no administrator rights are needed, and
-    both Word and WPS 文字 read per-user registration from there:
+    The keys are written under the `CLSID` and ProgID paths of one hive, chosen by -Scope:
+    Machine (the default) writes to HKLM\Software\Classes and therefore needs an elevated shell;
+    User writes the same keys to HKCU\Software\Classes without elevation. Word only honours a
+    machine-wide registration when it embeds an object, so Machine is the default (see the Scope
+    parameter for what was measured):
 
-      HKCU\Software\Classes\CLSID\{clsid}
+      HKLM\Software\Classes\CLSID\{clsid}
           (default)                 "MathType Rs equation"
           ProgID                    MathTypeRs.Equation.1
           LocalServer32             "<server.exe>" -Embedding
           DefaultIcon               "<server.exe>",0
-          MiscStatus                513   (recompose on resize | device independent rendering)
+          MiscStatus                0     (the value working equation objects use)
           Insertable                (empty: the class appears in the hosts' insert-object dialogs)
           AuxUserType\2 / \3        short name and application name
           Verb\0                    the primary verb, "Edit"
-      HKCU\Software\Classes\MathTypeRs.Equation.1\CLSID     the class id
-      HKCU\Software\Classes\MathTypeRs.Equation\CLSID       the class id, for the unversioned name
-      HKCU\Software\Classes\MathTypeRs.Equation\CurVer      MathTypeRs.Equation.1
+      HKLM\Software\Classes\MathTypeRs.Equation.1\CLSID     the class id
+      HKLM\Software\Classes\MathTypeRs.Equation\CLSID       the class id, for the unversioned name
+      HKLM\Software\Classes\MathTypeRs.Equation\CurVer      MathTypeRs.Equation.1
+
+    Under -Scope User every HKLM above is HKCU instead. The keys are otherwise identical, so
+    uninstall.ps1 takes the same -Scope and removes exactly what was written.
 
     The class id is the one in src/clsid.rs; rather than trusting the two to agree, this script
     asks the binary itself with `--registration` and stops if they differ.

@@ -140,11 +140,15 @@ function tryInsertOle(latex) {
     var shape = shapes.AddOLEObject(OLE_PROGID, '', false, false, '', 0, '', sel.Range);
     var obj = shape && shape.OLEFormat && shape.OLEFormat.Object;
     if (!obj) throw new Error('OLEFormat.Object is not reachable');
-    if (typeof obj.SetLatex === 'function') obj.SetLatex(latex);
-    if (typeof obj.Save === 'function') obj.Save();
+    // The object only counts as inserted when it can take and store the equation; a missing member
+    // means the source must go back rather than being lost.
+    if (typeof obj.SetLatex !== 'function') throw new Error('the object does not accept LaTeX (no SetLatex)');
+    if (typeof obj.Save !== 'function') throw new Error('the object has nowhere to store the equation (no Save)');
+    obj.SetLatex(latex);
+    obj.Save();
     return { ok: true, reason: '' };
   } catch (e) {
-    // Put the LaTeX back so the picture fallback still has it.
+    // Put the LaTeX back so the source is not lost; the picture fallback still has it.
     try { sel.Text = latex; } catch (e2) {}
     return { ok: false, reason: (e && e.message ? e.message : e) };
   }

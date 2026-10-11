@@ -7,7 +7,7 @@
     One command that does real work from end to end:
 
       1. builds the server (`cargo build -p mathtype-ole-server`) and checks it is warning free
-      2. registers it for the current user (install.ps1) and checks what was written
+      2. registers it (install.ps1, -Scope $Scope) and checks what was written in that same hive
       3. starts Word, creates a document and inserts the object with
          `$doc.InlineShapes.AddOLEObject("MathTypeRs.Equation.1")`
       4. activates it with `$shape.OLEFormat.DoVerb(-2)` and waits for a `mathtype` editor process,
@@ -34,13 +34,21 @@
     How long to wait for the editor to appear or to exit.
 .PARAMETER ObjectTimeoutSeconds
     How long to wait for the object to pick up an edit and for the document to save.
+.PARAMETER Scope
+    Which registration hive to install into, read back from and remove: Machine (default) is
+    HKLM and needs an elevated shell, User is HKCU. It is passed straight to install.ps1 and
+    uninstall.ps1 so the step 2 checks and the step 9 "no longer registered" check read the same
+    hive the scripts wrote.
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('debug', 'release')]
     [string] $Configuration = 'debug',
     [int] $EditorTimeoutSeconds = 60,
-    [int] $ObjectTimeoutSeconds = 60
+    [int] $ObjectTimeoutSeconds = 60,
+
+    [ValidateSet('Machine', 'User')]
+    [string] $Scope = 'Machine'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -133,12 +141,16 @@ if (-not (Test-Path -LiteralPath $server)) {
 
 # ---------------------------------------------------------------------------------------------
 Step '2. register'
-& (Join-Path $PSScriptRoot 'install.ps1') -Configuration $Configuration | ForEach-Object { Write-Host "    $_" }
-$classKey = "HKCU:\Software\Classes\CLSID\$classId"
+& (Join-Path $PSScriptRoot 'install.ps1') -Configuration $Configuration -Scope $Scope | ForEach-Object { Write-Host "    $_" }
+# Read back from the hive the install actually wrote to, so both this step and step 9 are real
+# assertions and neither passes against a hive the scripts never touched.
+$classes  = if ($Scope -eq 'Machine') { 'HKLM:\Software\Classes' } else { 'HKCU:\Software\Classes' }
+$classKey = Join-Path $classes "CLSID\$classId"
 $localServer = (Get-ItemProperty -LiteralPath "$classKey\LocalServer32").'(default)'
 $registeredProgId = (Get-ItemProperty -LiteralPath $classKey).ProgID
-$progIdClass = (Get-ItemProperty -LiteralPath "HKCU:\Software\Classes\$progId\CLSID").'(default)'
+$progIdClass = (Get-ItemProperty -LiteralPath (Join-Path $classes "$progId\CLSID")).'(default)'
 $insertable = Test-Path -LiteralPath "$classKey\Insertable"
+Write-Host "    scope              : $Scope ($classes)"
 Write-Host "    CLSID              : $classId"
 Write-Host "    ProgID             : $registeredProgId"
 Write-Host "    LocalServer32      : $localServer"
@@ -476,8 +488,8 @@ public struct RECT { public int Left, Top, Right, Bottom; }
 
 # ---------------------------------------------------------------------------------------------
 Step '9. unregister'
-& (Join-Path $PSScriptRoot 'uninstall.ps1') | ForEach-Object { Write-Host "    $_" }
-if (Test-Path -LiteralPath $classKey) { Fail 'the class is still registered' } else { Ok 'the class is no longer registered' }
+& (Join-Path $PSScriptRoot 'uninstall.ps1') -Scope $Scope | ForEach-Object { Write-Host "    $_" }
+if (Test-Path -LiteralPath $classKey) { Fail "the class is still registered under $Scope" } else { Ok "the class is no longer registered under $Scope" }
 
 Stop-EditorProcesses
 
@@ -492,7 +504,7 @@ foreach ($note in $script:Notes) { Write-Host "[note] $note" -ForegroundColor Ye
 
 Write-Host ''
 Write-Host 'To see WPS 文字 activate the object by hand:'
-Write-Host "  1. run  .\install.ps1 -Configuration $Configuration"
+Write-Host "  1. run  .\install.ps1 -Configuration $Configuration -Scope $Scope"
 Write-Host "  2. open $docx in WPS 文字 (Start-Process `"$($wpsExe.FullName)`" `"$docx`")"
 Write-Host '  3. double-click the equation in the page'
 Write-Host '  4. expect: a mathtype-ole-server.exe process, then a mathtype.exe editor window with the'

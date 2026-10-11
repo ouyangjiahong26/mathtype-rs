@@ -87,6 +87,35 @@ struct Job {
     scale: f64,
 }
 
+/// Smallest and largest layout size, in points, accepted by the command line and the HTTP API.
+pub(crate) const MIN_SIZE: f64 = 4.0;
+pub(crate) const MAX_SIZE: f64 = 200.0;
+
+/// Smallest and largest device-pixel scale accepted by the command line and the HTTP API.
+pub(crate) const MIN_SCALE: f64 = 1.0;
+pub(crate) const MAX_SCALE: f64 = 16.0;
+
+/// Reject sizes that are not finite or outside [`MIN_SIZE`]..=[`MAX_SIZE`].
+///
+/// A layout size is turned into a device buffer directly, so an unbounded value such as
+/// `9999999` would ask for an impossible allocation and abort the process.
+pub(crate) fn validate_size(size: f64) -> Result<f64, String> {
+    if size.is_finite() && (MIN_SIZE..=MAX_SIZE).contains(&size) {
+        Ok(size)
+    } else {
+        Err(format!("size must be between {MIN_SIZE} and {MAX_SIZE} points"))
+    }
+}
+
+/// Reject scales that are not finite or outside [`MIN_SCALE`]..=[`MAX_SCALE`].
+pub(crate) fn validate_scale(scale: f64) -> Result<f64, String> {
+    if scale.is_finite() && (MIN_SCALE..=MAX_SCALE).contains(&scale) {
+        Ok(scale)
+    } else {
+        Err(format!("scale must be between {MIN_SCALE} and {MAX_SCALE}"))
+    }
+}
+
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--serve") {
@@ -195,17 +224,16 @@ fn parse_job(args: &[String]) -> Result<Option<Job>, String> {
             "--in" => job.input_file = Some(read_value(args, &mut index, "--in")?.into()),
             "--out" => job.out = Some(read_value(args, &mut index, "--out")?.into()),
             "--size" => {
-                job.size = read_value(args, &mut index, "--size")?
+                let value: f64 = read_value(args, &mut index, "--size")?
                     .parse()
                     .map_err(|_| "--size needs a number of points".to_owned())?;
+                job.size = validate_size(value).map_err(|message| format!("--size {message}"))?;
             }
             "--scale" => {
-                job.scale = read_value(args, &mut index, "--scale")?
+                let value: f64 = read_value(args, &mut index, "--scale")?
                     .parse()
                     .map_err(|_| "--scale needs a positive number".to_owned())?;
-                if job.scale <= 0.0 {
-                    return Err("--scale must be positive".to_owned());
-                }
+                job.scale = validate_scale(value).map_err(|message| format!("--scale {message}"))?;
             }
             other if other.starts_with("--") => return Err(format!("unknown option: {other}")),
             other => job.input = Some(other.to_owned()),
@@ -724,5 +752,77 @@ fn dashed_rect(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
         painter.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.left(), end)], stroke);
         painter.line_segment([Pos2::new(rect.right(), y), Pos2::new(rect.right(), end)], stroke);
         y += DASH * 2.0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    #[test]
+    fn parse_job_applies_defaults() {
+        let job = parse_job(&args(&["x"])).expect("parses").expect("is a job");
+        assert_eq!(job.to, Format::Svg);
+        assert_eq!(job.from, None);
+        assert_eq!(job.input.as_deref(), Some("x"));
+        assert_eq!(job.size, 18.0);
+        assert_eq!(job.scale, 3.0);
+    }
+
+    #[test]
+    fn parse_job_reads_options() {
+        let job = parse_job(&args(&[
+            "--from", "mtef", "--to", "latex", "--size", "24", "--scale", "2", "body",
+        ]))
+        .expect("parses")
+        .expect("is a job");
+        assert_eq!(job.from, Some(Format::Mtef));
+        assert_eq!(job.to, Format::Latex);
+        assert_eq!(job.size, 24.0);
+        assert_eq!(job.scale, 2.0);
+        assert_eq!(job.input.as_deref(), Some("body"));
+    }
+
+    #[test]
+    fn help_returns_no_job() {
+        assert!(parse_job(&args(&["--help"])).expect("parses").is_none());
+        assert!(parse_job(&args(&["-h"])).expect("parses").is_none());
+    }
+
+    #[test]
+    fn parse_job_rejects_bad_arguments() {
+        assert!(parse_job(&args(&["--nope"])).is_err());
+        assert!(parse_job(&args(&["--from", "bogus", "x"])).is_err());
+        assert!(parse_job(&args(&["--size"])).is_err());
+        assert!(parse_job(&args(&["--size", "abc"])).is_err());
+        assert!(parse_job(&args(&["--scale", "abc"])).is_err());
+    }
+
+    #[test]
+    fn parse_job_rejects_out_of_range_size_and_scale() {
+        assert!(parse_job(&args(&["--size", "9999999", "x"])).is_err());
+        assert!(parse_job(&args(&["--size", "0", "x"])).is_err());
+        assert!(parse_job(&args(&["--scale", "0", "x"])).is_err());
+        assert!(parse_job(&args(&["--scale", "1000", "x"])).is_err());
+    }
+
+    #[test]
+    fn validate_size_accepts_the_ends_of_the_range() {
+        assert_eq!(validate_size(MIN_SIZE).unwrap(), MIN_SIZE);
+        assert_eq!(validate_size(MAX_SIZE).unwrap(), MAX_SIZE);
+        assert!(validate_size(f64::NAN).is_err());
+        assert!(validate_size(f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn validate_scale_accepts_the_ends_of_the_range() {
+        assert_eq!(validate_scale(MIN_SCALE).unwrap(), MIN_SCALE);
+        assert_eq!(validate_scale(MAX_SCALE).unwrap(), MAX_SCALE);
+        assert!(validate_scale(f64::NAN).is_err());
+        assert!(validate_scale(f64::INFINITY).is_err());
     }
 }
