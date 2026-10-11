@@ -30,6 +30,9 @@ MathType 的功能面与文档互通能力。
 | 字体槽 (style slot) | 功能样式（文本/函数/变量/希腊/符号/向量/数字）各自使用的字体 | `mt_layout::StyleFonts` |
 | 数学字母变体 (math variant) | 字母在某字体下的 Unicode 数学字母数字区码位，单一数学字体面内取字形 | `mt_layout::math_variant` |
 | 公式库 (formula library) | 用户数据目录下可检索、可插入的命名公式集 | `apps/mathtype/src/library.rs` |
+| 编号 (numbering) | 公式右侧（或左侧）制表位上的序号，由 Word 域（MACROBUTTON+SEQ）生成，更新域即重排 | `mt-numbering` |
+| 章节断点 (break) | 复位计数器的隐藏域段落：MTChap/MTSec 计数加一、MTEqn 清零 | `mt-numbering` |
+| 交叉引用 (cross-reference) | 指向编号书签 `_RefMTEqN` 的 REF 域（\h 超链接），编号变化后更新域同步 | `mt-numbering` |
 
 ## crate 地图
 
@@ -44,13 +47,14 @@ MathType 的功能面与文档互通能力。
 | `mt-html` | .docx → 网页导出：结构映射为 HTML，公式为行内 MathML（或 PNG），图片入 media/ 目录或 data URI 内嵌 |
 | `mt-style-preset` | 样式预设的文本格式、内置预设，与 `LayoutStyle`、MTEF 偏好的互转 |
 | `mt-batch` | 文档级批量转换：枚举全篇公式、预览统计、逐项转换（清单/导出/替换三种模式）、失败逐项记录、中止回调 |
+| `mt-numbering` | 公式编号与交叉引用：SEQ/MACROBUTTON/REF 域生成、编号段落组装、章/节复位域、编号设置持久化、已有编号枚举 |
 | `mt-layout` | 公式树 → 带位置的盒子树；字形度量抽象；间距表与字体槽可由预设注入 |
 | `mt-render` | 盒子树 → 屏幕 / PNG / SVG / EPS / WMF |
 | `mt-edit` | 编辑模型：光标导航、模板插入、撤销、面板内容 |
 | `apps/mathtype` | 桌面编辑器；同一份二进制还提供转换命令行与回环 HTTP 转换接口（供宿主加载项调用） |
 | `apps/ole-server` | 嵌入对象服务器：宿主双击激活与保存写回（ADR 0002 为准） |
 | `apps/word-addin` | Word 加载项：在文档里插入/转换公式 |
-| `apps/wps-addin` | WPS 加载项：命令面为 Word 子集——插入（OLE 或图片）、转 LaTeX、导出 PNG、批量转换、导出网页、检查转换服务 |
+| `apps/wps-addin` | WPS 加载项：命令面为 Word 子集——插入（OLE 或图片）、转 LaTeX、导出 PNG、批量转换、导出网页、公式编号、交叉引用、检查转换服务 |
 
 ## 约定
 

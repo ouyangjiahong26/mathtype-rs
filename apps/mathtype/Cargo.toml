@@ -15,6 +15,7 @@ mt-core.workspace = true
 mt-edit.workspace = true
 mt-html.workspace = true
 mt-batch.workspace = true
+mt-numbering.workspace = true
 mt-docx.workspace = true
 mt-layout.workspace = true
 mt-mathml.workspace = true

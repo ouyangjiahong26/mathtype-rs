@@ -11,6 +11,8 @@
           <button id="btnExportPng" label="导出 PNG" onAction="OnExportPng" size="large"/>
           <button id="btnBatchConvert" label="批量转换…" onAction="OnBatchConvert" size="large"/>
           <button id="btnExportHtml" label="导出网页" onAction="OnExportHtml" size="large"/>
+          <button id="btnNumberEquations" label="公式编号…" onAction="OnNumberEquations" size="large"/>
+          <button id="btnCrossReference" label="交叉引用…" onAction="OnCrossReference" size="large"/>
           <button id="btnCheckBridge" label="检查转换服务" onAction="OnCheckBridge" size="large"/>
         </group>
       </tab>

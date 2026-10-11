@@ -17,6 +17,7 @@ mt-html.workspace = true
 mt-batch.workspace = true
 mt-layout.workspace = true
 mt-omml.workspace = true
+mt-numbering.workspace = true
 mt-render.workspace = true
 mt-tex.workspace = true
 ttf-parser = "0.25"

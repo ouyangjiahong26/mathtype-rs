@@ -135,6 +135,11 @@ pub enum Position {
     BeforeItem { block: usize, item: usize },
     /// Immediately after an item.
     AfterItem { block: usize, item: usize },
+    /// Where a paragraph's properties go: right after the `w:pPr` opening tag when the paragraph
+    /// has properties, otherwise right after the paragraph's opening tag, where a new `w:pPr`
+    /// begins. The XML must therefore be property elements (`<w:tabs/>`, say) in the first case
+    /// and a whole `w:pPr` in the second.
+    ParagraphPropertiesStart { block: usize },
 }
 
 /// A Word document opened for reading and editing.
@@ -327,6 +332,10 @@ impl Document {
         let offset = match position {
             Position::BodyEnd => self.body_close,
             Position::ParagraphEnd { block } => self.paragraph_at_block(block)?.content_end,
+            Position::ParagraphPropertiesStart { block } => {
+                let paragraph = self.paragraph_at_block(block)?;
+                paragraph.properties_open_end.unwrap_or(paragraph.open_tag_end)
+            }
             Position::BeforeItem { block, item } | Position::AfterItem { block, item } => {
                 let paragraph = self.paragraph_at(block, item)?;
                 let range = paragraph.items[item].edit_range();
@@ -337,6 +346,16 @@ impl Document {
             }
         };
         self.splice_at(offset, xml)
+    }
+
+    /// Cuts a range out of the main part's XML and puts the fragment in its place, rescanning
+    /// the index.
+    ///
+    /// The range is an offset range into [`Document::document_xml`], valid until the next edit;
+    /// callers that located markup in the XML should splice it in at once. Well-formedness is
+    /// the caller's, as with [`Document::insert_field`].
+    pub fn splice_range(&mut self, range: Range<usize>, xml: &str) -> Result<(), DocxError> {
+        self.splice(range, xml)
     }
 
     /// Writes the container: edited parts fresh, everything untouched byte-for-byte.

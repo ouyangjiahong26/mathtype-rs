@@ -39,6 +39,24 @@ pub const CUSTOM_UI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
                   screentip="整篇文档的公式批量转换"
                   supertip="读取整篇文档，把每个公式转换为 Office 原生公式（读取失败的公式对象跳过并记录），结果另存为 &lt;名&gt;-converted.docx；有选区时只转换选区内的公式（在选区两侧加书签定位）。"/>
         </group>
+        <group id="MathTypeRsNumberingGroup" label="编号">
+          <button id="MathTypeRsInsertNumbered" label="插入编号公式" size="large"
+                  onAction="InsertNumberedEquation"
+                  screentip="把选中的 LaTeX 插入为带编号的公式"
+                  supertip="插入公式与制表位，编号由 Word 域生成（MACROBUTTON + SEQ），更新域后自动重排；编号格式沿用本文档的编号设置。"/>
+          <button id="MathTypeRsChapterBreak" label="下一章"
+                  onAction="InsertChapterBreak"
+                  screentip="插入章复位域"
+                  supertip="在光标处插入复位域：章计数加一，公式计数清零，之后更新域时编号按新章重排。"/>
+          <button id="MathTypeRsSectionBreak" label="下一节"
+                  onAction="InsertSectionBreak"
+                  screentip="插入节复位域"
+                  supertip="在光标处插入复位域：节计数加一，公式计数清零，之后更新域时编号按新节重排。"/>
+          <button id="MathTypeRsCrossRef" label="交叉引用" size="large"
+                  onAction="InsertCrossReference"
+                  screentip="引用最近一个编号"
+                  supertip="在光标处插入指向最近一个公式编号的 REF 域（超链接）；编号变化后更新域即同步。"/>
+        </group>
       </tab>
     </tabs>
   </ribbon>

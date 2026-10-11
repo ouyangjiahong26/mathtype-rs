@@ -9,6 +9,7 @@
 
 mod library;
 mod batch;
+mod numbering;
 mod serve;
 
 use std::sync::Arc;
@@ -135,6 +136,26 @@ fn main() -> eframe::Result<()> {
     }
     if args.first().map(String::as_str) == Some("batch-convert") {
         let code = match batch::run(&args[1..]) {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("{message}");
+                2
+            }
+        };
+        std::process::exit(code);
+    }
+    if args.first().map(String::as_str) == Some("number") {
+        let code = match numbering::run_number(&args[1..]) {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("{message}");
+                2
+            }
+        };
+        std::process::exit(code);
+    }
+    if args.first().map(String::as_str) == Some("crossref") {
+        let code = match numbering::run_crossref(&args[1..]) {
             Ok(code) => code,
             Err(message) => {
                 eprintln!("{message}");
@@ -291,6 +312,8 @@ fn usage() {
          mathtype --from omml --to latex --in equation.xml\n\
          mathtype batch-convert doc.docx --to omath --mode replace --json   # 文档级批量转换\n\
          mathtype export-html doc.docx web/  # --script=mathjax|katex|none, --math=mathml|image\n\
+         mathtype number doc.docx --style chapter --side right   # 公式编号（--at 只编第 N 个）\n\
+         mathtype crossref doc.docx --to 2   # 交叉引用（--to latest 为最近一个）\n\
          mathtype --serve 8760   # POST /convert?from=latex&to=omml for host add-ins"
     );
 }

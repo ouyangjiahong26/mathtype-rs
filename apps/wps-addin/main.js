@@ -373,6 +373,134 @@ function base64ToBinary(text) {
   return out.join('');
 }
 
+// Number every equation of the document through the bridge (#11). The document is read as
+// bytes, POSTed to /number with the style the user picks, and the answer JSON carries the
+// rewritten .docx base64-encoded. The numbered document is saved next to the original as
+// <名>-numbered.docx; the original is never touched in place. The numbers are Word fields:
+// update fields in the host to recompute them.
+function OnNumberEquations(control) {
+  var app = hostApp();
+  var doc = app.ActiveDocument;
+  if (!doc || !doc.FullName || !doc.Path) {
+    alert('请先保存文档，再执行“公式编号”。');
+    return;
+  }
+  var sep = doc.Path.indexOf('\\') >= 0 ? '\\' : '/';
+  var outPath = doc.Path + sep + stripExtension(doc.Name) + '-numbered.docx';
+  var style = 'plain';
+  try {
+    var asked = window.prompt('编号格式：plain（纯序号）/ chapter（章.序号）/ section（章.节.序号）/ paragraph（按标题重排）', 'plain');
+    if (asked === null) return;
+    asked = (asked || '').replace(/\s/g, '').toLowerCase();
+    if (asked === 'plain' || asked === 'chapter' || asked === 'section' || asked === 'paragraph') {
+      style = asked;
+    }
+  } catch (e) { /* keep the default */ }
+  var data;
+  try {
+    data = app.FileSystem.readAsBinaryString(doc.FullName);
+  } catch (e) {
+    alert('读取文档失败：' + (e && e.message ? e.message : e));
+    return;
+  }
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', BRIDGE_BASE + '/number?style=' + style + '&side=right', true);
+  xhr.overrideMimeType('text/plain; charset=x-user-defined');
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4) return;
+    if (xhr.status !== 200) {
+      alert(bridgeUnreachableMessage('HTTP ' + xhr.status + ': ' + xhr.responseText));
+      return;
+    }
+    var answer;
+    try {
+      answer = JSON.parse(xhr.responseText);
+    } catch (e) {
+      alert('编号返回了无法解析的结果：' + (e && e.message ? e.message : e));
+      return;
+    }
+    if (typeof answer.docx !== 'string') {
+      alert('编号返回了意外的结果形态。');
+      return;
+    }
+    try {
+      writeBinaryFile(outPath, base64ToBinary(answer.docx));
+    } catch (e) {
+      alert('写入编号后的文档失败：' + (e && e.message ? e.message : e) + '\n路径：' + outPath);
+      return;
+    }
+    alert('已为 ' + (answer.count || 0) + ' 个公式编号（' + style + ' 格式）。\n' +
+          '已另存为：' + outPath + '\n' +
+          '编号是 Word 域：在宿主里全选后按 F9 更新域即可重排。');
+  };
+  xhr.onerror = function () { alert(bridgeUnreachableMessage('网络错误')); };
+  xhr.send(data);
+}
+
+// Insert a cross-reference to a numbered equation through the bridge (#11). The document is
+// read as bytes, POSTed to /crossref with the target the user picks (a 1-based equation number
+// or latest), and the rewritten .docx is saved next to the original as <名>-crossref.docx.
+// The bridge works on the whole file, so the reference is appended at the end of the body;
+// moving it to the citing sentence is the one step left to the user.
+function OnCrossReference(control) {
+  var app = hostApp();
+  var doc = app.ActiveDocument;
+  if (!doc || !doc.FullName || !doc.Path) {
+    alert('请先保存文档，再执行“交叉引用”。');
+    return;
+  }
+  var sep = doc.Path.indexOf('\\') >= 0 ? '\\' : '/';
+  var outPath = doc.Path + sep + stripExtension(doc.Name) + '-crossref.docx';
+  var target = 'latest';
+  try {
+    var asked = window.prompt('引用第几个编号公式？（数字，或 latest 表示最近一个）', 'latest');
+    if (asked === null) return;
+    asked = (asked || '').replace(/\s/g, '');
+    if (/^\d+$/.test(asked) || asked.toLowerCase() === 'latest') target = asked;
+  } catch (e) { /* keep the default */ }
+  var data;
+  try {
+    data = app.FileSystem.readAsBinaryString(doc.FullName);
+  } catch (e) {
+    alert('读取文档失败：' + (e && e.message ? e.message : e));
+    return;
+  }
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', BRIDGE_BASE + '/crossref?to=' + encodeURIComponent(target), true);
+  xhr.overrideMimeType('text/plain; charset=x-user-defined');
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4) return;
+    if (xhr.status !== 200) {
+      alert(bridgeUnreachableMessage('HTTP ' + xhr.status + ': ' + xhr.responseText));
+      return;
+    }
+    var answer;
+    try {
+      answer = JSON.parse(xhr.responseText);
+    } catch (e) {
+      alert('交叉引用返回了无法解析的结果：' + (e && e.message ? e.message : e));
+      return;
+    }
+    if (typeof answer.docx !== 'string') {
+      alert('交叉引用返回了意外的结果形态。');
+      return;
+    }
+    try {
+      writeBinaryFile(outPath, base64ToBinary(answer.docx));
+    } catch (e) {
+      alert('写入引用后的文档失败：' + (e && e.message ? e.message : e) + '\n路径：' + outPath);
+      return;
+    }
+    alert('已插入指向 ' + (answer.bookmark || target) + ' 的交叉引用（REF 域）。\n' +
+          '已另存为：' + outPath + '\n' +
+          '引用加在正文末尾：剪切到引用处即可；更新域时编号自动同步。');
+  };
+  xhr.onerror = function () { alert(bridgeUnreachableMessage('网络错误')); };
+  xhr.send(data);
+}
+
 // Probe the bridge and report the result.
 function OnCheckBridge(control) {
   bridgeGet('/health', function (err, body) {

@@ -126,6 +126,12 @@ pub struct Paragraph {
     pub numbered: bool,
     /// How many tables deep the paragraph sits; zero for body paragraphs.
     pub table_depth: usize,
+    /// Where the paragraph's opening tag ends — the insertion point for a new `w:pPr`, which
+    /// must be the paragraph's first child.
+    pub open_tag_end: usize,
+    /// Where the paragraph's `w:pPr` opening tag ends, when it has properties: the insertion
+    /// point for new property elements. `None` when the paragraph has no properties.
+    pub properties_open_end: Option<usize>,
     /// Where the paragraph's content ends — the offset its closing tag starts at, the insertion
     /// point for markup appended to the paragraph.
     pub content_end: usize,
