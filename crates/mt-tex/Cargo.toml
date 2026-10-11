@@ -1,0 +1,10 @@
+[package]
+name = "mt-tex"
+description = "LaTeX math input and output for the equation model."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core.workspace = true
