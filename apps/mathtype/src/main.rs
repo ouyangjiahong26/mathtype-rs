@@ -12,8 +12,10 @@ mod serve;
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Pos2, Rect, Sense, Stroke, Vec2,
+    self, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Pos2, Rect, Sense,
+    Stroke, Vec2, ViewportCommand,
 };
+use mt_core::{Font, MathStyle};
 use mt_edit::{Cursor, Editor, PaletteItem, palettes};
 use mt_layout::{layout, layout_with_anchors, to_svg, Box as LayoutBox, LayoutStyle, RowAnchor};
 use mt_render::metrics::{FaceMetrics, MATH_FONT};
@@ -365,9 +367,68 @@ struct App {
     style: LayoutStyle,
     tex_input: String,
     status: String,
+    /// LaTeX parse failure to point at inside the input box: message and byte offset.
+    parse_error: Option<ParseFailure>,
+    /// True while the exit-confirmation prompt is up.
+    exit_prompt: bool,
     /// File the equation is read from and written back to, when opened from a document object.
     path: Option<std::path::PathBuf>,
     dirty: bool,
+}
+
+/// A parse failure worth showing where it happened: the message and the byte offset.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ParseFailure {
+    message: String,
+    /// Byte offset into the input the failure came from.
+    offset: usize,
+}
+
+/// One phase of a canvas pointer gesture, as the editor model understands it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PointerPhase {
+    /// Button just went down: place the caret and start a fresh selection from there.
+    Press,
+    /// Button still down: extend the selection to the pointer.
+    Drag,
+    /// Button released without a drag: plain click.
+    Click,
+}
+
+/// Font choices offered in the style panel, with their toolbar labels.
+const FONT_CHOICES: [(Font, &str); 6] = [
+    (Font::Italic, "变量体"),
+    (Font::Upright, "正体"),
+    (Font::Bold, "粗体"),
+    (Font::BoldItalic, "粗斜体"),
+    (Font::Script, "花体"),
+    (Font::SansSerif, "无衬线"),
+];
+
+/// Size presets offered in the style panel, matching [`MathStyle`]'s four tiers.
+const STYLE_CHOICES: [(MathStyle, &str); 4] = [
+    (MathStyle::Full, "标准"),
+    (MathStyle::Text, "文本"),
+    (MathStyle::Script, "一级小"),
+    (MathStyle::ScriptScript, "二级小"),
+];
+
+fn math_style_name(style: MathStyle) -> &'static str {
+    STYLE_CHOICES.iter().find(|(s, _)| *s == style).map(|(_, name)| *name).unwrap_or("?")
+}
+
+/// Apply a font to the selection (or record it for the next keystroke), reporting a math change.
+fn apply_font_choice(editor: &mut Editor, font: Font) -> bool {
+    let selected = editor.selection().is_some();
+    editor.apply_font(font);
+    selected
+}
+
+/// Apply a size preset to the selection (or record it for the next insertion), reporting a change.
+fn apply_style_choice(editor: &mut Editor, style: MathStyle) -> bool {
+    let selected = editor.selection().is_some();
+    editor.apply_style(style);
+    selected
 }
 
 impl App {
@@ -382,6 +443,8 @@ impl App {
             status: "输入字符或点选面板插入模板；左右方向键在槽位间移动".to_owned(),
             path: None,
             dirty: false,
+            parse_error: None,
+            exit_prompt: false,
         }
     }
 
@@ -427,16 +490,43 @@ impl App {
     }
 
     /// Import whatever the input box holds, picking the format from the text itself.
+    ///
+    /// LaTeX failures keep their byte offset so the input area can point at the offending spot.
     fn import_text(&mut self) {
         let text = self.tex_input.clone();
         let from = detect_format(&text);
+        if from == Format::Latex {
+            match mt_tex::parse(&text) {
+                Ok(math) => {
+                    self.editor.set_math(math);
+                    self.dirty = true;
+                    self.parse_error = None;
+                    self.status = "已导入（按 LaTeX 解析）".to_owned();
+                }
+                Err(error) => {
+                    self.parse_error = Some(ParseFailure {
+                        message: error.message.clone(),
+                        offset: error.offset,
+                    });
+                    self.status = format!(
+                        "LaTeX 解析失败：{}（第 {} 字节处）",
+                        error.message, error.offset
+                    );
+                }
+            }
+            return;
+        }
         match read_math(text.as_bytes(), from) {
             Ok(math) => {
                 self.editor.set_math(math);
                 self.dirty = true;
+                self.parse_error = None;
                 self.status = format!("已导入（按 {} 解析）", from.name());
             }
-            Err(message) => self.status = format!("导入失败：{message}"),
+            Err(message) => {
+                self.parse_error = None;
+                self.status = format!("导入失败：{message}");
+            }
         }
     }
 
@@ -551,10 +641,70 @@ impl App {
         );
         painter.rect_filled(caret, 0.0, color);
     }
+
+    /// Cover the selected span of the caret's row with a translucent highlight rectangle.
+    fn draw_selection(
+        &self,
+        painter: &egui::Painter,
+        origin: Pos2,
+        anchors: &[RowAnchor],
+        color: Color32,
+    ) {
+        let Some((start, end)) = self.editor.selection() else {
+            return;
+        };
+        let cursor = self.editor.cursor();
+        let Some(anchor) = anchors.iter().find(|anchor| &anchor.path == &cursor.path) else {
+            return;
+        };
+        let last = anchor.offsets.len().saturating_sub(1);
+        let x0 = origin.x + (anchor.origin.0 + anchor.offsets[start.min(last)]) as f32;
+        let x1 = origin.x + (anchor.origin.0 + anchor.offsets[end.min(last)]) as f32;
+        let baseline = origin.y + anchor.origin.1 as f32;
+        let size = self.style.size as f32;
+        let span = Rect::from_min_max(
+            Pos2::new(x0, baseline - size * 0.85),
+            Pos2::new(x1, baseline + size * 0.25),
+        );
+        painter.rect_filled(span, 2.0, color);
+    }
+
+    /// Modal asking whether to discard unsaved changes; shown when a close was cancelled.
+    fn show_exit_prompt(&mut self, ctx: &egui::Context) {
+        egui::Window::new("未保存的修改")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("公式有未保存的修改，直接退出将丢失这些修改。");
+                ui.horizontal(|ui| {
+                    if ui.button("放弃修改并退出").clicked() {
+                        self.exit_prompt = false;
+                        ui.ctx().send_viewport_cmd(ViewportCommand::Close);
+                    }
+                    if ui.button("继续编辑").clicked() {
+                        self.exit_prompt = false;
+                    }
+                });
+            });
+    }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Standalone sessions ask before discarding unsaved work; hand-off (--edit) sessions
+        // always write the file back on exit, so closing is unconditional there.
+        if ui.ctx().input(|input| input.viewport().close_requested())
+            && self.path.is_none()
+            && self.dirty
+            && !self.exit_prompt
+        {
+            ui.ctx().send_viewport_cmd(ViewportCommand::CancelClose);
+            self.exit_prompt = true;
+        }
+        if self.exit_prompt {
+            self.show_exit_prompt(ui.ctx());
+        }
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for palette in palettes() {
@@ -581,9 +731,24 @@ impl eframe::App for App {
                 if ui.button("重做").clicked() {
                     self.editor.redo();
                 }
+                ui.separator();
+                let shown_font = current_font(&self.editor);
+                for (font, name) in FONT_CHOICES {
+                    if ui.selectable_label(shown_font == font, name).clicked() {
+                        self.dirty |= apply_font_choice(&mut self.editor, font);
+                    }
+                }
+                ui.separator();
+                let shown_style = self.editor.typing_style();
+                for (style, name) in STYLE_CHOICES {
+                    if ui.selectable_label(shown_style == Some(style), name).clicked() {
+                        self.dirty |= apply_style_choice(&mut self.editor, style);
+                    }
+                }
+                ui.separator();
                 ui.add(
                     egui::Slider::new(&mut self.style.size, 8.0..=48.0)
-                        .text("字号")
+                        .text("显示字号")
                         .fixed_decimals(0),
                 );
                 if ui.button("复制 LaTeX").clicked() {
@@ -619,6 +784,13 @@ impl eframe::App for App {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                 self.draw_preview(ui);
                 ui.label(&self.status);
+                if let Some(failure) = &self.parse_error {
+                    let marker = error_marker(&self.tex_input, failure.offset);
+                    ui.monospace(
+                        egui::RichText::new(marker).color(ui.visuals().error_fg_color).family(egui::FontFamily::Monospace),
+                    );
+                }
+                ui.weak(style_status(&self.editor));
                 ui.horizontal(|ui| {
                     ui.label("输入");
                     let input = egui::TextEdit::singleline(&mut self.tex_input).desired_width(520.0);
@@ -645,16 +817,22 @@ impl eframe::App for App {
                 let (boxes, anchors) = self.geometry();
                 let origin = Pos2::new(rect.left() + 24.0, rect.center().y);
                 let font_id = |size: f64| FontId::new(size as f32, FontFamily::Name(MATH_FAMILY.into()));
+                self.draw_selection(&painter, origin, &anchors, ui.visuals().selection.bg_fill);
                 draw_boxes(&painter, &boxes, origin, &self.metrics, color, &font_id);
                 self.draw_caret(&painter, origin, &anchors, color);
 
-                if let Some(point) = response.interact_pointer_pos() {
-                    if let Some(target) = caret_at(&anchors, origin, point) {
-                        if response.dragged() {
-                            self.editor.extend_to(target);
-                        } else if response.clicked() {
-                            self.editor.set_cursor(target);
-                        }
+                let phase = if response.drag_started() {
+                    Some(PointerPhase::Press)
+                } else if response.dragged() {
+                    Some(PointerPhase::Drag)
+                } else if response.clicked() {
+                    Some(PointerPhase::Click)
+                } else {
+                    None
+                };
+                if let Some(phase) = phase {
+                    if let Some(point) = response.interact_pointer_pos() {
+                        apply_pointer(&mut self.editor, &anchors, origin, point, phase);
                     }
                 }
             });
@@ -671,6 +849,10 @@ impl eframe::App for App {
     }
 }
 
+/// Beyond this weighted distance a point counts as blank canvas rather than a caret position,
+/// so clicking far from the equation drops the selection instead of teleporting the caret.
+const MAX_HIT_COST: f32 = 600.0;
+
 /// Nearest insertion position to `point`, weighted so that staying on the caret's own line wins
 /// over a slightly smaller horizontal distance on a line further away.
 fn caret_at(anchors: &[RowAnchor], origin: Pos2, point: Pos2) -> Option<Cursor> {
@@ -680,12 +862,98 @@ fn caret_at(anchors: &[RowAnchor], origin: Pos2, point: Pos2) -> Option<Cursor> 
         for (index, offset) in anchor.offsets.iter().enumerate() {
             let x = origin.x + (anchor.origin.0 + offset) as f32;
             let cost = (point.x - x).abs() + (point.y - baseline).abs() * 8.0;
-            if best.as_ref().is_none_or(|(best_cost, _)| cost < *best_cost) {
+            if cost <= MAX_HIT_COST && best.as_ref().is_none_or(|(best_cost, _)| cost < *best_cost) {
                 best = Some((cost, Cursor { path: anchor.path.clone(), index }));
             }
         }
     }
     best.map(|(_, cursor)| cursor)
+}
+
+/// Feed one phase of a canvas pointer gesture to the editor model.
+///
+/// A press re-anchors the selection where it lands; a drag extends it to the pointer; a plain
+/// click just moves the caret. A miss (blank canvas) never moves the caret — it only drops the
+/// selection. Returns whether the gesture is still in progress (press or drag).
+fn apply_pointer(
+    editor: &mut Editor,
+    anchors: &[RowAnchor],
+    origin: Pos2,
+    point: Pos2,
+    phase: PointerPhase,
+) -> bool {
+    match phase {
+        PointerPhase::Press => {
+            match caret_at(anchors, origin, point) {
+                Some(target) => {
+                    editor.set_cursor(target.clone());
+                    editor.select_to(target);
+                }
+                None => editor.clear_selection(),
+            }
+            true
+        }
+        PointerPhase::Drag => {
+            if let Some(target) = caret_at(anchors, origin, point) {
+                editor.extend_to(target);
+            }
+            true
+        }
+        PointerPhase::Click => {
+            match caret_at(anchors, origin, point) {
+                Some(target) => editor.set_cursor(target),
+                None => editor.clear_selection(),
+            }
+            false
+        }
+    }
+}
+
+/// The failing line of `text` with a caret under byte `offset`, for the status area.
+fn error_marker(text: &str, offset: usize) -> String {
+    let mut consumed = 0;
+    for line in text.lines() {
+        let end = consumed + line.len();
+        if offset <= end {
+            let column = text[consumed..offset.min(end)].chars().count();
+            return format!("{line}\n{:<width$}^", "", width = column);
+        }
+        consumed = end + 1;
+    }
+    text.to_owned()
+}
+
+/// Explicit font of a node, when it carries one.
+fn node_font(node: &mt_core::Node) -> Option<Font> {
+    match node {
+        mt_core::Node::Char(char) => Some(char.font),
+        mt_core::Node::Styled(styled) => styled.font,
+        _ => None,
+    }
+}
+
+/// Font the style panel should highlight: the first selected node's when a selection exists,
+/// otherwise the font the next keystroke will use.
+fn current_font(editor: &Editor) -> Font {
+    if let Some((start, _)) = editor.selection() {
+        if let Some(mt_core::Node::Row(row)) = editor.math().node_at(&editor.cursor().path) {
+            if let Some(font) = row.iter().nth(start).and_then(node_font) {
+                return font;
+            }
+        }
+    }
+    editor.typing_font()
+}
+
+fn font_name(font: Font) -> &'static str {
+    FONT_CHOICES.iter().find(|(f, _)| *f == font).map(|(_, name)| *name).unwrap_or("其他字体")
+}
+
+/// One-line style state for the status area: what a style command will act on.
+fn style_status(editor: &Editor) -> String {
+    let scope = if editor.selection().is_some() { "选区" } else { "输入" };
+    let style = editor.typing_style().map(math_style_name).unwrap_or("继承");
+    format!("{scope}样式：字体 {}，字号 {style}", font_name(current_font(editor)))
 }
 
 /// Register the math face, plus a system face for the CJK interface labels when one loads.
@@ -874,5 +1142,123 @@ mod tests {
         let math = Math::new(Node::variable('x'));
         let bytes = write_math(&math, Format::Png, 18.0, 3.0).expect("renders");
         assert!(!bytes.is_empty());
+    }
+
+    /// A pointer fixture: an editor on `ab+cd`, its layout anchors, and a point in item `i`'s
+    /// middle (strictly closer to insertion point `i + 1` than to `i`).
+    fn drag_fixture() -> (Editor, Vec<RowAnchor>, Box<dyn Fn(usize) -> Pos2>) {
+        let editor = Editor::from_math(mt_tex::parse("ab+cd").expect("parses"));
+        let metrics = FaceMetrics::parse(MATH_FONT, 0).expect("font parses");
+        let style = LayoutStyle::display(18.0);
+        let (_, anchors) = layout_with_anchors(editor.math(), &metrics, &style);
+        let root = anchors
+            .iter()
+            .find(|anchor| anchor.path == mt_core::Path::root())
+            .expect("root row anchored")
+            .clone();
+        let point = move |item: usize| {
+            let mid = (root.offsets[item] + root.offsets[item + 1]) / 2.0;
+            // Nudge right of the midpoint so the nearest insertion point is unambiguous.
+            let x = root.origin.0 + mid + (root.offsets[item + 1] - root.offsets[item]).max(2.0) * 0.1;
+            Pos2::new(x as f32, root.origin.1 as f32)
+        };
+        (editor, anchors, Box::new(point))
+    }
+
+    #[test]
+    fn drag_press_then_move_grows_the_selection() {
+        let (mut editor, anchors, point) = drag_fixture();
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(1), PointerPhase::Press);
+        assert_eq!(editor.selection(), None, "a press alone selects nothing");
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(3), PointerPhase::Drag);
+        assert_eq!(editor.selection(), Some((2, 4)), "drag covers items 2 and 3");
+    }
+
+    #[test]
+    fn clicking_blank_canvas_drops_the_selection_without_moving_the_caret() {
+        let (mut editor, anchors, point) = drag_fixture();
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(1), PointerPhase::Press);
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(3), PointerPhase::Drag);
+        assert!(editor.selection().is_some());
+        let before = editor.cursor().clone();
+        assert!(!apply_pointer(&mut editor, &anchors, Pos2::ZERO, Pos2::new(9000.0, 9000.0), PointerPhase::Click));
+        assert_eq!(editor.selection(), None, "blank click clears the selection");
+        assert_eq!(editor.cursor(), &before, "blank click leaves the caret alone");
+    }
+
+    #[test]
+    fn caret_at_reports_blank_canvas_as_a_miss() {
+        let (_, anchors, point) = drag_fixture();
+        assert!(caret_at(&anchors, Pos2::ZERO, point(0)).is_some());
+        assert!(caret_at(&anchors, Pos2::ZERO, Pos2::new(9000.0, 9000.0)).is_none());
+    }
+
+    #[test]
+    fn font_choice_applies_to_the_selection_and_reports_the_change() {
+        let (mut editor, anchors, point) = drag_fixture();
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(0), PointerPhase::Press);
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(1), PointerPhase::Drag);
+        assert_eq!(editor.selection(), Some((1, 2)));
+        assert!(apply_font_choice(&mut editor, Font::Bold));
+        assert_eq!(current_font(&editor), Font::Bold, "the panel reflects the selection");
+        let latex = mt_tex::to_latex(editor.math());
+        assert!(latex.contains("\\mathbf"), "{latex}");
+        // With no selection the same command only arms the typing font.
+        editor.set_cursor(Cursor::start());
+        assert!(!apply_font_choice(&mut editor, Font::Script));
+        assert_eq!(editor.typing_font(), Font::Script);
+        assert!(!mt_tex::to_latex(editor.math()).contains("mathcal"));
+    }
+
+    #[test]
+    fn style_choice_applies_a_size_preset_to_the_selection() {
+        let (mut editor, anchors, point) = drag_fixture();
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(1), PointerPhase::Press);
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(2), PointerPhase::Drag);
+        assert!(apply_style_choice(&mut editor, MathStyle::Script));
+        assert_eq!(editor.typing_style(), Some(MathStyle::Script));
+        let latex = mt_tex::to_latex(editor.math());
+        assert!(latex.contains("scriptstyle"), "{latex}");
+    }
+
+    #[test]
+    fn style_status_names_the_font_and_scope() {
+        let editor = Editor::new();
+        assert!(style_status(&editor).contains("输入"), "{}", style_status(&editor));
+        assert!(style_status(&editor).contains("变量体"), "{}", style_status(&editor));
+    }
+
+    #[test]
+    fn error_marker_points_at_the_offending_byte() {
+        let marker = error_marker("a + \\bad{", 8);
+        let mut lines = marker.lines();
+        assert_eq!(lines.next(), Some("a + \\bad{"));
+        assert_eq!(lines.next(), Some("        ^"), "caret sits under byte 8");
+        // Offsets on later lines indent the caret accordingly.
+        let marker = error_marker("x + y\n\\sqrt{", 8);
+        assert_eq!(marker.lines().nth(1), Some("  ^"), "byte 8 is column 2 of line 2");
+    }
+
+    #[test]
+    fn acceptance_drag_bold_template_undo_redo_keeps_every_step() {
+        let (mut editor, anchors, point) = drag_fixture();
+        // 1. drag-select `b`.
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(0), PointerPhase::Press);
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(0), PointerPhase::Drag);
+        assert_eq!(editor.selection(), None, "dragging within one item selects nothing");
+        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(1), PointerPhase::Drag);
+        // 2. apply bold to the selection.
+        assert!(apply_font_choice(&mut editor, Font::Bold));
+        let bolded = mt_tex::to_latex(editor.math());
+        assert!(bolded.contains("\\mathbf"), "{bolded}");
+        // 3. insert a template at the caret.
+        editor.insert_template(mt_edit::Template::Fraction);
+        let with_template = mt_tex::to_latex(editor.math());
+        assert!(with_template.contains("\\frac"), "{with_template}");
+        // 4. undo returns to the bolded text; redo restores the template.
+        assert!(editor.undo());
+        assert_eq!(mt_tex::to_latex(editor.math()), bolded);
+        assert!(editor.redo());
+        assert_eq!(mt_tex::to_latex(editor.math()), with_template);
     }
 }
