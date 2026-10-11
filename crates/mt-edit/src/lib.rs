@@ -331,6 +331,11 @@ impl Editor {
         self.typing_font = font;
     }
 
+    /// Size preset recorded for the next insertion, if any.
+    pub fn typing_style(&self) -> Option<MathStyle> {
+        self.typing_style
+    }
+
     /// The row the caret sits in, if the caret is still valid.
     pub fn row(&self) -> Option<&Row> {
         match self.math.node_at(&self.cursor.path) {
