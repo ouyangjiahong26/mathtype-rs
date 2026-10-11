@@ -13,6 +13,8 @@ path = "src/main.rs"
 [dependencies]
 mt-core.workspace = true
 mt-edit.workspace = true
+mt-html.workspace = true
+mt-docx.workspace = true
 mt-layout.workspace = true
 mt-mathml.workspace = true
 mt-mtef.workspace = true
@@ -22,3 +24,6 @@ mt-tex.workspace = true
 eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
 egui = "0.36"
 ttf-parser = "0.25"
+
+[dev-dependencies]
+zip = { version = "2.4", default-features = false, features = ["deflate"] }

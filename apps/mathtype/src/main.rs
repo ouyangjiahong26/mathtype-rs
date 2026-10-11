@@ -125,6 +125,15 @@ fn main() -> eframe::Result<()> {
         }
         return Ok(());
     }
+    if args.first().map(String::as_str) == Some("export-html") {
+        return match export_html(&args[1..]) {
+            Ok(()) => Ok(()),
+            Err(message) => {
+                eprintln!("{message}");
+                std::process::exit(1);
+            }
+        };
+    }
     if args.first().map(String::as_str) == Some("--edit") {
         let path = args.get(1).cloned().unwrap_or_else(|| "equation.tex".to_owned());
         return run_editor(std::path::PathBuf::from(path));
@@ -138,6 +147,56 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native("mathtype-rs", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+}
+
+/// `mathtype export-html <in.docx> <outdir> [--script=...] [--math=...]`: the document to a
+/// web page directory, formulas as MathML unless pictures are asked for.
+fn export_html(args: &[String]) -> Result<(), String> {
+    let mut input: Option<std::path::PathBuf> = None;
+    let mut outdir: Option<std::path::PathBuf> = None;
+    let mut options = mt_html::Options::default();
+    let mut index = 0;
+    while index < args.len() {
+        let argument = args[index].as_str();
+        index += 1;
+        match argument {
+            "--help" | "-h" => {
+                println!("mathtype export-html <in.docx> <outdir> [--script=none|mathjax|katex] [--math=mathml|image]");
+                return Ok(());
+            }
+            "--script" => {
+                let value = read_value(args, &mut index, "--script")?;
+                options.script = mt_html::Script::parse(&value)
+                    .ok_or_else(|| format!("unknown --script {value}: none, mathjax, or katex"))?;
+            }
+            "--math" => {
+                let value = read_value(args, &mut index, "--math")?;
+                options.math = mt_html::MathMode::parse(&value)
+                    .ok_or_else(|| format!("unknown --math {value}: mathml or image"))?;
+            }
+            name if let Some(value) = name.strip_prefix("--script=") => {
+                options.script = mt_html::Script::parse(value)
+                    .ok_or_else(|| format!("unknown --script {value}: none, mathjax, or katex"))?;
+            }
+            name if let Some(value) = name.strip_prefix("--math=") => {
+                options.math = mt_html::MathMode::parse(value)
+                    .ok_or_else(|| format!("unknown --math {value}: mathml or image"))?;
+            }
+            name if name.starts_with("--") => return Err(format!("unknown option {name}")),
+            name if input.is_none() => input = Some(name.into()),
+            name if outdir.is_none() => outdir = Some(name.into()),
+            name => return Err(format!("unexpected argument {name}")),
+        }
+    }
+    let input = input.ok_or("usage: mathtype export-html <in.docx> <outdir>")?;
+    let outdir = outdir.ok_or("usage: mathtype export-html <in.docx> <outdir>")?;
+    let bytes = std::fs::read(&input)
+        .map_err(|error| format!("cannot read {}: {error}", input.display()))?;
+    let document = mt_docx::Document::open(&bytes)
+        .map_err(|error| format!("cannot open {}: {error}", input.display()))?;
+    let page = mt_html::export_files(&document, &options, &outdir)?;
+    println!("{} written", page.display());
+    Ok(())
 }
 
 /// Open the editor on an equation stored as text in `path`, writing it back when the user saves.
@@ -195,6 +254,8 @@ fn usage() {
          Examples:\n\
          mathtype '\\frac{{a}}{{b}}' --to omml\n\
          mathtype --from omml --to latex --in equation.xml\n\
+         mathtype export-html doc.docx web/   # --script=mathjax|katex|none, --math=mathml|image\n\
+         mathtype export-html doc.docx web/  # --script=mathjax|katex|none, --math=mathml|image\n\
          mathtype --serve 8760   # POST /convert?from=latex&to=omml for host add-ins"
     );
 }
@@ -374,6 +435,10 @@ struct App {
     /// File the equation is read from and written back to, when opened from a document object.
     path: Option<std::path::PathBuf>,
     dirty: bool,
+    /// True while the export-web dialog is up, with its two path fields.
+    web_dialog: bool,
+    web_docx: String,
+    web_out: String,
 }
 
 /// A parse failure worth showing where it happened: the message and the byte offset.
@@ -445,6 +510,9 @@ impl App {
             dirty: false,
             parse_error: None,
             exit_prompt: false,
+            web_dialog: false,
+            web_docx: String::new(),
+            web_out: String::new(),
         }
     }
 
@@ -670,6 +738,63 @@ impl App {
     }
 
     /// Modal asking whether to discard unsaved changes; shown when a close was cancelled.
+    /// The export-web dialog: a .docx path in, an output directory out. The editor works on one
+    /// equation, so the document to export is named here rather than opened.
+    fn show_web_dialog(&mut self, ctx: &egui::Context) {
+        egui::Window::new("导出网页")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("把整个 Word 文档导出为网页：公式转为 MathML，图片写入 media/ 目录。");
+                ui.horizontal(|ui| {
+                    ui.label("文档");
+                    ui.text_edit_singleline(&mut self.web_docx);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("输出目录");
+                    ui.text_edit_singleline(&mut self.web_out);
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("导出").clicked() {
+                        self.run_web_export();
+                    }
+                    if ui.button("取消").clicked() {
+                        self.web_dialog = false;
+                    }
+                });
+            });
+    }
+
+    /// Runs the export named in the dialog; the status line carries the outcome.
+    fn run_web_export(&mut self) {
+        let input = std::path::PathBuf::from(self.web_docx.trim());
+        let outdir = self.web_out.trim().to_owned();
+        let result = (|| -> Result<std::path::PathBuf, String> {
+            if input.as_os_str().is_empty() {
+                return Err("请先填写文档路径".to_owned());
+            }
+            let outdir = if outdir.is_empty() {
+                input.with_extension("").to_string_lossy().into_owned() + "-web"
+            } else {
+                outdir
+            };
+            let outdir = std::path::PathBuf::from(outdir);
+            let bytes = std::fs::read(&input)
+                .map_err(|error| format!("无法读取 {}: {error}", input.display()))?;
+            let document = mt_docx::Document::open(&bytes)
+                .map_err(|error| format!("无法打开 {}: {error}", input.display()))?;
+            mt_html::export_files(&document, &mt_html::Options::default(), &outdir)
+        })();
+        match result {
+            Ok(page) => {
+                self.status = format!("已导出 {}", page.display());
+                self.web_dialog = false;
+            }
+            Err(message) => self.status = format!("导出网页失败：{message}"),
+        }
+    }
+
     fn show_exit_prompt(&mut self, ctx: &egui::Context) {
         egui::Window::new("未保存的修改")
             .collapsible(false)
@@ -704,6 +829,9 @@ impl eframe::App for App {
         }
         if self.exit_prompt {
             self.show_exit_prompt(ui.ctx());
+        }
+        if self.web_dialog {
+            self.show_web_dialog(ui.ctx());
         }
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -768,6 +896,9 @@ impl eframe::App for App {
                 }
                 if ui.button("导出 EPS").clicked() {
                     self.export(Format::Eps);
+                }
+                if ui.button("导出网页…").clicked() {
+                    self.web_dialog = true;
                 }
                 if self.path.is_some() {
                     let label = if self.dirty { "保存 *" } else { "保存" };

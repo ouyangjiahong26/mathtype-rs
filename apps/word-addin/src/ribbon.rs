@@ -30,6 +30,10 @@ pub const CUSTOM_UI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
                   onAction="ExportSelectionPng"
                   screentip="把选中的 LaTeX 渲染成图片"
                   supertip="把选区中的 LaTeX 排版渲染为 PNG，写到文档所在目录。"/>
+          <button id="MathTypeRsExportHtml" label="导出网页"
+                  onAction="ExportDocumentHtml"
+                  screentip="把文档导出为网页"
+                  supertip="把整个文档导出为网页目录：公式转为 MathML，图片写入 media/ 子目录，浏览器直接打开。"/>
         </group>
       </tab>
     </tabs>
@@ -100,7 +104,8 @@ mod tests {
                 "ConvertSelectionToEquation",
                 "ConvertSelectionToLatex",
                 "TeXToggle",
-                "ExportSelectionPng"
+                "ExportSelectionPng",
+                "ExportDocumentHtml"
             ]
         );
     }

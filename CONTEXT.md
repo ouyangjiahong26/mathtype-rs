@@ -37,13 +37,14 @@ MathType 的功能面与文档互通能力。
 | `mt-omml` | Office 原生公式 ⇄ 公式树 |
 | `mt-mtef` | 嵌入对象数据流与偏好预设的读写 |
 | `mt-docx` | .docx 容器读写与轻索引：定位段落/公式/嵌入对象/图片，替换与插入，未触碰部件原样写回 |
+| `mt-html` | .docx → 网页导出：结构映射为 HTML，公式为行内 MathML（或 PNG），图片入 media/ 目录或 data URI 内嵌 |
 | `mt-layout` | 公式树 → 带位置的盒子树；字形度量抽象 |
 | `mt-render` | 盒子树 → 屏幕 / PNG / SVG / EPS / WMF |
 | `mt-edit` | 编辑模型：光标导航、模板插入、撤销、面板内容 |
 | `apps/mathtype` | 桌面编辑器；同一份二进制还提供转换命令行与回环 HTTP 转换接口（供宿主加载项调用） |
 | `apps/ole-server` | 嵌入对象服务器：宿主双击激活与保存写回（ADR 0002 为准） |
 | `apps/word-addin` | Word 加载项：在文档里插入/转换公式 |
-| `apps/wps-addin` | WPS 加载项：命令面为 Word 子集——插入（OLE 或图片）、转 LaTeX、导出 PNG、检查转换服务 |
+| `apps/wps-addin` | WPS 加载项：命令面为 Word 子集——插入（OLE 或图片）、转 LaTeX、导出 PNG、导出网页、检查转换服务 |
 
 ## 约定
 
