@@ -1,0 +1,11 @@
+[package]
+name = "mt-omml"
+description = "Office Math (OMML) reader and writer for the equation tree."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core.workspace = true
+quick-xml = "0.42"

@@ -1,0 +1,24 @@
+[package]
+name = "mathtype"
+description = "Desktop equation editor: palette-driven editing of the equation tree."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mathtype"
+path = "src/main.rs"
+
+[dependencies]
+mt-core.workspace = true
+mt-edit.workspace = true
+mt-layout.workspace = true
+mt-mathml.workspace = true
+mt-mtef.workspace = true
+mt-omml.workspace = true
+mt-render.workspace = true
+mt-tex.workspace = true
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts"] }
+egui = "0.36"
+ttf-parser = "0.25"

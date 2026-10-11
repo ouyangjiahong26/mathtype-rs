@@ -1,0 +1,33 @@
+[package]
+name = "mathtype-ole-server"
+description = "Out-of-process OLE embedded-object server that hosts an equation inside a document."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mathtype-ole-server"
+path = "src/main.rs"
+
+[dependencies]
+mt-core.workspace = true
+mt-layout.workspace = true
+mt-mtef.workspace = true
+mt-render.workspace = true
+mt-tex.workspace = true
+# `#[implement]` expands to paths into `windows_core`, so the runtime of the `windows` crate has to
+# be a dependency of its own, exactly as the crate's own macros expect.
+windows-core = "0.62"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_SystemInformation",
+    "Win32_System_Variant",
+    "Win32_UI_WindowsAndMessaging",
+] }

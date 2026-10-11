@@ -1,0 +1,15 @@
+[package]
+name = "mt-mtef"
+description = "Reader and writer for the MTEF equation stream embedded in document objects."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core.workspace = true
+cfb = "0.10"
+
+[dev-dependencies]
+mt-tex.workspace = true
+cfb = "0.10"

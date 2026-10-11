@@ -1,0 +1,9 @@
+[package]
+name = "mt-core"
+description = "Equation model: rows, characters and templates in the shape the editor and renderers share."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
