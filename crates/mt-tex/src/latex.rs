@@ -406,6 +406,19 @@ fn render_big(big: &BigOp, out: &mut String, aligned: bool) {
 }
 
 fn render_styled(styled: &Styled, out: &mut String, aligned: bool) {
+    // The class macro scopes the whole atom, so it wraps every other wrapper; `Op` and `Inner`
+    // have no macro (module docs) and fall through.
+    if let Some(name) = styled.class.and_then(class_macro) {
+        push_macro(out, name);
+        out.push('{');
+        render_styled_body(styled, out, aligned);
+        out.push('}');
+        return;
+    }
+    render_styled_body(styled, out, aligned);
+}
+
+fn render_styled_body(styled: &Styled, out: &mut String, aligned: bool) {
     if let Some(font) = styled.font {
         out.push('\\');
         out.push_str(font_macro(font));

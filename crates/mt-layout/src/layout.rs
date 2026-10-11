@@ -627,7 +627,9 @@ fn layout_slash_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64, stacked: bool) ->
     let slash_x = ox + numerator.w + kern;
     let denominator_x = slash_x + slash.w + kern;
     let mut slash_node = slash.node;
-    place(&mut slash_node, ctx, slash_x, oy);
+    // The slash is a bare glyph with nothing under it: `place` would run the fraction's own
+    // `shift_rows`, moving the numerator and denominator anchors a second time.
+    translate(&mut slash_node, slash_x, oy);
     let mut numerator_node = numerator.node;
     place(&mut numerator_node, &numerator_ctx, ox, oy - shift);
     let mut denominator_node = denominator.node;

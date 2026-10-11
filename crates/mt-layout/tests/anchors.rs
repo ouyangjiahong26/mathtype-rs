@@ -1,6 +1,6 @@
 //! Caret geometry tests: the row anchors `layout_with_anchors` reports.
 
-use mt_core::{Class, Frac, Math, Matrix, Node, Path, Scripts, Space, Sqrt};
+use mt_core::{Class, Frac, FracKind, Math, Matrix, Node, Path, Scripts, Space, Sqrt};
 use mt_layout::{
     constants as c, layout, layout_with_anchors, ApproxMetrics, Box as LBox, LayoutStyle, RowAnchor,
 };
@@ -169,4 +169,33 @@ fn anchors_stay_inside_the_root_box() {
         assert!(anchor.origin.1 >= -boxes.height() - 1e-9, "origin below the box top");
         assert!(anchor.origin.1 <= boxes.depth() + 1e-9, "origin above the box bottom");
     }
+}
+
+#[test]
+fn a_slash_fraction_keeps_row_anchors_unshifted() {
+    // Placing the slash through the fraction's own context used to run its `shift_rows` and
+    // move every anchor under the fraction a second time, so the anchors must sit exactly
+    // where their rows' glyphs landed.
+    let mut frac = Frac::new(Node::row([Node::variable('a')]), Node::row([Node::variable('b')]));
+    frac.kind = FracKind::Slash;
+    let (boxes, anchors) = layout_with_anchors(&Math::new(Node::Frac(Box::new(frac))), &ApproxMetrics, &style());
+
+    fn glyph_at(node: &LBox, ch: char) -> Option<(f64, f64)> {
+        match node {
+            LBox::Glyph { ch: found, x, y, .. } if *found == ch => Some((*x, *y)),
+            LBox::HBox { items, .. } | LBox::VBox { items, .. } => {
+                items.iter().find_map(|item| glyph_at(item, ch))
+            }
+            _ => None,
+        }
+    }
+    let (a_x, a_y) = glyph_at(&boxes, 'a').expect("glyph 'a' in the box tree");
+    let (b_x, b_y) = glyph_at(&boxes, 'b').expect("glyph 'b' in the box tree");
+
+    let numerator = anchor(&anchors, &Path::root().child(0));
+    close(numerator.origin.0, a_x);
+    close(numerator.origin.1, a_y);
+    let denominator = anchor(&anchors, &Path::root().child(1));
+    close(denominator.origin.0, b_x);
+    close(denominator.origin.1, b_y);
 }

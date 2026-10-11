@@ -130,7 +130,8 @@ fn control_characters_are_dropped_not_written_raw() {
     assert!(document.contains('\t'), "tab dropped in {document}");
     assert!(document.contains('\n'), "line feed dropped in {document}");
     assert!(document.contains("&#13;"), "carriage return neither escaped nor kept in {document}");
-    // What the writer emits is well-formed enough for the reader to take back.
+    // What the writer emits is well-formed enough for the reader to take back, whitespace
+    // intact (`parse` unwraps a single-run body).
     let read = parse(&document).unwrap();
-    assert_eq!(read.body, Math::new(Node::row([Node::text("abc\td\ne\rf")])).body);
+    assert_eq!(read.body, Node::text("abc\td\ne\rf"));
 }

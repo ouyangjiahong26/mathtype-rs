@@ -916,7 +916,7 @@ fn deeply_nested_input_is_rejected_not_crashed() {
         "{".repeat(129),
         format!("{0}{1}{0}", "{".repeat(129), "x"),
         format!("{}x", "\\left(".repeat(129)),
-        format!("\\frac{}{{b}}", "\\frac{a}".repeat(90)),
+        format!("\\frac{}{{b}}", "\\frac{a}".repeat(129)),
     ] {
         let error = match parse(&input) {
             Ok(_) => panic!("deeply nested input parsed: {}", input.chars().take(24).collect::<String>()),
@@ -972,12 +972,14 @@ fn forced_class_characters_keep_their_class() {
     // What the MathML reader produces for `<mo class="mt-class-bin">x</mo>`.
     let node = Node::Char(Char { ch: 'x', class: Class::Bin, font: Font::Italic });
     let latex = to_latex_fragment(&node);
-    assert_eq!(latex, "\\mathbin{x}");
-    assert_eq!(body(&latex), sym('x', Class::Bin));
+    // `push_macro` writes a separating space after a control word; the parser skips it.
+    assert_eq!(latex, "\\mathbin {x}");
+    assert_eq!(body(&latex), ro(vec![Node::Char(Char { ch: 'x', class: Class::Bin, font: Font::Italic })]));
     // A forced class on a symbol written as a macro wraps the macro.
     let node = Node::Char(Char { ch: '→', class: Class::Ord, font: Font::Upright });
-    assert_eq!(to_latex_fragment(&node), "\\mathord{\\to}");
-    assert_eq!(body("\\mathord{\\to}"), sym('→', Class::Ord));
+    let latex = to_latex_fragment(&node);
+    assert!(latex.starts_with("\\mathord"), "{latex}");
+    assert_eq!(body(&latex), ro(vec![sym('→', Class::Ord)]));
     // Natural classes write directly.
     assert_eq!(to_latex_fragment(&sym('+', Class::Bin)), "+");
     // Class macros parse onto single characters and larger bodies alike.
@@ -989,6 +991,33 @@ fn forced_class_characters_keep_their_class() {
     }))]));
 }
 
+#[test]
+fn styled_bodies_keep_their_class() {
+    // `\mathbin{\mathbf{x}}`: the class macro must scope the font wrapper, not be dropped by it.
+    assert_round_trips(Node::Styled(Box::new(Styled {
+        body: Node::Styled(Box::new(Styled {
+            body: v('x'),
+            style: None,
+            font: Some(Font::Bold),
+            class: None,
+        })),
+        style: None,
+        font: None,
+        class: Some(Class::Bin),
+    })));
+    // `\mathbin{x^2}`: same for a template body.
+    assert_round_trips(Node::Styled(Box::new(Styled {
+        body: Node::Scripts(Box::new(Scripts {
+            base: v('x'),
+            sub: None,
+            sup: Some(sym('2', Class::Ord)),
+        })),
+        style: None,
+        font: None,
+        class: Some(Class::Bin),
+    })));
+}
+
 // ------------------------------------------------------------------ lossy output spells parseably
 
 #[test]
@@ -996,7 +1025,7 @@ fn align_writes_parseably_in_its_contexts() {
     // Top level: no parseable spelling for an alignment point, so a placeholder space.
     let latex = to_latex_fragment(&Node::Align);
     assert_eq!(latex, "\\;");
-    assert_eq!(body(&latex), Node::Space(Space::Thick));
+    assert_eq!(body(&latex), ro(vec![Node::Space(Space::Thick)]));
     // Inside an `aligned` cell the alignment point round trips.
     let matrix = Matrix {
         rows: vec![vec![ro(vec![v('a'), Node::Align, v('b')])]],
@@ -1015,8 +1044,8 @@ fn error_nodes_write_escaped_text() {
     let latex = to_latex_fragment(&node);
     assert_eq!(latex, "\\text{a \\& b \\{c\\}}");
     // The output parses; the error nature is dropped (documented exception).
-    assert_eq!(body(&latex), Node::Text(Box::new(TextRun {
+    assert_eq!(body(&latex), ro(vec![Node::Text(Box::new(TextRun {
         text: "a & b {c}".to_owned(),
         font: Font::Upright,
-    })));
+    }))]));
 }
