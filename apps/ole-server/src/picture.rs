@@ -1,4 +1,5 @@
-//! The picture the hosts display: the equation laid out, rasterised and packed as a `CF_DIB`.
+//! The picture the hosts display: the equation laid out, then packed either as an Enhanced
+//! Metafile (vector, what hosts that can draw it get) or a `CF_DIB` bitmap (the fallback).
 //!
 //! `HIMETRIC` is the unit OLE measures embedded objects in: one unit is 0.01 mm, so a size in
 //! points is multiplied by `2540 / 72` to reach it.
@@ -7,7 +8,7 @@ use std::mem::size_of;
 
 use mt_core::Math;
 use mt_layout::{Box as LayoutBox, LayoutStyle, layout};
-use mt_render::{Image, RenderOptions, render};
+use mt_render::{Image, RenderOptions, render, render_emf};
 use windows::Win32::Graphics::Gdi::{BI_RGB, BITMAPINFOHEADER};
 
 use mt_render::metrics::{FaceMetrics, MATH_FONT};
@@ -31,6 +32,8 @@ pub struct Presentation {
     pub dib: Vec<u8>,
     /// Pixel size of the bitmap, which is the extent rounded to whole pixels.
     pub pixels: (u32, u32),
+    /// The same equation as an Enhanced Metafile, glyph outlines drawn as Bézier paths.
+    pub emf: Vec<u8>,
 }
 
 /// Lay the equation out at the device-independent size.
@@ -80,7 +83,21 @@ pub fn presentation(math: &Math, requested_points: f64, extent: Option<(i32, i32
     let image = render(&boxes, &style, metrics.face(), &options);
     let width_pt = boxes.width();
     let height_pt = boxes.height() + boxes.depth();
-    Some(Presentation { width_pt, height_pt, pixels: (image.width, image.height), dib: to_dib(&image) })
+    // Same layout, same size, vector shapes instead of pixels: the two presentations agree
+    // on the extent, so hosts see no jump when they pick either.
+    let emf = render_emf(&boxes, &style, metrics.face(), &RenderOptions {
+        scale: 1.0,
+        padding_em: 0.0,
+        foreground: [0, 0, 0, 255],
+        background: None,
+    });
+    Some(Presentation {
+        width_pt,
+        height_pt,
+        pixels: (image.width, image.height),
+        dib: to_dib(&image),
+        emf,
+    })
 }
 
 /// Bytes of the bitmap header a `CF_DIB` opens with, where its pixels start.
@@ -138,6 +155,29 @@ mod tests {
         assert_eq!(u32::from_le_bytes(picture.dib[0..4].try_into().unwrap()), 40);
         assert_eq!(i16::from_le_bytes(picture.dib[14..16].try_into().unwrap()), 32);
         assert_eq!(picture.dib.len(), 40 + picture.pixels.0 as usize * picture.pixels.1 as usize * 4);
+    }
+
+    #[test]
+    fn the_metafile_is_a_well_formed_enhanced_metafile() {
+        let math = parse(r"\frac{a}{b}+\sqrt{x_i^2}").unwrap();
+        let picture = presentation(&math, 18.0, None).unwrap();
+        // `EMR_HEADER` as the first record, the " EMF" signature, and the file's own length.
+        assert_eq!(u32::from_le_bytes(picture.emf[0..4].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(picture.emf[4..8].try_into().unwrap()), 88);
+        assert_eq!(u32::from_le_bytes(picture.emf[40..44].try_into().unwrap()), 0x464D4520);
+        assert_eq!(u32::from_le_bytes(picture.emf[48..52].try_into().unwrap()), picture.emf.len() as u32);
+    }
+
+    #[test]
+    fn the_metafile_grows_with_the_extent_like_the_bitmap() {
+        let math = parse(r"x^2").unwrap();
+        let small = presentation(&math, 18.0, None).unwrap();
+        let large = presentation(&math, 18.0, Some((3600, 3600))).unwrap();
+        // The frame rectangle, in 0.01 mm, is the picture's size; a bigger extent lays the
+        // equation out larger, so the metafile frame grows with it.
+        let frame = |emf: &[u8], at: usize| i32::from_le_bytes(emf[at..at + 4].try_into().unwrap());
+        assert!(frame(&large.emf, 32) > frame(&small.emf, 32), "width did not grow");
+        assert!(frame(&large.emf, 36) > frame(&small.emf, 36), "height did not grow");
     }
 
     #[test]

@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 mod eps;
+mod emf;
 pub mod metrics;
 mod outline;
 mod raster;
@@ -253,6 +254,23 @@ pub fn render_eps(
     let items = collect(tree, face);
     let bounds = ink_bounds(&items, tree, options.padding_em * style.size);
     eps::render(&items, bounds, options.foreground)
+}
+
+/// Serialise `tree` as an Enhanced Metafile.
+///
+/// The picture carries the same vector shapes as the EPS: glyph outlines as Bézier paths and
+/// rules as polygons, filled with the foreground colour. Device units are points, so the picture
+/// size matches [`image_size`] at `scale` 1; `padding_em` and the foreground colour are honoured,
+/// the background is not.
+pub fn render_emf(
+    tree: &LBox,
+    style: &LayoutStyle,
+    face: &Face<'_>,
+    options: &RenderOptions,
+) -> Vec<u8> {
+    let items = collect(tree, face);
+    let bounds = ink_bounds(&items, tree, options.padding_em * style.size);
+    emf::render(&items, bounds, options.foreground)
 }
 
 /// Map layout-point polygons to image pixels.
