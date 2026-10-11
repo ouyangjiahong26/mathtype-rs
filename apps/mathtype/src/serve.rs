@@ -11,6 +11,10 @@
 //! POST /batch?to=&mode=&dpi= body=.docx -> JSON report (+ base64 docx in replace mode)
 //! POST /number?style=&side=&at= body=.docx -> JSON {"docx": base64, "count": n}
 //! POST /crossref?to=N|latest body=.docx -> JSON {"docx": base64, "bookmark": name}
+//! POST /activate?index=N&progid= body=.docx -> JSON {"docx": base64}, after the object's
+//!     equation went through the desktop editor (`--edit`, or $MATHTYPE_RS_EDITOR) and came
+//!     back with a refreshed preview — the add-in's "double-click to edit" on hosts without
+//!     OLE. The request runs for as long as the editing session does.
 //! ```
 //!
 //! Only the loopback interface is bound, and the server stops when its process does.
@@ -151,6 +155,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("POST", "/batch") => batch(&mut stream, &query, &request.body),
         ("POST", "/number") => number(&mut stream, &query, &request.body),
         ("POST", "/crossref") => crossref(&mut stream, &query, &request.body),
+        ("POST", "/activate") => activate(&mut stream, &query, &request.body),
         ("GET", _) | ("POST", _) => respond(&mut stream, 404, "text/plain", "unknown path"),
         _ => respond(&mut stream, 405, "text/plain", "method not allowed"),
     }?;
@@ -457,6 +462,166 @@ fn crossref(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
         "application/json",
         &format!("{{\"bookmark\":\"{bookmark}\",\"docx\":\"{}\"}}", base64(&bytes)),
     )
+}
+
+/// POST /activate?index=N&progid=Prefix body=.docx — the "double-click" edit round trip.
+///
+/// The `index`-th embedded equation object whose ProgID starts with `progid` (default
+/// `MathTypeRs`) is handed to the desktop editor as LaTeX — the same hand-off the object server
+/// uses — and this request blocks until the editor exits. Its LaTeX comes back, becomes a tree,
+/// and is written into the object's stream with the stream's own preferences, with the preview
+/// picture re-rendered from the edited equation. The whole document is returned as base64.
+fn activate(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, String> {
+    fn bad(stream: &mut TcpStream, message: String) -> Result<u16, String> {
+        respond(stream, 400, "text/plain", &message)
+    }
+    let index = match parameter(query, "index").map(|value| value.parse::<usize>()) {
+        Some(Ok(n)) if n >= 1 => n,
+        _ => return bad(stream, "?index= must give the 1-based number of the object".to_owned()),
+    };
+    let filter = parameter(query, "progid").unwrap_or_else(|| "MathTypeRs".to_owned());
+
+    let mut document = match mt_docx::Document::open(body) {
+        Ok(document) => document,
+        Err(error) => return bad(stream, format!("the document does not open: {error}")),
+    };
+    let target = document
+        .equations()
+        .into_iter()
+        .filter(|equation| match &equation.kind {
+            mt_docx::EquationKind::Ole { prog_id, .. } => {
+                prog_id.as_deref().is_some_and(|id| id.starts_with(&filter))
+            }
+            _ => false,
+        })
+        .nth(index - 1);
+    let Some(target) = target else {
+        return bad(stream, format!("no equation object {index} with a {filter} ProgID"));
+    };
+    let part = match &target.kind {
+        mt_docx::EquationKind::Ole { part: Some(part), .. } => part.clone(),
+        _ => return bad(stream, "the object has no data part".to_owned()),
+    };
+    let object_bytes = match document.part(&part) {
+        Some(Ok(bytes)) => bytes,
+        _ => return bad(stream, format!("the object part {part} cannot be read")),
+    };
+    // A real embedded object is a compound file around the equation stream; the bridge also
+    // accepts the bare stream, and hands back whichever shape it was given.
+    let (equation_bytes, compound) = match mt_mtef::ole::read_from_ole(&object_bytes) {
+        Ok(Some(stream)) => (stream, true),
+        _ => (object_bytes.clone(), false),
+    };
+    let parsed = match mt_mtef::read(&equation_bytes) {
+        Ok(parsed) => parsed,
+        Err(error) => return bad(stream, format!("the object's equation stream is unreadable: {error}")),
+    };
+
+    let equation_file = std::env::temp_dir().join(format!("mathtype-activate-{}-{index}.tex", std::process::id()));
+    if let Err(error) = std::fs::write(&equation_file, mt_tex::to_latex(&parsed.math)) {
+        return respond(stream, 500, "text/plain", &format!("cannot stage the equation: {error}"));
+    }
+    let editor = match std::env::var_os("MATHTYPE_RS_EDITOR") {
+        Some(editor) => run_configured_editor(&editor, &equation_file),
+        None => run_builtin_editor(&equation_file),
+    };
+    let finished = match editor.and_then(|mut child| child.wait().map_err(|error| error.to_string())) {
+        Ok(status) => status,
+        Err(error) => {
+            let _ = std::fs::remove_file(&equation_file);
+            return respond(stream, 500, "text/plain", &format!("the editor could not be started: {error}"));
+        }
+    };
+    let edited = match std::fs::read_to_string(&equation_file) {
+        Ok(text) => text,
+        Err(error) => {
+            let _ = std::fs::remove_file(&equation_file);
+            return respond(stream, 500, "text/plain", &format!("the edited equation is unreadable: {error}"));
+        }
+    };
+    let _ = std::fs::remove_file(&equation_file);
+    if !finished.success() {
+        return respond(
+            stream,
+            500,
+            "text/plain",
+            &format!("the editor exited with {finished}; the object was left unchanged"),
+        );
+    }
+    let math = match mt_tex::parse(&edited) {
+        Ok(math) => math,
+        Err(error) => {
+            return bad(stream, format!("the edited equation does not parse at byte {}: {}", error.offset, error.message))
+        }
+    };
+
+    let equation = mt_mtef::write_with_preferences(&math, &parsed.header.preferences);
+    let rewritten = if compound {
+        match mt_mtef::ole::write_into_ole(&object_bytes, &equation) {
+            Ok(ole) => ole,
+            Err(error) => {
+                return respond(stream, 500, "text/plain", &format!("writing the object stream failed: {error}"));
+            }
+        }
+    } else {
+        equation
+    };
+    document.set_part(&part, rewritten);
+    let preview = preview_part(&document, target.block, target.item);
+    if let Some(preview) = preview {
+        let style = mt_layout::LayoutStyle::display(18.0);
+        let picture = if preview.ends_with(".emf") {
+            crate::write_emf(&math, &style)
+        } else {
+            crate::write_math_with_style(&math, crate::Format::Png, &style, 3.0).unwrap_or_default()
+        };
+        if !picture.is_empty() {
+            document.set_part(&preview, picture);
+        }
+    }
+    let bytes = match document.into_bytes() {
+        Ok(bytes) => bytes,
+        Err(error) => return respond(stream, 500, "text/plain", &format!("writing the document failed: {error}")),
+    };
+    println!("activate object {index} -> {} bytes after editing", bytes.len());
+    respond(
+        stream,
+        200,
+        "application/json",
+        &format!("{{\"docx\":\"{}\"}}", base64(&bytes)),
+    )
+}
+
+/// The part behind the object's preview picture, `word/media/image1.png` for instance.
+fn preview_part(document: &mt_docx::Document, block: usize, item: usize) -> Option<String> {
+    let paragraph = match &document.blocks()[block] {
+        mt_docx::Block::Paragraph(paragraph) => paragraph,
+        mt_docx::Block::Table(_) => return None,
+    };
+    let rel = match &paragraph.items[item] {
+        mt_docx::Item::Object { preview_rel_id: Some(rel), .. } => rel,
+        _ => return None,
+    };
+    document.relationship_part(rel)
+}
+
+/// Start `$MATHTYPE_RS_EDITOR`, which takes the equation file as its only argument.
+fn run_configured_editor(editor: &std::ffi::OsStr, equation: &std::path::PathBuf)
+    -> Result<std::process::Child, String> {
+    std::process::Command::new(editor)
+        .arg(equation)
+        .spawn()
+        .map_err(|error| error.to_string())
+}
+
+/// Start this same binary in editor mode on the equation file.
+fn run_builtin_editor(equation: &std::path::PathBuf) -> Result<std::process::Child, String> {
+    let program = std::env::current_exe().unwrap_or_else(|_| "mathtype".into());
+    std::process::Command::new(program)
+        .arg("--edit")
+        .arg(equation)
+        .spawn()
+        .map_err(|error| error.to_string())
 }
 
 /// Standard base64 of the bytes, for the docx the bridge hands back.
@@ -972,6 +1137,162 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_secs(5),
             "health request waited behind the stalled client"
+        );
+    }
+
+    /// A document whose one paragraph embeds a MathTypeRs equation object with a PNG preview.
+    fn ole_docx() -> Vec<u8> {
+        use std::io::Write;
+        let math = mt_tex::parse("\\frac{a+b}{c}").expect("the object equation parses");
+        let stream = mt_mtef::write(&math);
+        let bin = mt_mtef::ole::create_ole(&stream).expect("the compound file is written");
+        let document = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+             <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" \
+             xmlns:v=\"urn:schemas-microsoft-com:vml\" \
+             xmlns:o=\"urn:schemas-microsoft-com:office:office\" \
+             xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><w:body>\
+             <w:p><w:r><w:object w:dxaOrig=\"3621\" w:dyaOrig=\"1686\">\
+             <v:shape id=\"eqobj1\" style=\"width:271.6pt;height:126.5pt\">\
+             <v:imagedata r:id=\"rIdImg1\" o:title=\"\"/></v:shape>\
+             <o:OLEObject Type=\"Embed\" ProgID=\"MathTypeRs.Equation.1\" ShapeID=\"eqobj1\" \
+             DrawAspect=\"Content\" ObjectID=\"_1700000001\" r:id=\"rIdObj1\"/>\
+             </w:object></w:r></w:p></w:body></w:document>"
+        );
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        let text_parts: [(&str, String); 4] = [
+            (
+                "[Content_Types].xml",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+                 <Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\
+                 <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\
+                 <Default Extension=\"xml\" ContentType=\"application/xml\"/>\
+                 <Default Extension=\"bin\" ContentType=\"application/vnd.openxmlformats-officedocument.oleObject\"/>\
+                 <Default Extension=\"png\" ContentType=\"image/png\"/>\
+                 <Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>"
+                    .to_owned(),
+            ),
+            (
+                "_rels/.rels",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+                 <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\
+                 <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>"
+                    .to_owned(),
+            ),
+            ("word/document.xml", document),
+            (
+                "word/_rels/document.xml.rels",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+                 <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\
+                 <Relationship Id=\"rIdObj1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject\" Target=\"embeddings/oleObject1.bin\"/>\
+                 <Relationship Id=\"rIdImg1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image1.png\"/></Relationships>"
+                    .to_owned(),
+            ),
+        ];
+        for (name, data) in text_parts {
+            writer.start_file(name, options).expect("start part");
+            writer.write_all(data.as_bytes()).expect("write part");
+        }
+        writer.start_file("word/embeddings/oleObject1.bin", options).expect("start bin");
+        writer.write_all(&bin).expect("write bin");
+        writer.start_file("word/media/image1.png", options).expect("start preview");
+        writer.write_all(b"not a picture yet").expect("write preview");
+        writer.finish().expect("close container").into_inner()
+    }
+
+    /// A shell script standing in for the desktop editor: `fake_editor("a+b")` overwrites the
+    /// equation file with that text; `fake_editor("")` makes the editor fail.
+    fn fake_editor(replacement: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("mathtype-fake-editor-{}", std::process::id()));
+        let script = if replacement.is_empty() {
+            "#!/bin/sh\nexit 3\n".to_owned()
+        } else {
+            format!("#!/bin/sh\nprintf '%s' '{replacement}' > \"$1\"\n")
+        };
+        std::fs::write(&path, script).expect("write the fake editor");
+        make_executable(&path);
+        path
+    }
+
+    #[cfg(unix)]
+    fn make_executable(path: &std::path::Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(path).expect("stat the editor").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).expect("chmod the editor");
+    }
+
+    #[cfg(not(unix))]
+    fn make_executable(_path: &std::path::Path) {}
+
+    #[cfg(unix)]
+    #[test]
+    fn activate_round_trips_and_reports_editor_failures() {
+        // The environment is process-global; the test binary is single-threaded here.
+        unsafe { std::env::set_var("MATHTYPE_RS_EDITOR", fake_editor("a+b")) };
+        let bytes = ole_docx();
+        let mut raw = format!(
+            "POST /activate?index=1 HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\n\r\n",
+            bytes.len()
+        )
+        .into_bytes();
+        raw.extend_from_slice(&bytes);
+        let response = request(&raw);
+        assert!(
+            status(&response).contains("200"),
+            "{} — {}",
+            status(&response),
+            body(&response)
+        );
+        let json = body(&response);
+        let encoded = json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap();
+        let decoded = base64_decode(encoded);
+        let document = mt_docx::Document::open(&decoded).expect("the returned container opens");
+        let equations = document.equations();
+        assert_eq!(equations.len(), 1, "the object survived editing");
+        assert_eq!(mt_tex::to_latex(equations[0].math.as_ref().expect("the object parses")), "a+b");
+        // The stream is still inside its compound file, and the preview became a real picture.
+        let part = match &equations[0].kind {
+            mt_docx::EquationKind::Ole { part: Some(part), .. } => part.clone(),
+            kind => panic!("expected an object, got {kind:?}"),
+        };
+        let bin = document.part(&part).expect("part present").expect("part reads");
+        let stream = mt_mtef::ole::read_from_ole(&bin)
+            .expect("the compound file reads")
+            .expect("the object stayed a compound file");
+        assert_eq!(mt_tex::to_latex(&mt_mtef::read(&stream).expect("stream reads").math), "a+b");
+        let preview = document.part("word/media/image1.png").expect("preview present").expect("preview reads");
+        assert_eq!(&preview[..4], b"\x89PNG", "the preview was re-rendered");
+
+        // An editor that fails leaves the document alone and says so.
+        unsafe { std::env::set_var("MATHTYPE_RS_EDITOR", fake_editor("")) };
+        let response = request(&raw);
+        assert!(
+            status(&response).contains("500"),
+            "{} — {}",
+            status(&response),
+            body(&response)
+        );
+        assert!(body(&response).contains("exited"), "{}", body(&response));
+        unsafe { std::env::remove_var("MATHTYPE_RS_EDITOR") };
+    }
+
+    #[test]
+    fn activate_rejects_an_unknown_object() {
+        let bytes = ole_docx();
+        let mut raw = format!(
+            "POST /activate?index=5 HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\n\r\n",
+            bytes.len()
+        )
+        .into_bytes();
+        raw.extend_from_slice(&bytes);
+        let response = request(&raw);
+        assert!(
+            status(&response).contains("400"),
+            "{} — {}",
+            status(&response),
+            body(&response)
         );
     }
 }

@@ -125,6 +125,7 @@ function OnAddinLoad(ribbonUI) {
       console.log('[MathTypeRs] bridge health probe ok: ' + body);
     }
   });
+  registerActivationEvents();
   return true;
 }
 
@@ -507,4 +508,168 @@ function OnCheckBridge(control) {
     if (err) { alert(bridgeUnreachableMessage(err.message)); return; }
     alert('转换服务正常（' + BRIDGE_BASE + '）：' + body);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Object activation ("double-click to edit") — WPS on Linux has no OLE host, so
+// the add-in asks the bridge to hand the object's equation to the desktop
+// editor and gives back the updated document. Selected object + button always
+// works; a real double-click works wherever WPS exposes the event.
+// ---------------------------------------------------------------------------
+
+// One editing round trip is in flight; further triggers are ignored.
+var activating = false;
+
+function isOurEquationShape(shape) {
+  try {
+    var progId = shape.OLEFormat.ProgID;
+    return !!progId && progId.indexOf('MathTypeRs') === 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+// The 1-based ordinal of the MathTypeRs object under the selection, counting
+// only such objects, or 0 when none is selected.
+function selectedEquationOrdinal(app) {
+  var doc = app.ActiveDocument;
+  if (!doc || !doc.InlineShapes) return 0;
+  var sel = null;
+  try {
+    if (app.Selection && app.Selection.InlineShapes && app.Selection.InlineShapes.Count > 0) {
+      sel = app.Selection.InlineShapes.Item(1);
+    }
+  } catch (e) { sel = null; }
+  var ordinal = 0;
+  var start = null;
+  try { start = sel ? sel.Range.Start : null; } catch (e2) { start = null; }
+  var count = doc.InlineShapes.Count;
+  for (var i = 1; i <= count; i++) {
+    var shape;
+    try { shape = doc.InlineShapes.Item(i); } catch (e3) { continue; }
+    if (!isOurEquationShape(shape)) continue;
+    ordinal++;
+    if (start !== null) {
+      var shapeStart = null;
+      try { shapeStart = shape.Range.Start; } catch (e4) { shapeStart = null; }
+      if (shapeStart !== null && shapeStart === start) return ordinal;
+    }
+  }
+  // Nothing (or nothing recognisable) selected: the only object still works.
+  return ordinal === 1 ? 1 : 0;
+}
+
+// Save, hand the object's equation to the editor through the bridge, write the
+// updated document back to its own path, and reopen it.
+function activateEquationObject(app, index) {
+  if (activating) return;
+  var doc = app.ActiveDocument;
+  if (!doc || !doc.FullName || !doc.Path) {
+    alert('请先保存文档，再编辑公式对象。');
+    return;
+  }
+  activating = true;
+  var fullPath = doc.FullName;
+  try {
+    doc.Save();
+  } catch (e) { /* unsaved-changes prompts are the user's own */ }
+  var data;
+  try {
+    data = app.FileSystem.readAsBinaryString(fullPath);
+  } catch (e) {
+    activating = false;
+    alert('读取文档失败：' + (e && e.message ? e.message : e));
+    return;
+  }
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', BRIDGE_BASE + '/activate?index=' + index, true);
+  xhr.overrideMimeType('text/plain; charset=x-user-defined');
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.timeout = 3600000; // the request lives as long as the editing session
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4) return;
+    activating = false;
+    if (xhr.status !== 200) {
+      alert(bridgeUnreachableMessage('HTTP ' + xhr.status + ': ' + xhr.responseText));
+      return;
+    }
+    var answer;
+    try {
+      answer = JSON.parse(xhr.responseText);
+    } catch (e) {
+      alert('编辑返回了无法解析的结果：' + (e && e.message ? e.message : e));
+      return;
+    }
+    if (typeof answer.docx !== 'string') {
+      alert('编辑返回了意外的结果形态。');
+      return;
+    }
+    try {
+      writeBinaryFile(fullPath, base64ToBinary(answer.docx));
+    } catch (e) {
+      alert('写回文档失败：' + (e && e.message ? e.message : e) + '\n路径：' + fullPath);
+      return;
+    }
+    try {
+      doc.Saved = true;
+      doc.Close(0);
+      app.Documents.Open(fullPath);
+      alert('公式已更新。');
+    } catch (e) {
+      alert('文档已写回，但重新打开失败（' + (e && e.message ? e.message : e) + '）。\n请手动关闭并重新打开：' + fullPath);
+    }
+  };
+  xhr.onerror = function () {
+    activating = false;
+    alert(bridgeUnreachableMessage('网络错误'));
+  };
+  xhr.send(data);
+}
+
+// Ribbon entry: edit the selected equation object.
+function OnEditEquation(control) {
+  var app = hostApp();
+  var index = selectedEquationOrdinal(app);
+  if (index === 0) {
+    alert('请先点击选中一个 MathType 公式对象，再点“编辑公式”。');
+    return;
+  }
+  activateEquationObject(app, index);
+}
+
+// Where WPS exposes them, hook the document events: a double click edits the
+// object outright, and selecting one explains what to do.
+function registerActivationEvents() {
+  function hook(name, handler) {
+    try {
+      if (typeof wps !== 'undefined' && wps.ApiEvent && wps.ApiEvent.AddApiEventListener) {
+        wps.ApiEvent.AddApiEventListener(name, handler);
+        return true;
+      }
+    } catch (e) { /* fall through */ }
+    try {
+      if (typeof Application !== 'undefined' && Application.ApiEvent &&
+          Application.ApiEvent.AddApiEventListener) {
+        Application.ApiEvent.AddApiEventListener(name, handler);
+        return true;
+      }
+    } catch (e2) { /* this build does not expose the event */ }
+    return false;
+  }
+  var doubleClick = hook('WindowBeforeDoubleClick', function () {
+    var app = hostApp();
+    var index = selectedEquationOrdinal(app);
+    if (index === 0) return;
+    try { if (typeof wps !== 'undefined' && wps.ApiEvent) wps.ApiEvent.Cancel = true; } catch (e) {}
+    activateEquationObject(app, index);
+  });
+  var selection = hook('WindowSelectionChange', function () {
+    var app = hostApp();
+    if (selectedEquationOrdinal(app) > 0) {
+      console.log('[MathTypeRs] 公式对象已选中：双击或点“编辑公式”进入编辑。');
+    }
+  });
+  if (doubleClick || selection) {
+    console.log('[MathTypeRs] 激活事件已注册（双击=' + doubleClick + '，选区=' + selection + '）。');
+  }
 }

@@ -118,7 +118,7 @@
 
 #![forbid(unsafe_code)]
 
-mod ole;
+pub mod ole;
 mod read;
 mod tables;
 mod write;

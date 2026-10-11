@@ -13,6 +13,7 @@
           <button id="btnExportHtml" label="导出网页" onAction="OnExportHtml" size="large"/>
           <button id="btnNumberEquations" label="公式编号…" onAction="OnNumberEquations" size="large"/>
           <button id="btnCrossReference" label="交叉引用…" onAction="OnCrossReference" size="large"/>
+          <button id="btnEditEquation" label="编辑公式" onAction="OnEditEquation" size="large"/>
           <button id="btnCheckBridge" label="检查转换服务" onAction="OnCheckBridge" size="large"/>
         </group>
       </tab>
