@@ -22,7 +22,6 @@ mod clsid;
 mod factory;
 mod formats;
 mod handoff;
-mod metrics;
 mod object;
 mod picture;
 mod server;

@@ -1064,7 +1064,6 @@ dependencies = [
  "mt-mtef",
  "mt-render",
  "mt-tex",
- "ttf-parser",
  "windows",
  "windows-core",
 ]

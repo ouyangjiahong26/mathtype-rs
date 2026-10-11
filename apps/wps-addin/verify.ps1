@@ -11,16 +11,25 @@
     uninstalls.
 
     Prints PASS or FAIL, and on FAIL prints the exact step that blocked.
+
+    The bridge log comes from the MATHTYPE_BRIDGE_LOG environment variable or an explicit
+    -BridgeLog <path>; there is no default path, so the script never inspects a log it was not
+    pointed at.
 #>
 [CmdletBinding()]
 param(
-    [string]$BridgeLog  = 'C:\Users\ouyan\tools\mt-re\serve.log',
+    # The conversion bridge log to watch; MATHTYPE_BRIDGE_LOG fills the default.
+    [string]$BridgeLog  = $env:MATHTYPE_BRIDGE_LOG,
     [int]$LaunchTimeout = 150,
     [string]$AddinName  = 'MathTypeRs',
     [string]$Version    = '0.1.0'
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $BridgeLog) {
+    Write-Host '[FAIL] no bridge log given: pass -BridgeLog <path> or set the MATHTYPE_BRIDGE_LOG environment variable' -ForegroundColor Red
+    exit 1
+}
 $RealName    = "${AddinName}_$Version"
 $LinkName    = "${AddinName}_"
 $JsAddonsDir = Join-Path $env:APPDATA 'kingsoft\wps\jsaddons'

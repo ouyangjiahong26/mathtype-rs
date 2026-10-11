@@ -37,7 +37,7 @@ use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, Glo
 use windows::Win32::System::Ole::{
     ACTIVEOBJECT_WEAK, IOleClientSite, IOleObject, IOleObject_Impl, IEnumOLEVERB, IViewObject2, IViewObject2_Impl,
     IViewObject_Impl, OLECLOSE, OLEGETMONIKER, OLEMISC, OLEMISC_RECOMPOSEONRESIZE,
-    OLEMISC_RENDERINGISDEVICEINDEPENDENT, OLEWHICHMK, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY, OLEIVERB_SHOW,
+    OLEMISC_RENDERINGISDEVICEINDEPENDENT, OLECLOSE_SAVEIFDIRTY, OLEWHICHMK, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY, OLEIVERB_SHOW,
     RegisterActiveObject, RevokeActiveObject, USERCLASSTYPE, USERCLASSTYPE_APPNAME, USERCLASSTYPE_SHORT,
 };
 use windows::Win32::System::Variant::VARIANT;
@@ -141,6 +141,8 @@ struct Inner {
     latex: String,
     /// The equation stream exactly as it was loaded, kept when it could not be read.
     raw_native: Option<Vec<u8>>,
+    /// The equation preferences the loaded stream carried, so a save writes them back.
+    preferences: Option<mt_mtef::Preferences>,
     /// Full size of the equation in points.
     size_points: f64,
     /// Whether the LaTeX text is something the parser could not read.
@@ -168,6 +170,7 @@ impl Inner {
             math,
             latex,
             raw_native: None,
+            preferences: None,
             size_points: picture::DEFAULT_SIZE_POINTS,
             unparsed: false,
             dirty: false,
@@ -191,6 +194,12 @@ impl Inner {
     /// loaded rather than an empty equation.
     fn restore(&mut self, latex: Option<Vec<u8>>, native: Option<Vec<u8>>) {
         self.raw_native = None;
+        // Keep the preferences the equation stream was written with, so that saving writes the
+        // object back the way the document held it rather than with our defaults.
+        self.preferences = native
+            .as_ref()
+            .and_then(|bytes| mt_mtef::read(bytes).ok())
+            .map(|parsed| parsed.header.preferences);
         let text = latex.map(|raw| storage::text_of(&raw));
         if let Some(text) = &text {
             self.latex = text.clone();
@@ -371,6 +380,17 @@ fn tick(inner: &RefCell<Inner>) {
     }
 }
 
+/// Whether closing writes the streams first: only `OLECLOSE_SAVEIFDIRTY` on a dirty object saves.
+fn save_on_close(option: OLECLOSE, dirty: bool) -> bool {
+    option.0 == OLECLOSE_SAVEIFDIRTY.0 && dirty
+}
+
+/// Whether the verb activates the editor: the standard activation verbs, plus every positive
+/// verb index a host read out of the registry, all of which mean `&Edit` for this object.
+fn opens_editor(iverb: i32) -> bool {
+    iverb == OLEIVERB_PRIMARY.0 || iverb == OLEIVERB_SHOW.0 || iverb == OLEIVERB_OPEN.0 || iverb > 0
+}
+
 /// Write both streams into the host's storage and commit them.
 fn write_streams(inner: &RefCell<Inner>) -> Result<String, String> {
     let (storage, native, latex) = {
@@ -378,7 +398,13 @@ fn write_streams(inner: &RefCell<Inner>) -> Result<String, String> {
         let Some(storage) = state.storage.clone() else {
             return Err("the object has no storage, so the equation stays in memory".to_owned());
         };
-        let native = state.raw_native.clone().unwrap_or_else(|| mt_mtef::write(&state.math));
+        // Write the equation back with the preferences the loaded stream carried, so an
+        // embedded object round-trips the document's typesizes, spacings and styles; a stream
+        // this server could not read keeps its raw bytes, and anything else gets the defaults.
+        let native = state.raw_native.clone().unwrap_or_else(|| match &state.preferences {
+            Some(preferences) => mt_mtef::write_with_preferences(&state.math, preferences),
+            None => mt_mtef::write(&state.math),
+        });
         (storage, native, state.latex.clone())
     };
     storage::write_stream(&storage, STREAM_NATIVE, &native)?;
@@ -528,17 +554,45 @@ impl IOleObject_Impl for EquationObject_Impl {
         if inner.closed {
             return Ok(());
         }
-        inner.closed = true;
         if let Some(session) = inner.session.as_mut() {
             session.forget();
         }
         inner.session = None;
-        inner.storage = None;
-        inner.note("closed by the host");
+        // A dirty object closed with `OLECLOSE_SAVEIFDIRTY` must have its streams written before
+        // the storage is dropped, or the document the host then saves holds an old equation and
+        // the changes are gone. The save is the same one the automation `Save` member does.
+        if !save_on_close(*dwsaveoption, inner.dirty) {
+            inner.closed = true;
+            inner.storage = None;
+            inner.note("closed by the host");
+            drop(inner);
+            trace::log(&format!("Close(save={})", dwsaveoption.0));
+            self.state.object_closed();
+            return Ok(());
+        }
         drop(inner);
-        trace::log(&format!("Close(save={})", dwsaveoption.0));
-        self.state.object_closed();
-        Ok(())
+        match write_streams(&self.inner) {
+            Ok(note) => {
+                {
+                    let mut inner = self.inner.borrow_mut();
+                    inner.dirty = false;
+                    inner.closed = true;
+                    inner.storage = None;
+                    inner.note(&note);
+                }
+                trace::log(&format!("Close(save={}): {note}", dwsaveoption.0));
+                notify_saved(&self.inner);
+                self.state.object_closed();
+                Ok(())
+            }
+            Err(error) => {
+                // The storage is kept and the object stays open: the host can retry the save it
+                // asked for, and the error tells it why closing did not take.
+                trace::log(&format!("Close(save={}): refusing to drop a dirty object: {error}", dwsaveoption.0));
+                self.inner.borrow_mut().note(&format!("closing without saving failed: {error}"));
+                Err(Error::new(E_FAIL, format!("the object is dirty and its streams could not be written: {error}")))
+            }
+        }
     }
 
     fn SetMoniker(&self, _dwwhichmoniker: &OLEWHICHMK, _pmk: Ref<IMoniker>) -> WinResult<()> {
@@ -574,10 +628,10 @@ impl IOleObject_Impl for EquationObject_Impl {
     ) -> WinResult<()> {
         // A host's double-click is `OLEIVERB_PRIMARY`, its "Open" is `OLEIVERB_OPEN`, and an
         // object that shows itself on its own is asked to `OLEIVERB_SHOW`; Word and WPS 文字 do
-        // not agree on which one they send, so all three open the editor.
-        let open = iverb == OLEIVERB_PRIMARY.0
-            || iverb == OLEIVERB_SHOW.0
-            || iverb == OLEIVERB_OPEN.0;
+        // not agree on which one they send, so all three open the editor. Hosts also call the
+        // verbs the registry lists by index — install.ps1 registers `Verb\1` as `&Edit` — and
+        // every verb this object advertises opens the editor, so any positive index does too.
+        let open = opens_editor(iverb);
         trace::log(&format!("DoVerb({iverb}) -> {}", if open { "open the editor" } else { "unsupported" }));
         if open {
             return self.open_editor();
@@ -1103,7 +1157,11 @@ fn default_equation() -> (Math, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_LATEX, DISPID_GET_LATEX, DISPID_UNKNOWN, default_equation, dispid_of};
+    use super::{Inner, OLECLOSE_SAVEIFDIRTY, default_equation, dispid_of, opens_editor, save_on_close,
+        DEFAULT_LATEX, DISPID_GET_LATEX, DISPID_UNKNOWN};
+    use windows::Win32::System::Ole::{
+        OLECLOSE_NOSAVE, OLECLOSE_PROMPTSAVE, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY, OLEIVERB_SHOW,
+    };
 
     #[test]
     fn the_default_equation_is_something_the_parser_accepts() {
@@ -1118,5 +1176,50 @@ mod tests {
         assert_eq!(dispid_of("getlatex"), DISPID_GET_LATEX);
         assert_eq!(dispid_of("GetLatex"), DISPID_GET_LATEX);
         assert_eq!(dispid_of("nonesuch"), DISPID_UNKNOWN);
+    }
+
+    #[test]
+    fn closing_saves_only_when_asked_and_dirty() {
+        // `OLECLOSE_SAVEIFDIRTY` on a dirty object is the one combination that writes.
+        assert!(save_on_close(OLECLOSE_SAVEIFDIRTY, true));
+        assert!(!save_on_close(OLECLOSE_SAVEIFDIRTY, false));
+        // `NOSAVE` and `PROMPTSAVE` never write the streams on the way out.
+        assert!(!save_on_close(OLECLOSE_NOSAVE, true));
+        assert!(!save_on_close(OLECLOSE_PROMPTSAVE, true));
+    }
+
+    #[test]
+    fn every_registered_verb_opens_the_editor() {
+        // The standard activation verbs a double-click or an "Open" sends.
+        assert!(opens_editor(OLEIVERB_PRIMARY.0));
+        assert!(opens_editor(OLEIVERB_SHOW.0));
+        assert!(opens_editor(OLEIVERB_OPEN.0));
+        // Positive verbs are indexes into the registry list (`Verb\1` is `&Edit`), and Word
+        // calls them by number, so they must not be refused with `OLE_E_OLEVERB`.
+        assert!(opens_editor(1));
+        assert!(opens_editor(7));
+        // Hiding is not opening; the verb handling falls through to it.
+        assert!(!opens_editor(OLEIVERB_HIDE.0));
+    }
+
+    #[test]
+    fn restoring_keeps_the_preferences_the_stream_carried() {
+        let (math, _) = default_equation();
+        let stream = mt_mtef::write(&math);
+        let expected_bytes = stream.clone();
+        let expected = mt_mtef::read(&stream).expect("the stream parses").header.preferences;
+
+        let mut inner = Inner::new();
+        assert_eq!(inner.preferences, None);
+        inner.restore(None, Some(stream));
+        // Regression: the preferences the document wrote the equation with used to be thrown
+        // away at load, so a save wrote the defaults back over them.
+        assert_eq!(inner.preferences, Some(expected));
+        // The retained preferences are what the save path passes to `write_with_preferences`,
+        // so they must reproduce the stream the document held.
+        assert_eq!(
+            mt_mtef::write_with_preferences(&inner.math, inner.preferences.as_ref().unwrap()),
+            expected_bytes
+        );
     }
 }

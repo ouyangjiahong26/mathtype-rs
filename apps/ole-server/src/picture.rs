@@ -10,7 +10,7 @@ use mt_layout::{Box as LayoutBox, LayoutStyle, layout};
 use mt_render::{Image, RenderOptions, render};
 use windows::Win32::Graphics::Gdi::{BI_RGB, BITMAPINFOHEADER};
 
-use crate::metrics::{FaceMetrics, MATH_FONT};
+use mt_render::metrics::{FaceMetrics, MATH_FONT};
 
 /// HIMETRIC units in one point.
 pub const HIMETRIC_PER_POINT: f64 = 2540.0 / 72.0;

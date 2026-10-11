@@ -7,7 +7,6 @@
 //! - `--serve [port]`: the same conversions over loopback HTTP, for host add-ins that cannot
 //!   (WPS loads its add-ins as web pages).
 
-mod metrics;
 mod serve;
 
 use std::sync::Arc;
@@ -15,12 +14,10 @@ use std::sync::Arc;
 use eframe::egui::{
     self, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Pos2, Rect, Sense, Stroke, Vec2,
 };
-use metrics::FaceMetrics;
 use mt_edit::{Cursor, Editor, PaletteItem, palettes};
 use mt_layout::{layout, layout_with_anchors, to_svg, Box as LayoutBox, LayoutStyle, RowAnchor};
+use mt_render::metrics::{FaceMetrics, MATH_FONT};
 
-/// Bundled open-licensed math font, used for both measuring and drawing.
-const MATH_FONT: &[u8] = include_bytes!("../../../assets/fonts/latinmodern-math.otf");
 const MATH_FAMILY: &str = "math";
 
 /// System faces that can supply the CJK glyphs of the interface labels, best first.
@@ -288,6 +285,24 @@ fn as_text(bytes: &[u8]) -> Result<&str, String> {
     std::str::from_utf8(bytes).map_err(|error| format!("input is not valid UTF-8 text: {error}"))
 }
 
+/// Largest PNG this program will allocate: 128 Mpixels, about 512 MiB of RGBA.
+///
+/// Without this bound a huge input times a large `?scale=` lays the equation out into a bounds
+/// box whose pixel area allocates tens of gigabytes and aborts the process.
+const MAX_RENDER_PIXELS: u64 = 1 << 27;
+
+/// Refuse an image whose pixel area would exceed [`MAX_RENDER_PIXELS`].
+fn check_render_pixels(width: u32, height: u32) -> Result<(), String> {
+    let pixels = u64::from(width) * u64::from(height);
+    if pixels > MAX_RENDER_PIXELS {
+        Err(format!(
+            "the equation would render as {width}x{height} pixels ({pixels} total), over the {MAX_RENDER_PIXELS}-pixel limit; lower the scale or shorten the equation"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// Lay the equation out and produce one of the image formats.
 fn render_image(math: &mt_core::Math, to: Format, size: f64, scale: f64) -> Result<Vec<u8>, String> {
     let metrics = FaceMetrics::parse(MATH_FONT, 0).ok_or("bundled math font could not be parsed")?;
@@ -297,6 +312,10 @@ fn render_image(math: &mt_core::Math, to: Format, size: f64, scale: f64) -> Resu
         Format::Svg => Ok(to_svg(&boxes, &style).into_bytes()),
         Format::Png => {
             let options = mt_render::RenderOptions { scale, ..Default::default() };
+            // The bounds decide the allocation inside `render_png`, so measure them first and
+            // refuse the ones that would exhaust the address space.
+            let (width, height) = mt_render::image_size(&boxes, &style, metrics.face(), &options);
+            check_render_pixels(width, height)?;
             mt_render::render_png(&boxes, &style, metrics.face(), &options)
                 .map_err(|error| format!("cannot rasterise: {error}"))
         }
@@ -758,6 +777,7 @@ fn dashed_rect(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mt_core::{Math, Node};
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|item| (*item).to_owned()).collect()
@@ -824,5 +844,35 @@ mod tests {
         assert_eq!(validate_scale(MAX_SCALE).unwrap(), MAX_SCALE);
         assert!(validate_scale(f64::NAN).is_err());
         assert!(validate_scale(f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn the_pixel_guard_refuses_only_oversized_images() {
+        // An ordinary screen-sized image is fine.
+        assert!(check_render_pixels(1920, 1080).is_ok());
+        // Just at the limit is fine; one pixel more is not.
+        let side = (MAX_RENDER_PIXELS as f64).sqrt() as u32;
+        assert!(check_render_pixels(side, side).is_ok());
+        assert!(check_render_pixels(side + 1, side + 1).is_err());
+        let error = check_render_pixels(u32::MAX, u32::MAX).unwrap_err();
+        assert!(error.contains("pixel"), "{error}");
+    }
+
+    #[test]
+    fn an_equation_too_large_to_rasterise_is_refused_not_crashed() {
+        // A very wide equation at the largest size and scale would once have been laid out into
+        // a bounds box and then allocated as an RGBA buffer of tens of gigabytes, aborting the
+        // process; a request this big must now come back as an error (the HTTP front end turns
+        // it into a 400) instead.
+        let math = Math::new(Node::row((0..200_000).map(|_| Node::variable('x'))));
+        let error = write_math(&math, Format::Png, MAX_SIZE, MAX_SCALE).unwrap_err();
+        assert!(error.contains("pixel limit"), "{error}");
+    }
+
+    #[test]
+    fn a_small_equation_still_renders_as_png() {
+        let math = Math::new(Node::variable('x'));
+        let bytes = write_math(&math, Format::Png, 18.0, 3.0).expect("renders");
+        assert!(!bytes.is_empty());
     }
 }
