@@ -130,6 +130,119 @@ pub fn export_html(application: &Object) -> Outcome {
     Ok(format!("web page written to {}", page.display()))
 }
 
+/// Batch-converts every formula of the whole document (or of the selection, when there is one)
+/// to Office Math (#13).
+///
+/// The document is read from disk (`FullName`) after a save, converted by the shared
+/// `mt-batch` pipeline, and the result is **saved next to** the original as
+/// `<名>-converted.docx`, never in place — the host keeps the original open. A selection that is
+/// neither collapsed nor the whole document is marked with a temporary bookmark
+/// (`MTRSBatchScope`), whose byte range in `word/document.xml` becomes the pipeline's scope; the
+/// bookmark itself stays in the output and can be deleted there. When no bookmark can be placed
+/// or found, the whole document is converted.
+pub fn batch_convert(application: &Object) -> Outcome {
+    let document = word::active_document(application).map_err(failed("the document could not be read"))?;
+    let directory = document.get_string("Path").map_err(failed("the document could not be read"))?;
+    let name = document.get_string("Name").map_err(failed("the document could not be read"))?;
+    let full_name = document.get_string("FullName").map_err(failed("the document could not be read"))?;
+    if full_name.is_empty() || directory.is_empty() {
+        return Err("the document has never been saved".to_owned());
+    }
+
+    // Selection scope, best effort: a real sub-selection is bookmarked so the pipeline can cut
+    // its range out of the document's markup. Any failure here falls back to the whole document.
+    let mut scoped = false;
+    if let Some(selection) = word::selection(application).ok() {
+        let bounds = (selection.get_i32("Start"), selection.get_i32("End"));
+        let content = document.get_object("Content").map_err(failed("the document could not be read"))?;
+        let whole = (content.get_i32("Start"), content.get_i32("End"));
+        if let (Ok(start), Ok(end), Ok(content_start), Ok(content_end)) =
+            (bounds.0, bounds.1, whole.0, whole.1)
+        {
+            let partial = start != end && !(start == content_start && end == content_end);
+            if partial {
+                if selection
+                    .get_object("Bookmarks")
+                    .and_then(|bookmarks| bookmarks.call_object("Add", vec![Variant::bstr(SCOPE_BOOKMARK)]))
+                    .is_ok()
+                {
+                    scoped = true;
+                }
+            }
+        }
+    }
+    // The bookmark only exists on disk once the document is saved; saving is what a batch run
+    // wants anyway. `Saved` being false only means the disk copy is stale.
+    let saved = document.get("Saved").and_then(|value| value.number()).map(|value| value != 0.0).unwrap_or(false);
+    if !saved {
+        document.call("Save", Vec::new()).map_err(failed("the document could not be saved"))?;
+    }
+
+    let bytes = std::fs::read(&full_name).map_err(|error| format!("{full_name} could not be read: {error}"))?;
+    let scope = scope_of(&bytes, scoped);
+    let directory = PathBuf::from(&directory);
+    let options = mt_batch::Options {
+        format: mt_batch::TargetFormat::OMath,
+        mode: mt_batch::Mode::Replace,
+        dpi: mt_batch::DEFAULT_DPI,
+        size: mt_batch::DEFAULT_SIZE,
+        export_dir: directory.clone(),
+        scope,
+    };
+    let outcome = mt_batch::run(&bytes, &options, &mut |_| true).map_err(|error| format!("批量转换失败: {error}"))?;
+    let report = &outcome.report;
+
+    let stem = Path::new(&name).file_stem().map_or_else(
+        || "document".to_string(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    let target = directory.join(format!("{stem}-converted.docx"));
+    if let Some(docx) = &outcome.docx {
+        std::fs::write(&target, docx).map_err(|error| format!("{} could not be written: {error}", target.display()))?;
+    }
+    let report_path = directory.join(format!("{stem}-batch-report.txt"));
+    std::fs::write(&report_path, report.to_text())
+        .map_err(|error| format!("{} could not be written: {error}", report_path.display()))?;
+
+    let scope_note = if scoped { "（仅选区内的公式）" } else { "（整篇文档）" };
+    Ok(format!(
+        "批量转换{}：共 {} 个，成功 {}，失败 {}；另存为 {}，报告 {}",
+        scope_note,
+        report.total,
+        report.succeeded,
+        report.failures.len(),
+        target.display(),
+        report_path.display()
+    ))
+}
+
+/// The name of the bookmark that marks a selection's scope.
+const SCOPE_BOOKMARK: &str = "MTRSBatchScope";
+
+/// The byte range of the scope bookmark in `word/document.xml`, when it is there and whole.
+///
+/// The pipeline works on the file's markup, and a bookmark is the one marker that survives the
+/// round trip through the host's save. When anything about it cannot be found, `None` means the
+/// whole document.
+fn scope_of(bytes: &[u8], scoped: bool) -> Option<(usize, usize)> {
+    if !scoped {
+        return None;
+    }
+    let document = mt_docx::Document::open(bytes).ok()?;
+    let xml = document.document_xml();
+    let name = xml.find(format!("w:name=\"{SCOPE_BOOKMARK}\"").as_str())?;
+    let start = xml[..name].rfind("<w:bookmarkStart")?;
+    let attributes = &xml[start..name];
+    let id = attributes.split("w:id=\"").nth(1)?.split('"').next()?.to_owned();
+    let end_marker = format!("w:id=\"{id}\"");
+    let end = xml[name..].find("<w:bookmarkEnd")? + name;
+    if xml[end..].contains(&end_marker) {
+        Some((start, end))
+    } else {
+        None
+    }
+}
+
 /// The class of the object server that provides the embedded equation.
 const OBJECT_SERVER: &str = "MathTypeRs.Equation.1";
 
@@ -253,11 +366,21 @@ pub enum Command {
     ExportPng,
     /// `ExportDocumentHtml`: the document becomes a web page directory next to itself.
     ExportHtml,
+    /// `BatchConvertDocument`: every formula of the document (or selection) becomes Office Math.
+    BatchConvert,
 }
 
 impl Command {
     /// Every command, for the name and member id lookups.
-    const ALL: [Self; 6] = [Self::InsertObject, Self::ToEquation, Self::ToLatex, Self::Toggle, Self::ExportPng, Self::ExportHtml];
+    const ALL: [Self; 7] = [
+        Self::InsertObject,
+        Self::ToEquation,
+        Self::ToLatex,
+        Self::Toggle,
+        Self::ExportPng,
+        Self::ExportHtml,
+        Self::BatchConvert,
+    ];
 
     /// The member name Office finds the command under.
     pub const fn name(self) -> &'static str {
@@ -268,6 +391,7 @@ impl Command {
             Self::Toggle => "TeXToggle",
             Self::ExportPng => "ExportSelectionPng",
             Self::ExportHtml => "ExportDocumentHtml",
+            Self::BatchConvert => "BatchConvertDocument",
         }
     }
 
@@ -280,6 +404,7 @@ impl Command {
             Self::Toggle => 103,
             Self::ExportPng => 104,
             Self::ExportHtml => 105,
+            Self::BatchConvert => 106,
         }
     }
 
@@ -302,6 +427,7 @@ impl Command {
             Self::Toggle => toggle(application),
             Self::ExportPng => export_png(application),
             Self::ExportHtml => export_html(application),
+            Self::BatchConvert => batch_convert(application),
         }
     }
 }

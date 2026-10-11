@@ -34,6 +34,10 @@ pub const CUSTOM_UI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
                   onAction="ExportDocumentHtml"
                   screentip="把文档导出为网页"
                   supertip="把整个文档导出为网页目录：公式转为 MathML，图片写入 media/ 子目录，浏览器直接打开。"/>
+          <button id="MathTypeRsBatchConvert" label="批量转换…" size="large"
+                  onAction="BatchConvertDocument"
+                  screentip="整篇文档的公式批量转换"
+                  supertip="读取整篇文档，把每个公式转换为 Office 原生公式（读取失败的公式对象跳过并记录），结果另存为 &lt;名&gt;-converted.docx；有选区时只转换选区内的公式（在选区两侧加书签定位）。"/>
         </group>
       </tab>
     </tabs>
