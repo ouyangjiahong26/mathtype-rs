@@ -1,0 +1,10 @@
+[package]
+name = "mt-edit"
+description = "Editing model: cursor navigation over the equation tree, palette templates, undo history."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core.workspace = true
