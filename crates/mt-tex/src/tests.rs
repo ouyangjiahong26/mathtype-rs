@@ -573,6 +573,107 @@ fn omml_codec_pipeline_output() {
     assert_eq!(to_latex(&math), "\\frac{a}{b}+\\sqrt{x_i^2}");
 }
 
+// -------------------------------------------------------- round-trip regressions
+
+#[test]
+fn nested_scripts_round_trip() {
+    // A self-scripted argument must be braced, otherwise `a^{b^c}` serialises to `a^b^c`.
+    assert_eq!(to_latex(&parse("a^{b^c}").unwrap()), "a^{b^c}");
+    assert_eq!(to_latex(&parse("a_{b_c}").unwrap()), "a_{b_c}");
+
+    let nested = Node::Scripts(Box::new(Scripts {
+        base: v('a'),
+        sub: None,
+        sup: Some(Node::Scripts(Box::new(Scripts {
+            base: v('b'),
+            sub: None,
+            sup: Some(v('c')),
+        }))),
+    }));
+    assert_eq!(assert_round_trips(nested), "a^{b^c}");
+}
+
+#[test]
+fn escaped_characters_round_trip() {
+    for ch in ['%', '#', '&', '$', '_', '^', '~'] {
+        let latex = assert_round_trips(sym(ch, Class::Ord));
+        assert_eq!(latex, format!("\\{ch}"));
+    }
+}
+
+#[test]
+fn literal_backslash_round_trips() {
+    // `\\` is a row separator, so a literal backslash is written `\backslash`.
+    assert_eq!(assert_round_trips(sym('\\', Class::Ord)), "\\backslash");
+}
+
+#[test]
+fn backslash_inside_a_matrix_cell_survives() {
+    let matrix = Node::Matrix(Box::new(Matrix {
+        rows: vec![vec![sym('\\', Class::Ord), v('a')]],
+        delims: None,
+        kind: MatrixKind::Matrix,
+        align: Side::Center,
+        columns: Vec::new(),
+        rules: false,
+    }));
+    let latex = assert_round_trips(matrix);
+    assert!(!latex.contains("\\\\"), "a literal backslash must not become a row separator: {latex}");
+}
+
+#[test]
+fn every_font_face_round_trips() {
+    let faces = [
+        Font::DoubleStruck,
+        Font::Script,
+        Font::BoldScript,
+        Font::Fraktur,
+        Font::BoldFraktur,
+        Font::Bold,
+        Font::Italic,
+        Font::BoldItalic,
+        Font::Upright,
+        Font::SansSerif,
+        Font::SansSerifBold,
+        Font::SansSerifItalic,
+        Font::SansSerifBoldItalic,
+        Font::Monospace,
+        Font::Symbol,
+        Font::Extra,
+    ];
+    for font in faces {
+        let node = Node::Styled(Box::new(Styled {
+            body: v('A'),
+            style: None,
+            font: Some(font),
+            class: None,
+        }));
+        assert_round_trips(node);
+    }
+}
+
+#[test]
+fn bold_script_font_round_trips() {
+    let node = Node::Styled(Box::new(Styled {
+        body: v('g'),
+        style: None,
+        font: Some(Font::BoldScript),
+        class: None,
+    }));
+    assert_eq!(assert_round_trips(node), "\\mathbfcal{g}");
+}
+
+#[test]
+fn arrow_delimiter_round_trips() {
+    let fence = Node::Fence(Box::new(Fence { open: Delim::Arrow, close: Delim::Arrow, body: v('x') }));
+    assert_eq!(assert_round_trips(fence), "\\left→x\\right→");
+
+    // Arrow and Angle are distinct even though the model draws them alike.
+    let mixed = Node::Fence(Box::new(Fence { open: Delim::Arrow, close: Delim::Angle, body: v('x') }));
+    let latex = assert_round_trips(mixed);
+    assert!(latex.starts_with("\\left→x\\right\\rangle"), "unexpected `{latex}`");
+}
+
 // ---------------------------------------------------------------- round trips
 
 const CORPUS: &[&str] = &[
@@ -582,6 +683,22 @@ const CORPUS: &[&str] = &[
     "x^a_b",
     "x^{a+b}",
     "x_1^2",
+    "a^{b^c}",
+    "a_{b_c}",
+    "x^{a^{b}}",
+    "{}",
+    "a^{}",
+    "{}^a",
+    "\\%",
+    "\\#",
+    "\\&",
+    "\\$",
+    "\\_",
+    "\\^",
+    "\\~",
+    "\\backslash",
+    "50\\%",
+    "\\#1",
     "\\frac{a}{b}",
     "\\frac12",
     "\\frac{a+b}{c}",
@@ -604,6 +721,7 @@ const CORPUS: &[&str] = &[
     "\\left\\{\\begin{matrix}a\\end{matrix}\\right\\}",
     "\\left.\\frac{a}{b}\\right|",
     "\\left\\langle x \\right\\rangle",
+    "\\left→x\\right→",
     "\\left\\lfloor x \\right\\rfloor",
     "\\bigl(x\\bigr)",
     "(x)",
@@ -635,11 +753,18 @@ const CORPUS: &[&str] = &[
     "\\mathbb{R}",
     "\\mathcal{L}",
     "\\mathfrak{g}",
+    "\\mathbfcal{F}",
+    "\\mathbffrak{g}",
     "\\mathbf{v}",
     "\\mathit{x}",
     "\\mathrm{d}",
     "\\mathsf{A}",
+    "\\mathsfbf{A}",
+    "\\mathsfit{A}",
+    "\\mathsfbfit{A}",
     "\\mathtt{x}",
+    "\\mathsymbol{x}",
+    "\\mathextra{x}",
     "\\boldsymbol{\\alpha}",
     "\\bm{v}",
     "\\operatorname{foo}",

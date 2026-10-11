@@ -3,6 +3,17 @@
 //! The output is chosen so that re-parsing it yields a tree equal to the input after
 //! [`mt_core::Node::normalize`]. In particular every macro the parser understands has a
 //! canonical spelling here.
+//!
+//! # Canonical forms
+//!
+//! A few [`mt_core::Font`] faces have no standard LaTeX spelling. Rather than fold them onto an
+//! unrelated macro (which would silently change the face on re-read) every face gets a distinct
+//! canonical control word, [`Font::SansSerifBold`] as `\mathsfbf` and [`Font::Extra`] as
+//! `\mathextra` for example; the parser accepts exactly the names this module writes. See
+//! [`font_macro`].
+//!
+//! [`mt_core::Delim::Arrow`] is written as the `→` character, matching mt-mathml and mt-omml, and
+//! is read back as `Delim::Arrow` rather than as a custom character.
 
 use mt_core::{
     Accent, AccentKind, BigOp, Class, Delim, Fence, Font, Frac, FracKind, Limits, MathStyle,
@@ -61,8 +72,12 @@ fn render(node: &Node, out: &mut String) {
 }
 
 /// Render `node`, wrapping it in braces when a bare rendering would not bind as one argument.
+///
+/// A [`Node::Row`] renders as several atoms; [`Node::Scripts`] and [`Node::Big`] render as one
+/// atom followed by their own scripts. Both must be delimited, otherwise `a^{b^c}` is written
+/// `a^b^c` and rejected on re-read as a double superscript.
 fn render_braced(node: &Node, out: &mut String) {
-    if node.is_row() {
+    if node.is_row() || matches!(node, Node::Scripts(_) | Node::Big(_)) {
         out.push('{');
         render(node, out);
         out.push('}');
@@ -102,7 +117,10 @@ fn push_delim(out: &mut String, text: &str) {
 fn render_char(ch: char, out: &mut String) {
     if let Some(name) = symbols::macro_for(ch) {
         push_macro(out, name);
-    } else if matches!(ch, '\\' | '{' | '}' | '$' | '%' | '&' | '#' | '_' | '^' | '~') {
+    } else if ch == '\\' {
+        // `\\` means a row separator, so a literal backslash needs its own control word.
+        out.push_str("\\backslash");
+    } else if matches!(ch, '{' | '}' | '$' | '%' | '&' | '#' | '_' | '^' | '~') {
         out.push('\\');
         out.push(ch);
     } else {
@@ -361,6 +379,10 @@ fn style_macro(style: MathStyle) -> &'static str {
     }
 }
 
+/// Canonical control word for a font, the inverse of `parse::font_macro`.
+///
+/// Names are the standard LaTeX macros where one exists and dedicated spellings elsewhere, so
+/// that every [`Font`] round trips through LaTeX instead of being folded onto another face.
 fn font_macro(font: Font) -> &'static str {
     match font {
         Font::DoubleStruck => "mathbb",
@@ -373,12 +395,12 @@ fn font_macro(font: Font) -> &'static str {
         Font::BoldItalic => "boldsymbol",
         Font::Upright => "mathrm",
         Font::SansSerif => "mathsf",
-        Font::SansSerifBold => "mathsf",
-        Font::SansSerifItalic => "mathsf",
-        Font::SansSerifBoldItalic => "mathsf",
+        Font::SansSerifBold => "mathsfbf",
+        Font::SansSerifItalic => "mathsfit",
+        Font::SansSerifBoldItalic => "mathsfbfit",
         Font::Monospace => "mathtt",
-        Font::Symbol => "mathrm",
-        Font::Extra => "mathrm",
+        Font::Symbol => "mathsymbol",
+        Font::Extra => "mathextra",
     }
 }
 
@@ -462,7 +484,7 @@ fn delim_open_tex(delim: Delim) -> String {
         Delim::Floor => "\\lfloor",
         Delim::Ceil => "\\lceil",
         Delim::None => ".",
-        Delim::Arrow => "\\uparrow",
+        Delim::Arrow => "→",
         Delim::DoubleBar => "\\|",
     }
     .to_owned()
@@ -480,7 +502,7 @@ fn delim_close_tex(delim: Delim) -> String {
         Delim::Floor => "\\rfloor",
         Delim::Ceil => "\\rceil",
         Delim::None => ".",
-        Delim::Arrow => "\\downarrow",
+        Delim::Arrow => "→",
         Delim::DoubleBar => "\\|",
     }
     .to_owned()

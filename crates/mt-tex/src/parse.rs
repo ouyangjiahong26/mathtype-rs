@@ -328,6 +328,13 @@ impl Parser {
     fn parse_control(&mut self) -> Result<Node, ParseError> {
         let (name, start) = self.read_control()?;
         match name.as_str() {
+            // Single-character escapes written by `latex::render_char`, and the control word the
+            // serialiser uses for a literal backslash (`\\` is a row separator and would be lost).
+            "#" | "%" | "&" | "$" | "_" | "^" | "~" => {
+                let ch = name.chars().next().unwrap();
+                Ok(char_node_with(ch, char_class(ch), symbols::char_font(ch)))
+            }
+            "backslash" => Ok(char_node_with('\\', char_class('\\'), symbols::char_font('\\'))),
             "frac" | "dfrac" | "tfrac" | "cfrac" => {
                 let num = self.parse_arg()?;
                 let den = self.parse_arg()?;
@@ -383,8 +390,9 @@ impl Parser {
                 let text = self.read_brace_string()?;
                 Ok(Node::Text(Box::new(TextRun { text, font })))
             }
-            "mathbb" | "mathcal" | "mathfrak" | "mathbf" | "mathit" | "mathrm" | "mathsf"
-            | "mathtt" | "boldsymbol" | "bm" | "mathnormal" => {
+            "mathbb" | "mathcal" | "mathbfcal" | "mathfrak" | "mathbffrak" | "mathbf"
+            | "mathit" | "mathrm" | "mathsf" | "mathsfbf" | "mathsfit" | "mathsfbfit"
+            | "mathtt" | "mathsymbol" | "mathextra" | "boldsymbol" | "bm" | "mathnormal" => {
                 let font = font_macro(&name);
                 let body = self.parse_arg()?;
                 Ok(styled_font(font, body))
@@ -655,6 +663,11 @@ impl Parser {
                 self.bump();
                 Ok(Delim::None)
             }
+            Some('→') => {
+                // The serialiser writes `Delim::Arrow` as this character, as mt-mathml/mt-omml do.
+                self.bump();
+                Ok(Delim::Arrow)
+            }
             Some(ch) => {
                 self.bump();
                 Ok(Delim::Custom(ch))
@@ -763,17 +776,25 @@ fn style_control(name: &str) -> Option<MathStyle> {
     })
 }
 
+/// Font for a control word, the inverse of `latex::font_macro`.
 fn font_macro(name: &str) -> Font {
     match name {
         "mathbb" => Font::DoubleStruck,
         "mathcal" => Font::Script,
+        "mathbfcal" => Font::BoldScript,
         "mathfrak" => Font::Fraktur,
+        "mathbffrak" => Font::BoldFraktur,
         "mathbf" => Font::Bold,
         "mathit" | "mathnormal" => Font::Italic,
         "mathrm" => Font::Upright,
         "mathsf" => Font::SansSerif,
+        "mathsfbf" => Font::SansSerifBold,
+        "mathsfit" => Font::SansSerifItalic,
+        "mathsfbfit" => Font::SansSerifBoldItalic,
         "mathtt" => Font::Monospace,
         "boldsymbol" | "bm" => Font::BoldItalic,
+        "mathsymbol" => Font::Symbol,
+        "mathextra" => Font::Extra,
         _ => Font::Upright,
     }
 }
