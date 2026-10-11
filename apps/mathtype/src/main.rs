@@ -7,6 +7,7 @@
 //! - `--serve [port]`: the same conversions over loopback HTTP, for host add-ins that cannot
 //!   (WPS loads its add-ins as web pages).
 
+mod library;
 mod serve;
 
 use std::sync::Arc;
@@ -15,10 +16,11 @@ use eframe::egui::{
     self, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Pos2, Rect, Sense,
     Stroke, Vec2, ViewportCommand,
 };
-use mt_core::{Font, MathStyle};
+use mt_core::{Font, MathStyle, Side};
 use mt_edit::{Cursor, Editor, PaletteItem, palettes};
 use mt_layout::{layout, layout_with_anchors, to_svg, Box as LayoutBox, LayoutStyle, RowAnchor};
 use mt_render::metrics::{FaceMetrics, MATH_FONT};
+use mt_style_preset::StylePreset;
 
 const MATH_FAMILY: &str = "math";
 
@@ -366,23 +368,28 @@ fn check_render_pixels(width: u32, height: u32) -> Result<(), String> {
     }
 }
 
-/// Lay the equation out and produce one of the image formats.
-fn render_image(math: &mt_core::Math, to: Format, size: f64, scale: f64) -> Result<Vec<u8>, String> {
+
+/// Lay the equation out under the full preset `style` and produce one of the image formats.
+fn render_image_with_style(
+    math: &mt_core::Math,
+    to: Format,
+    style: &LayoutStyle,
+    scale: f64,
+) -> Result<Vec<u8>, String> {
     let metrics = FaceMetrics::parse(MATH_FONT, 0).ok_or("bundled math font could not be parsed")?;
-    let style = LayoutStyle::display(size);
-    let boxes = layout(math, &metrics, &style);
+    let boxes = layout(math, &metrics, style);
     match to {
-        Format::Svg => Ok(to_svg(&boxes, &style).into_bytes()),
+        Format::Svg => Ok(to_svg(&boxes, style).into_bytes()),
         Format::Png => {
             let options = mt_render::RenderOptions { scale, ..Default::default() };
             // The bounds decide the allocation inside `render_png`, so measure them first and
             // refuse the ones that would exhaust the address space.
-            let (width, height) = mt_render::image_size(&boxes, &style, metrics.face(), &options);
+            let (width, height) = mt_render::image_size(&boxes, style, metrics.face(), &options);
             check_render_pixels(width, height)?;
-            mt_render::render_png(&boxes, &style, metrics.face(), &options)
+            mt_render::render_png(&boxes, style, metrics.face(), &options)
                 .map_err(|error| format!("cannot rasterise: {error}"))
         }
-        Format::Eps => Ok(mt_render::render_eps(&boxes, &style, metrics.face(), &mt_render::RenderOptions::default())
+        Format::Eps => Ok(mt_render::render_eps(&boxes, style, metrics.face(), &mt_render::RenderOptions::default())
             .into_bytes()),
         _ => Err(format!("{} is not an image format", to.name())),
     }
@@ -390,12 +397,22 @@ fn render_image(math: &mt_core::Math, to: Format, size: f64, scale: f64) -> Resu
 
 /// Write an equation out in the requested format.
 fn write_math(math: &mt_core::Math, to: Format, size: f64, scale: f64) -> Result<Vec<u8>, String> {
+    write_math_with_style(math, to, &LayoutStyle::display(size), scale)
+}
+
+/// Write an equation out under the full preset `style`, so exports follow the active preset.
+fn write_math_with_style(
+    math: &mt_core::Math,
+    to: Format,
+    style: &LayoutStyle,
+    scale: f64,
+) -> Result<Vec<u8>, String> {
     Ok(match to {
         Format::Latex => mt_tex::to_latex(math).into_bytes(),
         Format::MathMl => mt_mathml::write(math).into_bytes(),
         Format::Omml => mt_omml::write(math).into_bytes(),
         Format::Mtef => mt_mtef::write(math),
-        Format::Svg | Format::Png | Format::Eps => render_image(math, to, size, scale)?,
+        Format::Svg | Format::Png | Format::Eps => render_image_with_style(math, to, style, scale)?,
     })
 }
 
@@ -426,6 +443,20 @@ struct App {
     editor: Editor,
     metrics: FaceMetrics,
     style: LayoutStyle,
+    /// The presets on offer: the built-ins plus any imported from files.
+    presets: Vec<StylePreset>,
+    /// Which entry of `presets` the style comes from.
+    preset_index: usize,
+    /// The formula library the side panel searches and inserts from.
+    library: library::Library,
+    /// Name the next library save will use.
+    library_name: String,
+    /// Substring the library list is filtered by.
+    library_query: String,
+    /// Path the preset import/export buttons act on.
+    preset_path: String,
+    /// Path the library import/export buttons act on.
+    library_path: String,
     tex_input: String,
     status: String,
     /// LaTeX parse failure to point at inside the input box: message and byte offset.
@@ -500,10 +531,26 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install_fonts(&cc.egui_ctx);
         let metrics = FaceMetrics::parse(MATH_FONT, 0).expect("bundled math font must parse");
+        let presets = mt_style_preset::builtins().to_vec();
+        let style = presets[0].layout_style();
+        let library = library::Library::load_default().unwrap_or_else(|error| {
+            let mut empty = library::Library::default();
+            empty.path = library::default_path();
+            eprintln!("公式库无法读取：{error}");
+            empty
+        });
+        let library_path = library.path.display().to_string();
         Self {
             editor: Editor::new(),
             metrics,
-            style: LayoutStyle::display(18.0),
+            style,
+            presets,
+            preset_index: 0,
+            library,
+            library_name: String::new(),
+            library_query: String::new(),
+            preset_path: "preset.ini".to_owned(),
+            library_path,
             tex_input: String::from(r"\frac{a}{b} + \sqrt{x_i^2}"),
             status: "输入字符或点选面板插入模板；左右方向键在槽位间移动".to_owned(),
             path: None,
@@ -546,6 +593,174 @@ impl App {
             }
             Err(error) => self.status = format!("保存失败：{error}"),
         }
+    }
+
+    /// Switch to `index`-th preset: the layout style is rebuilt, so canvas and exports re-typeset
+    /// with the new sizes, spacing and font slots on the next frame.
+    fn apply_preset(&mut self, index: usize) {
+        let Some(preset) = self.presets.get(index) else { return };
+        self.preset_index = index;
+        self.style = preset.layout_style();
+        self.editor.set_typing_font(preset.styles.variable);
+        self.status = format!(
+            "已切换预设「{}」：全号 {}pt，变量 {}，公式将按新字体与字号重新排版",
+            preset.name,
+            preset.sizes.full,
+            font_name(preset.styles.variable)
+        );
+    }
+
+    /// Read a preset file into the list and switch to it.
+    fn import_preset(&mut self) {
+        let path = self.preset_path.trim().to_owned();
+        let read = std::fs::read_to_string(&path)
+            .map_err(|error| error.to_string())
+            .and_then(|text| mt_style_preset::parse(&text).map_err(|error| error.to_string()));
+        match read {
+            Ok(preset) => {
+                self.status = format!("已导入预设「{}」（{}）", preset.name, path);
+                self.presets.push(preset);
+                self.apply_preset(self.presets.len() - 1);
+            }
+            Err(message) => self.status = format!("导入预设失败：{message}"),
+        }
+    }
+
+    /// Write the current preset to the path the panel names.
+    fn export_preset(&mut self) {
+        let preset = &self.presets[self.preset_index];
+        let path = std::path::PathBuf::from(self.preset_path.trim());
+        match std::fs::write(&path, preset.to_text()) {
+            Ok(()) => self.status = format!("已导出预设「{}」到 {}", preset.name, path.display()),
+            Err(error) => self.status = format!("导出预设失败：{error}"),
+        }
+    }
+
+    /// Save the current equation into the library under the name the panel names.
+    fn save_to_library(&mut self) {
+        let latex = mt_tex::to_latex(self.editor.math());
+        self.library.add(&self.library_name, &latex);
+        match self.library.save() {
+            Ok(()) => {
+                let name = self.library.entries.last().expect("just added").name.clone();
+                self.status = format!("已保存到公式库：{name}");
+                self.library_name.clear();
+            }
+            Err(message) => self.status = format!("公式库保存失败：{message}"),
+        }
+    }
+
+    /// Load a whole library file into the panel.
+    fn import_library(&mut self) {
+        match library::Library::load(self.library_path.trim()) {
+            Ok(loaded) => {
+                self.status =
+                    format!("已导入公式库（{} 条）：{}", loaded.entries.len(), loaded.path.display());
+                self.library = loaded;
+            }
+            Err(error) => self.status = format!("导入公式库失败：{error}"),
+        }
+    }
+
+    /// Write the library to the path the panel names.
+    fn export_library(&mut self) {
+        let path = std::path::PathBuf::from(self.library_path.trim());
+        match self.library.save_to(&path) {
+            Ok(()) => self.status = format!("公式库已另存到 {}", path.display()),
+            Err(message) => self.status = format!("公式库另存失败：{message}"),
+        }
+    }
+
+    /// Insert one library entry at the caret; used by the list buttons and by canvas drops.
+    fn insert_entry(&mut self, entry: &library::LibraryEntry) {
+        match library::insert_entry(&mut self.editor, entry) {
+            Ok(()) => {
+                self.dirty = true;
+                self.status = format!("已插入「{}」", entry.name);
+            }
+            Err(message) => self.status = format!("插入「{}」失败：{message}", entry.name),
+        }
+    }
+
+    /// The preset and formula-library side panel.
+    fn draw_side_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("样式预设");
+        let mut selected = self.preset_index;
+        egui::ComboBox::from_id_salt("preset-select")
+            .selected_text(&self.presets[selected].name)
+            .show_ui(ui, |ui| {
+                for (index, preset) in self.presets.iter().enumerate() {
+                    ui.selectable_value(&mut selected, index, preset.name.clone());
+                }
+            });
+        if selected != self.preset_index {
+            self.apply_preset(selected);
+        }
+        ui.weak(preset_status(&self.presets[self.preset_index]));
+        ui.horizontal(|ui| {
+            ui.label("预设文件");
+            ui.add(egui::TextEdit::singleline(&mut self.preset_path).desired_width(120.0));
+        });
+        ui.horizontal(|ui| {
+            if ui.button("导入预设").clicked() {
+                self.import_preset();
+            }
+            if ui.button("导出预设").clicked() {
+                self.export_preset();
+            }
+        });
+
+        ui.separator();
+        ui.heading("公式库");
+        ui.horizontal(|ui| {
+            ui.label("名称");
+            ui.add(egui::TextEdit::singleline(&mut self.library_name).desired_width(120.0));
+            if ui.button("保存当前公式").clicked() {
+                self.save_to_library();
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("检索");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.library_query)
+                    .desired_width(120.0)
+                    .hint_text("名称或内容"),
+            );
+        });
+        let hits = self.library.search(&self.library_query);
+        egui::ScrollArea::vertical().show_rows(ui, 22.0, hits.len(), |ui, range| {
+            for index in &hits[range] {
+                let entry = self.library.entries[*index].clone();
+                ui.horizontal(|ui| {
+                    let response = ui
+                        .add(egui::Button::new(&entry.name).sense(egui::Sense::click_and_drag()))
+                        .on_hover_text(&entry.latex);
+                    if response.clicked() {
+                        self.insert_entry(&entry);
+                    }
+                    if response.dragged() {
+                        egui::DragAndDrop::set_payload(ui.ctx(), entry.clone());
+                    }
+                    if ui.small_button("删").clicked() {
+                        self.library.remove(*index);
+                        let _ = self.library.save();
+                    }
+                });
+                ui.weak(&entry.latex);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("库文件");
+            ui.add(egui::TextEdit::singleline(&mut self.library_path).desired_width(120.0));
+        });
+        ui.horizontal(|ui| {
+            if ui.button("导入库").clicked() {
+                self.import_library();
+            }
+            if ui.button("另存库").clicked() {
+                self.export_library();
+            }
+        });
     }
 
     fn apply_palette_item(&mut self, item: PaletteItem) {
@@ -598,9 +813,23 @@ impl App {
         }
     }
 
+    /// The equation's bytes in `format`, following the active preset.
+    ///
+    /// A stream export declares the preset as its equation preferences, so a MathType reader
+    /// re-typesets the equation with the same sizes and style slots.
+    fn preset_bytes(&self, format: Format) -> Result<Vec<u8>, String> {
+        if format == Format::Mtef {
+            return Ok(mt_mtef::write_with_preferences(
+                self.editor.math(),
+                &mt_style_preset::to_preferences(&self.presets[self.preset_index]),
+            ));
+        }
+        write_math_with_style(self.editor.math(), format, &self.style, 3.0)
+    }
+
     /// Put the equation on the clipboard in one of the interchange formats.
     fn copy_as(&mut self, ctx: &egui::Context, format: Format) {
-        match write_math(self.editor.math(), format, self.style.size, 3.0) {
+        match self.preset_bytes(format) {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 ctx.copy_text(text.clone());
@@ -620,7 +849,8 @@ impl App {
         let Ok(math) = mt_tex::parse(&self.tex_input) else {
             return;
         };
-        let style = LayoutStyle::display(self.style.size.min(16.0));
+        let mut style = self.style;
+        style.size = style.size.min(16.0);
         let boxes = layout(&math, &self.metrics, &style);
         let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), Sense::hover());
         let painter = ui.painter_at(rect);
@@ -631,7 +861,7 @@ impl App {
 
     /// Write the equation to a file in the requested image format.
     fn export(&mut self, format: Format) {
-        match write_math(self.editor.math(), format, self.style.size, 3.0) {
+        match self.preset_bytes(format) {
             Ok(bytes) => {
                 let path = format!("equation.{}", format.name());
                 match std::fs::write(&path, &bytes) {
@@ -908,6 +1138,9 @@ impl eframe::App for App {
                 }
             });
         });
+        egui::Panel::right("presets").resizable(true).show(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| self.draw_side_panel(ui));
+        });
 
         egui::CentralPanel::default().show(ui, |ui| {
             // Bottom-up: the footer claims its natural height first, the canvas then takes whatever
@@ -946,7 +1179,15 @@ impl eframe::App for App {
                 );
                 let color = ui.visuals().text_color();
                 let (boxes, anchors) = self.geometry();
-                let origin = Pos2::new(rect.left() + 24.0, rect.center().y);
+                let origin = match self.presets[self.preset_index].alignment {
+                    Side::Left => Pos2::new(rect.left() + 24.0, rect.center().y),
+                    Side::Center => {
+                        Pos2::new(rect.center().x - boxes.width() as f32 / 2.0, rect.center().y)
+                    }
+                    Side::Right => {
+                        Pos2::new(rect.right() - 24.0 - boxes.width() as f32, rect.center().y)
+                    }
+                };
                 let font_id = |size: f64| FontId::new(size as f32, FontFamily::Name(MATH_FAMILY.into()));
                 self.draw_selection(&painter, origin, &anchors, ui.visuals().selection.bg_fill);
                 draw_boxes(&painter, &boxes, origin, &self.metrics, color, &font_id);
@@ -964,6 +1205,15 @@ impl eframe::App for App {
                 if let Some(phase) = phase {
                     if let Some(point) = response.interact_pointer_pos() {
                         apply_pointer(&mut self.editor, &anchors, origin, point, phase);
+                    }
+                }
+                // A library entry dragged onto the canvas inserts where it lands.
+                if let Some(entry) = egui::DragAndDrop::payload::<library::LibraryEntry>(ui.ctx()) {
+                    if ui.input(|state| state.pointer.any_released()) {
+                        if response.hovered() {
+                            self.insert_entry(&entry);
+                        }
+                        egui::DragAndDrop::clear_payload(ui.ctx());
                     }
                 }
             });
@@ -1085,6 +1335,23 @@ fn style_status(editor: &Editor) -> String {
     let scope = if editor.selection().is_some() { "选区" } else { "输入" };
     let style = editor.typing_style().map(math_style_name).unwrap_or("继承");
     format!("{scope}样式：字体 {}，字号 {style}", font_name(current_font(editor)))
+}
+
+/// One-line preset summary for the side panel.
+fn preset_status(preset: &StylePreset) -> String {
+    let alignment = match preset.alignment {
+        Side::Left => "左对齐",
+        Side::Center => "居中",
+        Side::Right => "右对齐",
+    };
+    format!(
+        "全号 {}pt · 脚本 {}pt / {}pt · 变量 {} · {}",
+        preset.sizes.full,
+        preset.sizes.script,
+        preset.sizes.script_script,
+        font_name(preset.styles.variable),
+        alignment
+    )
 }
 
 /// Register the math face, plus a system face for the CJK interface labels when one loads.
@@ -1391,5 +1658,36 @@ mod tests {
         assert_eq!(mt_tex::to_latex(editor.math()), bolded);
         assert!(editor.redo());
         assert_eq!(mt_tex::to_latex(editor.math()), with_template);
+    }
+
+    #[test]
+    fn switching_presets_retypesets_the_same_tree() {
+        let math = mt_tex::parse(r"\frac{a}{b} + \sqrt{x_i^2}").expect("fixture parses");
+        let metrics = FaceMetrics::parse(MATH_FONT, 0).expect("bundled font parses");
+        let presets = mt_style_preset::builtins();
+        let width = |index: usize| layout(&math, &metrics, &presets[index].layout_style()).width();
+        let (default, compact, large) = (width(0), width(2), width(3));
+        assert!(compact < default, "the compact preset must tighten the same tree");
+        assert!(large > default * 1.05, "the large-print preset must enlarge the same tree");
+    }
+
+    #[test]
+    fn preset_status_names_sizes_and_alignment() {
+        let status = preset_status(&mt_style_preset::builtins()[0]);
+        assert!(status.contains("18pt"), "{status}");
+        assert!(status.contains("变量体"), "{}", status);
+        assert!(status.contains("居中"), "{status}");
+    }
+
+    #[test]
+    fn a_stream_export_embeds_the_active_preset() {
+        // The editor has no cheap constructor outside eframe, so exercise the same wiring the
+        // copy path uses: the preset's preferences travel inside a written stream.
+        let math = mt_tex::parse("x^2").unwrap();
+        let preset = &mt_style_preset::builtins()[2];
+        let stream =
+            mt_mtef::write_with_preferences(&math, &mt_style_preset::to_preferences(preset));
+        let read = mt_mtef::read(&stream).expect("the stream reads back");
+        assert_eq!(read.header.preferences.sizes[0].value, "12", "compact preset full size");
     }
 }

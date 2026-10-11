@@ -28,11 +28,16 @@ pub mod constants;
 mod boxed;
 mod layout;
 mod metrics;
+mod spacing;
 mod style;
 mod svg;
+mod variants;
 
 pub use boxed::Box;
 pub use layout::{RowAnchor, layout, layout_with_anchors};
 pub use metrics::{ApproxMetrics, FontMetrics};
-pub use style::LayoutStyle;
+pub use spacing::Spacing;
+pub use style::{LayoutStyle, StyleFonts};
 pub use svg::{to_svg, view_box};
+pub use variants::{math_base, math_variant};
+

@@ -375,6 +375,14 @@ pub fn write_bare_with_preferences(math: &Math, preferences: &Preferences) -> Ve
     write::document_with_preferences(math, preferences)
 }
 
+/// The preferences a stream written without explicit ones declares.
+///
+/// A style preset layered on top of a stream starts from these values and overrides the entries
+/// it models, so the rest of the arrays stay what MathType expects.
+pub fn default_preferences() -> Preferences {
+    write::default_preferences()
+}
+
 // --------------------------------------------------------------------------- errors
 
 /// Why a stream could not be read or written.

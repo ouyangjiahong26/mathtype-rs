@@ -48,8 +48,9 @@ impl FontMetrics for ApproxMetrics {
     }
 }
 
-/// Advance, height and depth of `ch`, in em units.
+/// Advance, height and depth of `ch`, measuring a styled variant like its plain letter.
 fn measurement(ch: char) -> (f64, f64, f64) {
+    let ch = crate::math_base(ch).unwrap_or(ch);
     match ch {
         '0'..='9' => (0.5, 0.65, 0.0),
         'A'..='Z' => (0.7, 0.7, 0.0),

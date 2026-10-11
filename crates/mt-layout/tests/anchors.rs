@@ -189,8 +189,8 @@ fn a_slash_fraction_keeps_row_anchors_unshifted() {
             _ => None,
         }
     }
-    let (a_x, a_y) = glyph_at(&boxes, 'a').expect("glyph 'a' in the box tree");
-    let (b_x, b_y) = glyph_at(&boxes, 'b').expect("glyph 'b' in the box tree");
+    let (a_x, a_y) = glyph_at(&boxes, '\u{1D44E}').expect("the italic variable a in the box tree");
+    let (b_x, b_y) = glyph_at(&boxes, '\u{1D44F}').expect("the italic variable b in the box tree");
 
     let numerator = anchor(&anchors, &Path::root().child(0));
     close(numerator.origin.0, a_x);

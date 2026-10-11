@@ -1181,6 +1181,7 @@ dependencies = [
  "mt-mtef",
  "mt-omml",
  "mt-render",
+ "mt-style-preset",
  "mt-tex",
  "ttf-parser",
  "zip",
@@ -1338,6 +1339,15 @@ dependencies = [
  "mt-layout",
  "png",
  "ttf-parser",
+]
+
+[[package]]
+name = "mt-style-preset"
+version = "0.1.0"
+dependencies = [
+ "mt-core",
+ "mt-layout",
+ "mt-mtef",
 ]
 
 [[package]]

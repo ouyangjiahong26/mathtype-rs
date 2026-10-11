@@ -1,0 +1,12 @@
+[package]
+name = "mt-style-preset"
+description = "Style presets: the text format, built-ins, and conversion to layout styles and stream preferences."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core = { workspace = true }
+mt-layout = { workspace = true }
+mt-mtef = { workspace = true }
