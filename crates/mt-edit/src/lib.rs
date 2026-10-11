@@ -140,13 +140,13 @@ impl Template {
                 })),
                 vec![0],
             ),
-            Template::Sum => (big_op('\u{2211}', 'n', true), vec![0]),
-            Template::Product => (big_op('\u{220F}', 'n', true), vec![0]),
-            Template::Coproduct => (big_op('\u{2210}', 'n', true), vec![0]),
-            Template::Integral => (big_op('\u{222B}', 'n', false), vec![0]),
-            Template::DoubleIntegral => (big_op('\u{222C}', 'n', false), vec![0]),
-            Template::TripleIntegral => (big_op('\u{222D}', 'n', false), vec![0]),
-            Template::ContourIntegral => (big_op('\u{222E}', 'n', false), vec![0]),
+            Template::Sum => (big_op('\u{2211}', true), vec![0]),
+            Template::Product => (big_op('\u{220F}', true), vec![0]),
+            Template::Coproduct => (big_op('\u{2210}', true), vec![0]),
+            Template::Integral => (big_op('\u{222B}', false), vec![0]),
+            Template::DoubleIntegral => (big_op('\u{222C}', false), vec![0]),
+            Template::TripleIntegral => (big_op('\u{222D}', false), vec![0]),
+            Template::ContourIntegral => (big_op('\u{222E}', false), vec![0]),
             Template::LimitBelow => (
                 Node::Limits(Box::new(mt_core::Limits {
                     base: Node::empty(),
@@ -240,8 +240,7 @@ impl Template {
     }
 }
 
-fn big_op(op: char, limit_placeholder: char, limits: bool) -> Node {
-    let _ = limit_placeholder;
+fn big_op(op: char, limits: bool) -> Node {
     Node::Big(Box::new(BigOp {
         base: Node::row([Node::symbol(op, Class::Op)]),
         sub: Some(Node::empty()),
@@ -440,14 +439,17 @@ impl Editor {
             let index = index.min(row.len());
             row.insert(index, node);
             let node_path = self.cursor.path.child(index);
-            if let Some(selected) = selected {
-                if let Some(slot) = entry.first().and_then(|slot| self.math.node_at_mut(&node_path.child(*slot))) {
-                    *slot = Node::Row(selected);
-                }
-            }
             let mut target = node_path;
             for slot in &entry {
                 target = target.child(*slot);
+            }
+            if let Some(selected) = selected {
+                if !entry.is_empty() {
+                    // Walk the full entry path so nested templates keep their surrounding slots.
+                    if let Some(slot) = self.math.node_at_mut(&target) {
+                        *slot = Node::Row(selected);
+                    }
+                }
             }
             self.cursor = Cursor { path: target, index: 0 };
             self.anchor = None;
@@ -565,9 +567,15 @@ impl Editor {
         if self.cursor.index > 0 {
             let previous = self.cursor.index - 1;
             if self.node_at_index(previous).is_some_and(|node| node.slot_count() > 0) {
-                self.cursor = Cursor { path: self.deepest_last_slot(&self.cursor.path.child(previous)), index: 0 };
-                let len = self.row().map_or(0, Row::len);
-                self.cursor.index = len;
+                let path = self.deepest_last_slot(&self.cursor.path.child(previous));
+                // The deepest slot may end on a template node itself, not a row we can enter.
+                if self.math.node_at(&path).is_some_and(Node::is_row) {
+                    self.cursor = Cursor { path, index: 0 };
+                    let len = self.row().map_or(0, Row::len);
+                    self.cursor.index = len;
+                } else {
+                    self.cursor.index = previous;
+                }
             } else {
                 self.cursor.index = previous;
             }
@@ -585,7 +593,13 @@ impl Editor {
         if self.cursor.index < len {
             let next = self.cursor.index;
             if self.node_at_index(next).is_some_and(|node| node.slot_count() > 0) {
-                self.cursor = Cursor { path: self.deepest_first_slot(&self.cursor.path.child(next)), index: 0 };
+                let path = self.deepest_first_slot(&self.cursor.path.child(next));
+                // The deepest slot may end on a template node itself, not a row we can enter.
+                if self.math.node_at(&path).is_some_and(Node::is_row) {
+                    self.cursor = Cursor { path, index: 0 };
+                } else {
+                    self.cursor.index = next + 1;
+                }
             } else {
                 self.cursor.index = next + 1;
             }
@@ -652,6 +666,10 @@ impl Editor {
         };
         let Some(target) = target else { return };
         let target_path = parent_path.child(target);
+        // Single-script templates have a missing sibling slot; only move into an existing row.
+        if !self.math.node_at(&target_path).is_some_and(Node::is_row) {
+            return;
+        }
         let index = self.cursor.index.min(self.row_len(&target_path));
         self.cursor = Cursor { path: target_path, index };
     }
@@ -815,6 +833,10 @@ fn restyle(node: &mut Node, font: Option<Font>, style: Option<MathStyle>) {
             if let Some(font) = font {
                 *node_font = font;
             }
+            if let Some(style) = style {
+                let body = std::mem::replace(node, Node::empty());
+                *node = Node::Styled(Box::new(Styled { body, style: Some(style), font, class: None }));
+            }
         }
         other => {
             if font.is_some() || style.is_some() {
@@ -841,7 +863,7 @@ pub fn classify(ch: char, current_font: Font) -> Option<Node> {
         '\u{2211}' | '\u{220F}' | '\u{222B}' | '\u{222E}' | '\u{2210}' => Class::Op,
         _ => Class::Ord,
     };
-    let font = if class == Class::Ord && (ch.is_alphabetic() || ch == '\u{03B1}') {
+    let font = if class == Class::Ord && ch.is_alphabetic() {
         current_font
     } else {
         Font::Upright
@@ -1107,5 +1129,88 @@ mod tests {
         assert_eq!(editor.cursor().path.to_string(), "0.2");
         editor.move_vertical(true);
         assert_eq!(editor.cursor().path.to_string(), "0.0");
+    }
+
+    #[test]
+    fn vertical_move_stays_put_when_the_target_slot_does_not_exist() {
+        let mut editor = Editor::new();
+        editor.insert_template(Template::Superscript);
+        // Park the caret in the base and try to move down into the missing subscript.
+        editor.cursor = Cursor { path: Path::root().child(0).child(0), index: 0 };
+        editor.move_vertical(false);
+        assert_eq!(editor.cursor().path.to_string(), "0.0");
+        editor.insert_char('x');
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        let Node::Scripts(scripts) = &row[0] else { panic!("expected scripts") };
+        assert_eq!(scripts.base, Node::row([Node::variable('x')]));
+        assert_eq!(scripts.sub, None);
+    }
+
+    #[test]
+    fn move_left_falls_back_when_the_deepest_slot_is_not_a_row() {
+        let mut editor = Editor::new();
+        editor.insert_char('a');
+        editor.insert_template(Template::LimitBelow);
+        editor.insert_char('x');
+        editor.move_right();
+        editor.move_right();
+        editor.insert_char('b');
+        // Moving left twice: first past 'b', then onto the limit below; its last slot (over)
+        // is missing, so the caret must fall back to the position before the template instead
+        // of a dead path.
+        editor.move_left();
+        editor.move_left();
+        assert_eq!(editor.cursor().path.to_string(), ".");
+        assert_eq!(editor.cursor().index, 1);
+        editor.insert_char('z');
+        assert_eq!(flat(&editor), ["a", "z", "<3>", "b"]);
+    }
+
+    #[test]
+    fn move_right_falls_back_when_the_deepest_slot_is_not_a_row() {
+        let mut editor = Editor::new();
+        editor.insert_char('a');
+        editor.apply_style(MathStyle::Script);
+        editor.insert_char('x');
+        editor.cursor = Cursor { path: Path::root(), index: 0 };
+        // Moving right onto the styled character must not park the caret on the Styled node.
+        editor.move_right();
+        assert_eq!(editor.cursor().path.to_string(), ".");
+        assert_eq!(editor.cursor().index, 1);
+        editor.move_right();
+        assert_eq!(editor.cursor().path.to_string(), ".");
+        assert_eq!(editor.cursor().index, 2);
+        editor.typing_style = None;
+        editor.insert_char('y');
+        assert_eq!(flat(&editor), ["a", "<1>", "y"]);
+    }
+
+    #[test]
+    fn a_selection_transfers_into_a_function_body_keeping_the_fence() {
+        let mut editor = Editor::new();
+        for ch in "ab".chars() {
+            editor.insert_char(ch);
+        }
+        editor.cursor = Cursor { path: Path::root(), index: 2 };
+        editor.anchor = Some(Cursor { path: Path::root(), index: 0 });
+        editor.wrap_with(Template::Function("sin"));
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        assert_eq!(row.len(), 1);
+        let Node::Fence(fence) = row[0].slot(1).unwrap() else { panic!("expected a fence, got {:?}", row[0]) };
+        assert_eq!(fence.body, Node::row([Node::variable('a'), Node::variable('b')]));
+        assert_eq!(editor.cursor().path.to_string(), "0.1.0");
+    }
+
+    #[test]
+    fn applying_a_style_wraps_plain_characters() {
+        let mut editor = Editor::new();
+        editor.insert_char('x');
+        editor.cursor = Cursor { path: Path::root(), index: 1 };
+        editor.anchor = Some(Cursor { path: Path::root(), index: 0 });
+        editor.apply_style(MathStyle::Script);
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        let Node::Styled(styled) = &row[0] else { panic!("expected a styled node, got {:?}", row[0]) };
+        assert_eq!(styled.style, Some(MathStyle::Script));
+        assert_eq!(styled.body, Node::variable('x'));
     }
 }
