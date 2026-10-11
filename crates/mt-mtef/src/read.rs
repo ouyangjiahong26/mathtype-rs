@@ -144,10 +144,11 @@ impl<'a> Nibbles<'a> {
 
 /// One item of an object list.
 enum Item {
-    /// Records standing for nodes of the row being read.
     Nodes(Vec<Node>),
-    /// A line, kept whole when the caller reads a pile or a table.
-    Line(Row),
+    /// A line, kept whole when the caller reads a pile or a table. `null` marks a line that is
+    /// not drawn at all, which an optional slot reads as absent — a line that is drawn but
+    /// empty is a slot that is present and empty.
+    Line { row: Row, null: bool },
     /// A script template, whose base is the record next to it.
     Script { sub: Option<Node>, sup: Option<Node>, precedes: bool },
 }
@@ -229,7 +230,7 @@ impl<'a> Parser<'a> {
                         push(&mut out, node, &mut pending);
                     }
                 }
-                Item::Line(row) => {
+                Item::Line { row, .. } => {
                     chain = 0;
                     for node in row {
                         push(&mut out, node, &mut pending);
@@ -369,10 +370,14 @@ impl<'a> Parser<'a> {
             result?;
         }
         if options & OPT_LINE_NULL != 0 {
-            return Ok(if lines { Item::Line(Row::new()) } else { Item::Nodes(Vec::new()) });
+            return Ok(if lines {
+                Item::Line { row: Row::new(), null: true }
+            } else {
+                Item::Nodes(Vec::new())
+            });
         }
         let contents = self.list()?;
-        Ok(if lines { Item::Line(contents) } else { Item::Nodes(contents) })
+        Ok(if lines { Item::Line { row: contents, null: false } } else { Item::Nodes(contents) })
     }
 
     fn character(&mut self) -> Result<Item, MtefError> {
@@ -537,46 +542,55 @@ impl<'a> Parser<'a> {
         };
         let _template_options = self.reader.u8()?;
         let items = self.items()?;
-        let mut lines: Vec<Row> = Vec::new();
+        let mut lines: Vec<(Row, bool)> = Vec::new();
         let mut glyphs: Vec<Node> = Vec::new();
         for item in items {
             match item {
-                Item::Line(row) => lines.push(row),
+                Item::Line { row, null } => lines.push((row, null)),
                 Item::Nodes(nodes) => {
                     for node in nodes {
                         match node {
                             Node::Char(_) => glyphs.push(node),
-                            Node::Row(row) => lines.push(row),
-                            other => lines.push(vec![other]),
+                            Node::Row(row) => lines.push((row, false)),
+                            other => lines.push((vec![other], false)),
                         }
                     }
                 }
                 Item::Script { sub, sup, precedes: false } => {
-                    let base = lines.pop().map(slot).unwrap_or_else(Node::empty);
-                    lines.push(vec![attach(base, sub, sup)]);
+                    let base = lines.pop().map(|(row, _)| slot(row)).unwrap_or_else(Node::empty);
+                    lines.push((vec![attach(base, sub, sup)], false));
                 }
                 Item::Script { sub, sup, precedes: true } => match lines.first_mut() {
-                    Some(row) => {
+                    Some((row, _)) => {
                         let base = slot(std::mem::take(row));
                         *row = vec![attach(base, sub, sup)];
                     }
-                    None => lines.push(vec![attach(Node::empty(), sub, sup)]),
+                    None => lines.push((vec![attach(Node::empty(), sub, sup)], false)),
                 },
             }
         }
         Ok(self.build_template(selector, variation, lines, glyphs))
     }
 
-    fn build_template(&mut self, selector: u8, variation: u32, lines: Vec<Row>, glyphs: Vec<Node>) -> Item {
+    fn build_template(&mut self, selector: u8, variation: u32, lines: Vec<(Row, bool)>, glyphs: Vec<Node>) -> Item {
         let glyph = |position: usize| {
             glyphs.get(position).and_then(|node| match node {
                 Node::Char(ch) => Some(ch.ch),
                 _ => None,
             })
         };
-        let main = lines.first().cloned().unwrap_or_default();
-        let second = lines.get(1).cloned().unwrap_or_default();
-        let third = lines.get(2).cloned().unwrap_or_default();
+        // An optional slot is absent when its line is not drawn; a line that is drawn but empty
+        // is a slot that is present and empty.
+        let optional_line = |position: usize| lines.get(position).and_then(|(row, null)| {
+            if *null {
+                None
+            } else {
+                Some(slot(row.clone()))
+            }
+        });
+        let main = lines.first().cloned().map(|(row, _)| row).unwrap_or_default();
+        let second = lines.get(1).cloned().map(|(row, _)| row).unwrap_or_default();
+        let third = lines.get(2).cloned().map(|(row, _)| row).unwrap_or_default();
         match selector {
             // Fences and intervals.
             0..=8 => {
@@ -662,8 +676,8 @@ impl<'a> Parser<'a> {
                 });
                 let big = BigOp {
                     base,
-                    sub: optional(second),
-                    sup: optional(third),
+                    sub: optional_line(1),
+                    sup: optional_line(2),
                     limits: variation & 0x0040 != 0,
                 };
                 let mut nodes = vec![Node::Big(Box::new(big))];
@@ -673,8 +687,8 @@ impl<'a> Parser<'a> {
             // Limits.
             23 => Item::Nodes(vec![Node::Limits(Box::new(Limits {
                 base: slot(main),
-                under: optional(second),
-                over: optional(third),
+                under: optional_line(1),
+                over: optional_line(2),
                 align: Side::Center,
             }))]),
             // Long division.
@@ -688,8 +702,8 @@ impl<'a> Parser<'a> {
             }))]),
             // Scripts: the base is the neighbouring record, the slots are sub then superscript.
             27..=29 => Item::Script {
-                sub: optional(main),
-                sup: optional(second),
+                sub: optional_line(0),
+                sup: optional_line(1),
                 precedes: variation & 0x0001 != 0,
             },
             // Bra-ket notation.
@@ -707,7 +721,7 @@ impl<'a> Parser<'a> {
             // A template this crate does not know: keep its contents.
             _ => {
                 self.report.skipped += 1;
-                Item::Nodes(lines.into_iter().flatten().collect())
+                Item::Nodes(lines.into_iter().flat_map(|(row, _)| row).collect())
             }
         }
     }
@@ -750,7 +764,7 @@ impl<'a> Parser<'a> {
                     return Ok(rows);
                 }
                 match self.item(true)? {
-                    Item::Line(row) => rows.push(row),
+                    Item::Line { row, .. } => rows.push(row),
                     Item::Nodes(nodes) if !nodes.is_empty() => rows.push(nodes),
                     Item::Nodes(_) => self.report.skipped += 1,
                     Item::Script { sub, sup, .. } => {
@@ -822,7 +836,7 @@ impl<'a> Parser<'a> {
     fn cell(&mut self) -> Result<Row, MtefError> {
         loop {
             match self.item(true)? {
-                Item::Line(row) => return Ok(row),
+                Item::Line { row, .. } => return Ok(row),
                 Item::Nodes(nodes) if nodes.is_empty() => self.report.skipped += 1,
                 Item::Nodes(nodes) => return Ok(nodes),
                 Item::Script { sub, sup, .. } => {

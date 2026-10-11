@@ -170,7 +170,7 @@ const LARGE_OPS: &str = "\u{2211}\u{220F}\u{2210}\u{22C0}\u{22C1}\u{22C2}\u{22C3
 
 const BINARY: &str = "+-*\u{2212}\u{00B1}\u{2213}\u{00D7}\u{00F7}\u{22C5}\u{2217}\u{00B7}\u{2218}\u{2216}\u{2227}\u{2228}\u{2229}\u{222A}\u{2295}\u{2296}\u{2297}\u{2299}\u{2216}";
 
-const RELATIONS: &str = "=<>\u{2264}\u{2265}\u{2260}\u{2248}\u{2261}\u{2208}\u{2209}\u{2282}\u{2283}\u{2286}\u{2287}\
+const RELATIONS: &str = "=<>:\u{2264}\u{2265}\u{2260}\u{2248}\u{2261}\u{2208}\u{2209}\u{2282}\u{2283}\u{2286}\u{2287}\
 \u{2192}\u{2190}\u{2194}\u{21D2}\u{21D4}\u{21A6}\u{2191}\u{2193}\u{27F9}\u{27FA}\u{223C}\u{221D}\u{2245}\u{225C}\
 \u{2323}\u{2254}\u{2255}\u{220B}\u{2225}\u{2223}\u{2224}\u{22A5}\u{224D}\u{226A}\u{226B}";
 
@@ -252,6 +252,9 @@ const FAMILIES: [Family; 8] = [
 ];
 
 /// The family a delimiter belongs to, if any.
+///
+/// A custom delimiter that spells the glyph one of the families draws belongs to that family, so
+/// it is written with the template that draws it rather than as an ad-hoc interval.
 pub(crate) fn family_of(delim: Delim) -> Option<(u8, char, char)> {
     let found = match delim {
         Delim::Angle | Delim::Arrow => &FAMILIES[0],
@@ -262,9 +265,28 @@ pub(crate) fn family_of(delim: Delim) -> Option<(u8, char, char)> {
         Delim::Norm | Delim::DoubleBar => &FAMILIES[5],
         Delim::Floor => &FAMILIES[6],
         Delim::Ceil => &FAMILIES[7],
-        Delim::None | Delim::Custom(_) => return None,
+        Delim::Custom(ch) => FAMILIES.iter().find(|family| family.open == ch || family.close == ch)?,
+        Delim::None => return None,
     };
     Some((found.selector, found.open, found.close))
+}
+
+/// Whether a delimiter is the glyph its family draws on the given side.
+pub(crate) fn natural_side(delim: Delim, family: (u8, char, char), opening: bool) -> bool {
+    let natural = if opening { family.1 } else { family.2 };
+    match delim {
+        Delim::Custom(ch) => ch == natural,
+        _ => delimiter_char_of(delim, opening) == Some(natural),
+    }
+}
+
+/// The character a named delimiter is drawn with on one side, or `None` when it draws nothing.
+fn delimiter_char_of(delim: Delim, opening: bool) -> Option<char> {
+    if opening {
+        delim.open()
+    } else {
+        delim.close()
+    }
 }
 
 /// The delimiter a fence template draws, given its selector and the sides that are present.

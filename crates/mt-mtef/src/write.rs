@@ -5,7 +5,7 @@
 //! definition per extra face the tree uses — followed by the equation itself. Only fields whose
 //! meaning is established are written, and the reader undoes exactly this encoding.
 
-use mt_core::{Class, Delim, Font, FracKind, Math, MathStyle, Matrix, MatrixKind, Node, Row};
+use mt_core::{Char, Class, Delim, Font, FracKind, Math, MathStyle, Matrix, MatrixKind, Node, Row, Styled, TextRun};
 
 use crate::tables::*;
 use crate::{Dimension, Preferences, StyleDef};
@@ -58,12 +58,13 @@ pub(crate) fn default_preferences() -> Preferences {
 /// A bare equation byte stream, declaring the given equation preferences.
 pub(crate) fn document_with_preferences(math: &Math, preferences: &Preferences) -> Vec<u8> {
     let mut fonts = Vec::new();
-    collect_fonts(&math.body, &mut fonts);
+    let body = applied_fonts(&math.body);
+    collect_fonts(&body, &mut fonts);
     let mut writer = Writer { out: Vec::new(), fonts, prefs: preferences };
     writer.header();
     writer.definitions();
     writer.size(math.style);
-    writer.write_line(&Slot::Node(&math.body));
+    writer.write_line(&Slot::Node(&body));
     writer.out.push(TAG_END);
     writer.out
 }
@@ -248,7 +249,19 @@ impl Writer<'_> {
                     self.template(selector, variation, &[Slot::Node(&accent.base)], &[glyph]);
                 }
             }
-            Node::Big(big) => self.big_op(big),
+            // A large operator template takes a single operator glyph, so an operator spelled
+            // with more — a function name like `lim` — has no template of its own: with
+            // scripts it is written as the limits template around it, and without them it is
+            // written as the text it spells.
+            Node::Big(big) => match &big.base {
+                Node::Char(ch) => self.big_op(big, ch.ch),
+                _ if big.sub.is_some() || big.sup.is_some() => {
+                    let under = optional_slot(big.sub.as_ref());
+                    let over = optional_slot(big.sup.as_ref());
+                    self.template(23, 0, &[Slot::Node(&big.base), under, over], &[]);
+                }
+                _ => self.node(&big.base),
+            },
             // A style override has no record of its own; the body is written as it stands.
             Node::Styled(styled) => self.node(&styled.body),
             // A construct this crate could not represent is written as its text.
@@ -343,12 +356,8 @@ impl Writer<'_> {
         out
     }
 
-    fn big_op(&mut self, big: &mt_core::BigOp) {
-        let operator = match &big.base {
-            Node::Char(ch) => Some(ch.ch),
-            _ => None,
-        };
-        let selector = operator.map_or(22, big_selector);
+    fn big_op(&mut self, big: &mt_core::BigOp, operator: char) {
+        let selector = big_selector(operator);
         let mut variation = 0;
         if big.limits {
             variation |= 0x0040;
@@ -361,20 +370,17 @@ impl Writer<'_> {
         }
         if selector == 15 {
             variation |= match operator {
-                Some('\u{222C}') => 0x0002,
-                Some('\u{222D}') => 0x0003,
-                Some('\u{222E}') | Some('\u{222F}') | Some('\u{2230}') => 0x0004,
+                '\u{222C}' => 0x0002,
+                '\u{222D}' => 0x0003,
+                '\u{222E}' | '\u{222F}' | '\u{2230}' => 0x0004,
                 _ => 0x0001,
             };
         }
         let under = optional_slot(big.sub.as_ref());
         let over = optional_slot(big.sup.as_ref());
         // The operand of an operator with limits is a sibling in the equation tree, so the main
-        // slot is left out; an operator that is not a character keeps its contents there.
-        let main = match operator {
-            Some(_) => Slot::Absent,
-            None => Slot::Node(&big.base),
-        };
+        // slot is left out.
+        let main = Slot::Absent;
         self.out.push(TAG_TMPL);
         self.out.push(0);
         self.out.push(selector);
@@ -383,12 +389,8 @@ impl Writer<'_> {
         self.write_line(&main);
         self.write_line(&under);
         self.write_line(&over);
-        if let Some(ch) = operator {
-            let (class, font) = match &big.base {
-                Node::Char(ch) => (ch.class, ch.font),
-                _ => (Class::Op, Font::Upright),
-            };
-            self.character(ch, class, font, None);
+        if let Node::Char(ch) = &big.base {
+            self.character(operator, ch.class, ch.font, None);
         }
         self.out.push(TAG_END);
     }
@@ -440,7 +442,7 @@ impl Writer<'_> {
     fn character(&mut self, ch: char, class: Class, font: Font, typeface: Option<i32>) {
         self.out.push(TAG_CHAR);
         self.out.push(0);
-        let typeface = typeface.unwrap_or_else(|| self.typeface(font, class));
+        let typeface = typeface.unwrap_or_else(|| self.typeface(ch, font, class));
         self.signed(typeface);
         self.u16(u16::try_from(ch as u32).unwrap_or(0xFFFD));
     }
@@ -449,7 +451,7 @@ impl Writer<'_> {
     fn embellished_character(&mut self, ch: char, class: Class, font: Font, embellishments: &[u8]) {
         self.out.push(TAG_CHAR);
         self.out.push(OPT_CHAR_EMBELL);
-        let typeface = self.typeface(font, class);
+        let typeface = self.typeface(ch, font, class);
         self.signed(typeface);
         self.u16(u16::try_from(ch as u32).unwrap_or(0xFFFD));
         for embellishment in embellishments {
@@ -499,8 +501,11 @@ impl Writer<'_> {
         self.out.extend_from_slice(&value.to_le_bytes());
     }
 
-    /// The typeface a character is written with.
-    fn typeface(&self, font: Font, class: Class) -> i32 {
+    /// The typeface a character is written with. A character that is a large operator in its
+    /// own right reads back as one whatever class the tree gives it, so it is written in the
+    /// function style to keep the stream stable under a round trip.
+    fn typeface(&self, ch: char, font: Font, class: Class) -> i32 {
+        let class = if class_of_char(ch) == Class::Op { Class::Op } else { class };
         standard_typeface(font, class).unwrap_or_else(|| {
             let (name, bits) = explicit_font(font);
             let index = self
@@ -533,14 +538,26 @@ fn embellishment_chain(node: &Node) -> Option<(&mt_core::Char, Vec<u8>)> {
     }
 }
 
-/// The template selector, variation and decorative characters of a fence.
+/// The template selector, variation and decorative characters of a fence. A side only uses its
+/// family's template when it draws that family's own glyph on that side, so a custom delimiter
+/// pointing the wrong way falls through to the interval template.
 fn fence_template(open: Delim, close: Delim, left: bool, right: bool) -> (u8, u32, [Option<char>; 2]) {
     match (family_of(open), family_of(close)) {
-        (Some(open_family), Some(close_family)) if left && right && open_family.0 == close_family.0 => {
+        (Some(open_family), Some(close_family))
+            if left
+                && right
+                && open_family.0 == close_family.0
+                && natural_side(open, open_family, true)
+                && natural_side(close, close_family, false) =>
+        {
             (open_family.0, 0x0003, [Some(open_family.1), Some(close_family.2)])
         }
-        (Some(family), _) if !right => (family.0, 0x0001, [Some(family.1), None]),
-        (_, Some(family)) if !left => (family.0, 0x0002, [Some(family.2), None]),
+        (Some(family), _) if !right && natural_side(open, family, true) => {
+            (family.0, 0x0001, [Some(family.1), None])
+        }
+        (_, Some(family)) if !left && natural_side(close, family, false) => {
+            (family.0, 0x0002, [Some(family.2), None])
+        }
         _ => {
             let variation =
                 interval_code(open, true).unwrap_or(0) | interval_code(close, false).unwrap_or(0);
@@ -603,6 +620,93 @@ fn collect_fonts(node: &Node, fonts: &mut Vec<(String, u8)>) {
             }
         }
     });
+}
+
+/// The tree with every font override applied to the characters and text runs it covers.
+///
+/// The format has no record for a style that covers a range of material, so a font override is
+/// spelled by writing the covered characters in the overridden face; borrowing the tree keeps
+/// the common case — no overrides at all — free of copying.
+fn applied_fonts(node: &Node) -> std::borrow::Cow<'_, Node> {
+    if !overrides_font(node) {
+        return std::borrow::Cow::Borrowed(node);
+    }
+    std::borrow::Cow::Owned(apply_font(node, None))
+}
+
+/// Whether the tree carries a font override anywhere.
+fn overrides_font(node: &Node) -> bool {
+    let mut found = false;
+    node.walk(&mut |node| {
+        found |= matches!(node, Node::Styled(styled) if styled.font.is_some());
+    });
+    found
+}
+
+/// The node with `font` substituted for the face of every character and text run it covers.
+fn apply_font(node: &Node, font: Option<Font>) -> Node {
+    let apply = |node: &Node| apply_font(node, font);
+    match node {
+        Node::Row(row) => Node::Row(row.iter().map(apply).collect()),
+        Node::Char(ch) => Node::Char(Char { ch: ch.ch, class: ch.class, font: font.unwrap_or(ch.font) }),
+        Node::Text(text) => Node::Text(Box::new(TextRun { text: text.text.clone(), font: font.unwrap_or(text.font) })),
+        Node::Space(_) | Node::Align | Node::Error(_) => node.clone(),
+        Node::Frac(frac) => Node::Frac(Box::new(mt_core::Frac {
+            num: apply(&frac.num),
+            den: apply(&frac.den),
+            kind: frac.kind,
+        })),
+        Node::Sqrt(sqrt) => Node::Sqrt(Box::new(mt_core::Sqrt {
+            index: sqrt.index.as_ref().map(apply),
+            radicand: apply(&sqrt.radicand),
+        })),
+        Node::Scripts(scripts) => Node::Scripts(Box::new(mt_core::Scripts {
+            base: apply(&scripts.base),
+            sub: scripts.sub.as_ref().map(apply),
+            sup: scripts.sup.as_ref().map(apply),
+        })),
+        Node::Limits(limits) => Node::Limits(Box::new(mt_core::Limits {
+            base: apply(&limits.base),
+            under: limits.under.as_ref().map(apply),
+            over: limits.over.as_ref().map(apply),
+            align: limits.align,
+        })),
+        Node::Fence(fence) => Node::Fence(Box::new(mt_core::Fence {
+            open: fence.open,
+            close: fence.close,
+            body: apply(&fence.body),
+        })),
+        Node::Matrix(matrix) => Node::Matrix(Box::new(mt_core::Matrix {
+            rows: matrix.rows.iter().map(|row| row.iter().map(apply).collect()).collect(),
+            delims: matrix.delims,
+            kind: matrix.kind,
+            align: matrix.align,
+            columns: matrix.columns.clone(),
+            rules: matrix.rules,
+        })),
+        Node::Accent(accent) => Node::Accent(Box::new(mt_core::Accent {
+            kind: accent.kind,
+            base: apply(&accent.base),
+            under: accent.under,
+        })),
+        Node::Big(big) => Node::Big(Box::new(mt_core::BigOp {
+            base: apply(&big.base),
+            sub: big.sub.as_ref().map(apply),
+            sup: big.sup.as_ref().map(apply),
+            limits: big.limits,
+        })),
+        // A style override that names a font is applied by the substitution above; one that
+        // only names a style or a class has no record and keeps its wrapper.
+        Node::Styled(styled) => match styled.font {
+            Some(override_font) => apply_font(&styled.body, Some(override_font)),
+            None => Node::Styled(Box::new(Styled {
+                body: apply(&styled.body),
+                style: styled.style,
+                font: None,
+                class: styled.class,
+            })),
+        },
+    }
 }
 
 #[cfg(test)]
