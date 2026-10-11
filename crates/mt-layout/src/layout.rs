@@ -23,6 +23,8 @@ use mt_core::{
 };
 
 use crate::constants::*;
+use crate::spacing::Spacing;
+use crate::variants::math_variant;
 use crate::{Box, FontMetrics, LayoutStyle};
 
 /// A laid-out box together with its extents in points, relative to its own baseline origin.
@@ -281,7 +283,9 @@ fn layout_row(row: &[Node], ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     for (index, child) in row.iter().enumerate() {
         if atom_index.get(next_atom) == Some(&index) {
             if next_atom > 0 {
-                let kern = class_space(atom_class[next_atom - 1], atom_class[next_atom]) * size;
+                let kern =
+                    class_space(atom_class[next_atom - 1], atom_class[next_atom], &ctx.style.spacing)
+                        * size;
                 if kern != 0.0 {
                     items.push(Box::Kern { width: kern });
                     pen += kern;
@@ -352,9 +356,15 @@ fn demote_binary_operators(classes: &mut [Class]) {
 ///
 /// This is the TeXbook's table (chapter 18, rule 20) with the impossible entries — those a `Bin`
 /// would need to reach without being demoted — filled in with the ordinary-atom value, since
-/// [`demote_binary_operators`] has already rewritten them away.
-fn class_space(left: Class, right: Class) -> f64 {
-    CLASS_SPACING[class_index(left)][class_index(right)]
+/// [`demote_binary_operators`] has already rewritten them away. The table stores which kern of
+/// the spacing table each pair takes, so a style preset retunes all of them at once.
+fn class_space(left: Class, right: Class, spacing: &Spacing) -> f64 {
+    match CLASS_SPACING[class_index(left)][class_index(right)] {
+        1 => spacing.thin_kern,
+        2 => spacing.medium_kern,
+        3 => spacing.thick_kern,
+        _ => 0.0,
+    }
 }
 
 fn class_index(class: Class) -> usize {
@@ -370,60 +380,65 @@ fn class_index(class: Class) -> usize {
     }
 }
 
-/// Rows are the left atom, columns the right one, both in [`class_index`] order.
+/// Rows are the left atom, columns the right one, both in [`class_index`] order; `0` is no kern,
+/// `1` thin, `2` medium, `3` thick.
 #[rustfmt::skip]
-const CLASS_SPACING: [[f64; 8]; 8] = [
-    //          Ord         Op          Bin           Rel           Open        Close       Punct       Inner
-    /* Ord   */ [0.0,        THIN_KERN,  MEDIUM_KERN,  THICK_KERN,   0.0,        0.0,        THIN_KERN,  0.0],
-    /* Op    */ [THIN_KERN,  THIN_KERN,  MEDIUM_KERN,  THICK_KERN,   THIN_KERN,  0.0,        THIN_KERN,  THIN_KERN],
-    /* Bin   */ [MEDIUM_KERN,MEDIUM_KERN,MEDIUM_KERN,  THICK_KERN,   MEDIUM_KERN,0.0,        THIN_KERN,  MEDIUM_KERN],
-    /* Rel   */ [THICK_KERN, THICK_KERN, MEDIUM_KERN,  THICK_KERN,   THICK_KERN, 0.0,        THICK_KERN, THICK_KERN],
-    /* Open  */ [0.0,        0.0,        MEDIUM_KERN,  0.0,          0.0,        0.0,        0.0,        0.0],
-    /* Close */ [0.0,        THIN_KERN,  MEDIUM_KERN,  THICK_KERN,   0.0,        0.0,        THIN_KERN,  THIN_KERN],
-    /* Punct */ [THIN_KERN,  THIN_KERN,  MEDIUM_KERN,  THICK_KERN,   THIN_KERN,  0.0,        THIN_KERN,  THIN_KERN],
-    /* Inner */ [THIN_KERN,  THIN_KERN,  MEDIUM_KERN,  THICK_KERN,   THIN_KERN,  0.0,        THIN_KERN,  THIN_KERN],
+const CLASS_SPACING: [[u8; 8]; 8] = [
+    //          Ord    Op     Bin    Rel    Open   Close  Punct  Inner
+    /* Ord   */ [0,     1,     2,     3,     0,     0,     1,     0],
+    /* Op    */ [1,     1,     2,     3,     1,     0,     1,     1],
+    /* Bin    */ [2,     2,     2,     3,     2,     0,     1,     2],
+    /* Rel    */ [3,     3,     2,     3,     3,     0,     3,     3],
+    /* Open   */ [0,     0,     2,     0,     0,     0,     0,     0],
+    /* Close  */ [0,     1,     2,     3,     0,     0,     1,     1],
+    /* Punct  */ [1,     1,     2,     3,     1,     0,     1,     1],
+    /* Inner  */ [1,     1,     2,     3,     1,     0,     1,     1],
 ];
 
 // -------------------------------------------------------------------------------------------
 // Leaves
 // -------------------------------------------------------------------------------------------
 
-fn layout_char(character: Char, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
+/// Lay one glyph of the tree: `ch` in the already-resolved face `font`.
+///
+/// The codepoint moves to the mathematical alphanumeric variant of the face, so the glyph the
+/// metrics measure is the glyph the box draws.
+fn glyph_leaf(ch: char, font: Font, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let size = ctx.size();
-    let font = ctx.font_override.unwrap_or(character.font);
-    let advance = ctx.metrics.advance(character.ch, font) * size;
-    let height = ctx.metrics.height(character.ch, font) * size;
-    let depth = ctx.metrics.depth(character.ch, font) * size;
-    let glyph = Box::Glyph { ch: character.ch, font, x: ox, y: oy, size, yscale: 1.0 };
+    let ch = math_variant(ch, font);
+    let advance = ctx.metrics.advance(ch, font) * size;
+    let height = ctx.metrics.height(ch, font) * size;
+    let depth = ctx.metrics.depth(ch, font) * size;
+    let glyph = Box::Glyph { ch, font, x: ox, y: oy, size, yscale: 1.0 };
     leaf(glyph, advance, height, depth)
 }
 
+fn layout_char(character: Char, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
+    let font = ctx
+        .font_override
+        .unwrap_or_else(|| ctx.style.fonts.resolve(character.ch, character.class, character.font));
+    glyph_leaf(character.ch, font, ctx, ox, oy)
+}
+
 fn layout_text(run: &TextRun, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
-    let font = ctx.font_override.unwrap_or(run.font);
-    let mut items = Vec::new();
-    let mut pen = ox;
-    let mut height = 0.0_f64;
-    let mut depth = 0.0_f64;
-    for ch in run.text.chars() {
-        let laid = layout_char(Char { ch, class: Class::Ord, font }, ctx, pen, oy);
-        pen += laid.w;
-        height = height.max(laid.h);
-        depth = depth.max(laid.d);
-        items.push(laid.node);
-    }
-    let width = pen - ox;
-    Laid::new(Box::HBox { items, width, height, depth }, width, height, depth)
+    let font = ctx.font_override.unwrap_or_else(|| ctx.style.fonts.text_font(run.font));
+    text_leaf(run.text.chars(), font, ctx, ox, oy)
 }
 
 /// Unrepresentable construct: its message is set as upright text so a preview still shows it.
 fn layout_message(message: &str, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let font = ctx.font_override.unwrap_or(Font::Upright);
+    text_leaf(message.chars(), font, ctx, ox, oy)
+}
+
+/// Lay a run of characters that all share one face, tracking the pen and the extremes.
+fn text_leaf(chars: impl Iterator<Item = char>, font: Font, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let mut items = Vec::new();
     let mut pen = ox;
     let mut height = 0.0_f64;
     let mut depth = 0.0_f64;
-    for ch in message.chars() {
-        let laid = layout_char(Char { ch, class: Class::Ord, font }, ctx, pen, oy);
+    for ch in chars {
+        let laid = glyph_leaf(ch, font, ctx, pen, oy);
         pen += laid.w;
         height = height.max(laid.h);
         depth = depth.max(laid.d);
@@ -575,11 +590,12 @@ fn layout_stacked_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let numerator = layout_node(&frac.num, &numerator_ctx, 0.0, 0.0);
     let denominator = layout_node(&frac.den, &denominator_ctx, 0.0, 0.0);
 
+    let spacing = &ctx.style.spacing;
     let thickness = match frac.kind {
-        FracKind::Bar => ctx.em(FRAC_RULE_THICKNESS),
+        FracKind::Bar => ctx.em(spacing.frac_rule_thickness),
         _ => 0.0,
     };
-    let gap = if thickness > 0.0 { ctx.em(FRAC_RULE_GAP) } else { ctx.em(FRAC_NOBAR_GAP) };
+    let gap = if thickness > 0.0 { ctx.em(spacing.frac_rule_gap) } else { ctx.em(spacing.frac_nobar_gap) };
     let axis = ctx.metrics.axis_height() * ctx.size();
 
     let width = numerator.w.max(denominator.w);
@@ -621,8 +637,9 @@ fn layout_slash_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64, stacked: bool) ->
     let numerator = layout_node(&frac.num, &numerator_ctx, 0.0, 0.0);
     let denominator = layout_node(&frac.den, &denominator_ctx, 0.0, 0.0);
     let slash = layout_char(Char { ch: '/', class: Class::Ord, font: Font::Upright }, ctx, 0.0, 0.0);
-    let kern = ctx.em(FRAC_SLASH_KERN);
-    let shift = if stacked { ctx.em(FRAC_SLASH_SHIFT) } else { 0.0 };
+    let spacing = &ctx.style.spacing;
+    let kern = ctx.em(spacing.frac_slash_kern);
+    let shift = if stacked { ctx.em(spacing.frac_slash_shift) } else { 0.0 };
 
     let slash_x = ox + numerator.w + kern;
     let denominator_x = slash_x + slash.w + kern;
@@ -653,9 +670,10 @@ fn layout_sqrt(sqrt: &Sqrt, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let radicand = layout_node(&sqrt.radicand, &radicand_ctx, 0.0, 0.0);
 
     let font = ctx.font_override.unwrap_or(Font::Upright);
-    let gap = ctx.em(RADICAL_RULE_GAP);
-    let thickness = ctx.em(RADICAL_RULE_THICKNESS);
-    let kern = ctx.em(RADICAL_KERN);
+    let spacing = &ctx.style.spacing;
+    let gap = ctx.em(spacing.radical_rule_gap);
+    let thickness = ctx.em(spacing.radical_rule_thickness);
+    let kern = ctx.em(spacing.radical_kern);
     let top = radicand.h + gap + thickness;
     let sign = fit_glyph(ctx, '\u{221A}', font, top + radicand.d);
     let sign_y = align_top(&sign, top);
@@ -666,13 +684,13 @@ fn layout_sqrt(sqrt: &Sqrt, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     // How far the index reaches above the baseline, and where its own baseline goes.
     let index_span = index
         .as_ref()
-        .map(|laid| top + ctx.em(RADICAL_INDEX_GAP) + laid.d + laid.h);
+        .map(|laid| top + ctx.em(spacing.radical_index_gap) + laid.d + laid.h);
 
     let sign_x = ox + index_width;
     let radicand_x = sign_x + sign.advance + kern;
     let mut items = Vec::new();
     if let Some(index) = index {
-        let baseline = oy - top - ctx.em(RADICAL_INDEX_GAP) - index.d;
+        let baseline = oy - top - ctx.em(spacing.radical_index_gap) - index.d;
         let mut node = index.node;
         place(&mut node, &index_ctx, ox, baseline);
         items.push(node);
@@ -798,12 +816,13 @@ fn attach_scripts(
     ox: f64,
     oy: f64,
 ) -> Laid {
-    let kern = ctx.em(SCRIPT_KERN);
-    let offset = if ctx.cramped { 0.0 } else { ctx.em(SCRIPT_OFFSET) };
+    let spacing = &ctx.style.spacing;
+    let kern = ctx.em(spacing.script_kern);
+    let offset = if ctx.cramped { 0.0 } else { ctx.em(spacing.script_offset) };
     let mut raise = (base.h - base.d) / 2.0 + offset;
-    let drop = base.d + ctx.em(SUBSCRIPT_OFFSET);
+    let drop = base.d + ctx.em(spacing.subscript_offset);
     if let (Some(sub), Some(sup)) = (&sub, &sup) {
-        let needed = sup.d + sub.h + ctx.em(SCRIPT_MIN_GAP) - drop;
+        let needed = sup.d + sub.h + ctx.em(spacing.script_min_gap) - drop;
         if raise < needed {
             raise = needed;
         }
@@ -851,7 +870,8 @@ fn stack_limits(
     ox: f64,
     oy: f64,
 ) -> Laid {
-    let gap = ctx.em(LIMIT_GAP);
+    let spacing = &ctx.style.spacing;
+    let gap = ctx.em(spacing.limit_gap);
     let width = base
         .w
         .max(over.as_ref().map_or(0.0, |laid| laid.w))
@@ -893,7 +913,8 @@ fn stack_limits(
 fn layout_fence(fence: &Fence, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let body = layout_node(&fence.body, &ctx.slot(0), 0.0, 0.0);
     let font = ctx.font_override.unwrap_or(Font::Upright);
-    let kern = ctx.em(FENCE_KERN);
+    let spacing = &ctx.style.spacing;
+    let kern = ctx.em(spacing.fence_kern);
     let need = body.h + body.d;
     let centre = (body.d - body.h) / 2.0;
     let open = fence.open.open().map(|ch| (ch, fit_glyph(ctx, ch, font, need)));
@@ -972,7 +993,8 @@ fn layout_matrix(matrix: &Matrix, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         cells.push(laid_row);
     }
 
-    let separation = ctx.em(MATRIX_COL_SEPARATION);
+    let spacing = &ctx.style.spacing;
+    let separation = ctx.em(spacing.matrix_col_separation);
     let mut col_x = vec![0.0_f64; cols];
     let mut x = 0.0;
     for c in 0..cols {
@@ -997,7 +1019,7 @@ fn layout_matrix(matrix: &Matrix, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let table_d = stack_d + shift;
 
     let font = ctx.font_override.unwrap_or(Font::Upright);
-    let kern = ctx.em(FENCE_KERN);
+    let kern = ctx.em(spacing.fence_kern);
     let (open_delim, close_delim) = matrix.delims.unwrap_or_else(|| default_delims(matrix.kind));
     let need = table_h + table_d;
     let centre = (table_d - table_h) / 2.0;
@@ -1049,7 +1071,7 @@ fn layout_matrix(matrix: &Matrix, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     }
     items.push(Box::VBox { items: row_boxes, width: table_width, height: table_h, depth: table_d });
     if matrix.rules {
-        let thickness = ctx.em(MATRIX_RULE_THICKNESS);
+        let thickness = ctx.em(spacing.matrix_rule_thickness);
         for r in 1..rows {
             let boundary = (row_y[r - 1] + row_d[r - 1] + row_y[r] - row_h[r]) / 2.0;
             let rule = Box::Rule {
@@ -1119,14 +1141,15 @@ fn default_delims(kind: MatrixKind) -> (Delim, Delim) {
 fn layout_accent(accent: &Accent, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let base = layout_node(&accent.base, &ctx.slot(0), 0.0, 0.0);
     let size = ctx.size();
-    let gap = ctx.em(ACCENT_GAP);
+    let spacing = &ctx.style.spacing;
+    let gap = ctx.em(spacing.accent_gap);
     let over = !accent.under;
     let font = ctx.font_override.unwrap_or(Font::Upright);
 
     let mut accent_node: Box;
     let (accent_w, accent_h, accent_d);
     if matches!(accent.kind, AccentKind::Bar | AccentKind::Line | AccentKind::Strike) {
-        let thickness = ctx.em(ACCENT_RULE_THICKNESS);
+        let thickness = ctx.em(spacing.accent_rule_thickness);
         let y = match accent.kind {
             AccentKind::Strike => (base.d - base.h) / 2.0,
             _ if over => -(base.h + gap + thickness / 2.0),

@@ -5,7 +5,7 @@ use mt_core::{
     MatrixKind, Node, Scripts, Side, Space, Sqrt, Styled,
 };
 use mt_layout::{
-    constants as c, layout, ApproxMetrics, Box as LBox, FontMetrics, LayoutStyle,
+    constants as c, layout, math_base, ApproxMetrics, Box as LBox, FontMetrics, LayoutStyle,
 };
 
 /// A laid-out glyph, flattened out of the box tree for assertions.
@@ -64,7 +64,7 @@ fn glyphs(node: &LBox) -> Vec<Glyph> {
 fn glyph(node: &LBox, ch: char) -> Glyph {
     glyphs(node)
         .into_iter()
-        .find(|glyph| glyph.ch == ch)
+        .find(|glyph| glyph.ch == ch || math_base(glyph.ch) == Some(ch))
         .unwrap_or_else(|| panic!("no glyph {ch:?} in the box tree"))
 }
 
@@ -792,7 +792,7 @@ fn limits_nodes_do_not_enlarge_their_base() {
         align: Side::Center,
     })));
     for part in glyphs(&cases) {
-        close(part.size, if part.ch == 'x' { 7.0 } else { 10.0 });
+        close(part.size, if math_base(part.ch) == Some('x') { 7.0 } else { 10.0 });
     }
 
     let operator = lay(Node::Limits(Box::new(Limits {

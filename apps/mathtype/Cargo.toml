@@ -20,6 +20,7 @@ mt-mathml.workspace = true
 mt-mtef.workspace = true
 mt-omml.workspace = true
 mt-render.workspace = true
+mt-style-preset.workspace = true
 mt-tex.workspace = true
 eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
 egui = "0.36"

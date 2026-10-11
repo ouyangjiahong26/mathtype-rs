@@ -26,6 +26,10 @@ MathType 的功能面与文档互通能力。
 | 转换器 (translator) | 公式树与某外部格式之间的双向映射 | `mt-tex` / `mt-mathml` / `mt-omml` / `mt-mtef` |
 | 嵌入对象 (embedded object) | Word/WPS 文档中以对象形式存的公式，带可重新编辑的数据流 | `mt-mtef` |
 | 加载项 (add-in) | 宿主应用里提供公式命令的扩展 | `apps/`（Word、WPS）|
+| 样式预设 (style preset) | 字号、间距、字体槽与对齐默认值的一整套样式；文本格式，可导入导出 | `mt-style-preset` |
+| 字体槽 (style slot) | 功能样式（文本/函数/变量/希腊/符号/向量/数字）各自使用的字体 | `mt_layout::StyleFonts` |
+| 数学字母变体 (math variant) | 字母在某字体下的 Unicode 数学字母数字区码位，单一数学字体面内取字形 | `mt_layout::math_variant` |
+| 公式库 (formula library) | 用户数据目录下可检索、可插入的命名公式集 | `apps/mathtype/src/library.rs` |
 
 ## crate 地图
 
@@ -38,7 +42,8 @@ MathType 的功能面与文档互通能力。
 | `mt-mtef` | 嵌入对象数据流与偏好预设的读写 |
 | `mt-docx` | .docx 容器读写与轻索引：定位段落/公式/嵌入对象/图片，替换与插入，未触碰部件原样写回 |
 | `mt-html` | .docx → 网页导出：结构映射为 HTML，公式为行内 MathML（或 PNG），图片入 media/ 目录或 data URI 内嵌 |
-| `mt-layout` | 公式树 → 带位置的盒子树；字形度量抽象 |
+| `mt-style-preset` | 样式预设的文本格式、内置预设，与 `LayoutStyle`、MTEF 偏好的互转 |
+| `mt-layout` | 公式树 → 带位置的盒子树；字形度量抽象；间距表与字体槽可由预设注入 |
 | `mt-render` | 盒子树 → 屏幕 / PNG / SVG / EPS / WMF |
 | `mt-edit` | 编辑模型：光标导航、模板插入、撤销、面板内容 |
 | `apps/mathtype` | 桌面编辑器；同一份二进制还提供转换命令行与回环 HTTP 转换接口（供宿主加载项调用） |
