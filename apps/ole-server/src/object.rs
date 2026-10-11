@@ -24,13 +24,15 @@ use windows::Win32::Foundation::{
     OLE_E_ADVISENOTSUPPORTED, OLE_E_NOCONNECTION, OLE_E_NOTRUNNING, OLE_E_OLEVERB, RECTL, S_FALSE, SIZE,
 };
 use windows::Win32::Graphics::Gdi::{
-    BITMAPINFO, DIB_RGB_COLORS, GetDeviceCaps, HDC, LOGPIXELSX, LOGPIXELSY, LOGPALETTE, SRCCOPY, StretchDIBits,
+    BITMAPINFO, DIB_RGB_COLORS, GetDeviceCaps, HDC, LOGPIXELSX, LOGPIXELSY, LOGPALETTE, SRCCOPY, SetEnhMetaFileBits,
+    StretchDIBits,
 };
 use windows::Win32::System::Com::StructuredStorage::{IPersistStorage, IPersistStorage_Impl, IStorage};
 use windows::Win32::System::Com::{
     DISPATCH_FLAGS, DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT, DISPATCH_PROPERTYPUTREF, DISPPARAMS,
     DVASPECT, DVASPECT_CONTENT, DVTARGETDEVICE, EXCEPINFO, FORMATETC, IAdviseSink, IDataObject, IDataObject_Impl,
     IDispatch, IDispatch_Impl, IEnumFORMATETC, IEnumSTATDATA, IMoniker, IPersist_Impl, ITypeInfo, STGMEDIUM,
+    TYMED_ENHMF,
     STGMEDIUM_0, TYMED_HGLOBAL,
 };
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
@@ -38,6 +40,7 @@ use windows::Win32::System::Ole::{
     ACTIVEOBJECT_WEAK, IOleClientSite, IOleObject, IOleObject_Impl, IEnumOLEVERB, IViewObject2, IViewObject2_Impl,
     IViewObject_Impl, OLECLOSE, OLEGETMONIKER, OLEMISC, OLEMISC_RECOMPOSEONRESIZE,
     OLEMISC_RENDERINGISDEVICEINDEPENDENT, OLECLOSE_SAVEIFDIRTY, OLEWHICHMK, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY, OLEIVERB_SHOW,
+    CF_ENHMETAFILE,
     RegisterActiveObject, RevokeActiveObject, USERCLASSTYPE, USERCLASSTYPE_APPNAME, USERCLASSTYPE_SHORT,
 };
 use windows::Win32::System::Variant::VARIANT;
@@ -746,6 +749,25 @@ impl IDataObject_Impl for EquationObject_Impl {
             return Err(Error::from_hresult(reason));
         }
         let picture = self.picture()?;
+        if format.cfFormat == CF_ENHMETAFILE.0 {
+            // The vector picture: the metafile bytes become a GDI handle the host plays back at
+            // whatever size it is drawing, so zooming stays sharp.
+            let handle = unsafe { SetEnhMetaFileBits(&picture.emf) };
+            if handle.is_invalid() {
+                return Err(Error::new(E_FAIL, "the equation metafile could not be created"));
+            }
+            trace::log(&format!(
+                "GetData -> CF_ENHMETAFILE ({:.1}x{:.1} points), {} bytes",
+                picture.width_pt,
+                picture.height_pt,
+                picture.emf.len()
+            ));
+            return Ok(STGMEDIUM {
+                tymed: TYMED_ENHMF.0 as u32,
+                u: STGMEDIUM_0 { hEnhMetaFile: handle },
+                pUnkForRelease: ManuallyDrop::new(None),
+            });
+        }
         let bytes = &picture.dib;
         unsafe {
             let handle: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE, bytes.len())?;
@@ -807,7 +829,7 @@ impl IDataObject_Impl for EquationObject_Impl {
         if formats::unsupported_direction(dwdirection) {
             return Err(Error::from_hresult(E_NOTIMPL));
         }
-        trace::log("EnumFormatEtc -> CF_DIB, DVASPECT_CONTENT");
+        trace::log("EnumFormatEtc -> CF_ENHMETAFILE then CF_DIB, DVASPECT_CONTENT");
         Ok(FormatEnumerator::for_get())
     }
 
