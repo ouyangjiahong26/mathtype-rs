@@ -54,7 +54,7 @@ MathType 的功能面与文档互通能力。
 | `apps/mathtype` | 桌面编辑器；同一份二进制还提供转换命令行与回环 HTTP 转换接口（供宿主加载项调用） |
 | `apps/ole-server` | 嵌入对象服务器：宿主双击激活与保存写回（ADR 0002 为准） |
 | `apps/word-addin` | Word 加载项：在文档里插入/转换公式 |
-| `apps/wps-addin` | WPS 加载项：命令面为 Word 子集——插入（OLE 或图片）、转 LaTeX、导出 PNG、批量转换、导出网页、公式编号、交叉引用、检查转换服务 |
+| `apps/wps-addin` | WPS 加载项：命令面为 Word 子集——插入（OLE 或图片）、编辑公式对象（双击或按钮，经桥 /activate 拉起编辑器）、转 LaTeX、导出 PNG、批量转换、导出网页、公式编号、交叉引用、检查转换服务 |
 
 ## 约定
 

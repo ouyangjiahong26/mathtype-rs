@@ -36,7 +36,7 @@ const UI_FONT_CANDIDATES: [&str; 4] = [
 
 /// Input and output formats the command line converts between.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Format {
+pub(crate) enum Format {
     Latex,
     MathMl,
     Omml,
@@ -471,7 +471,7 @@ fn write_math(math: &mt_core::Math, to: Format, size: f64, scale: f64) -> Result
 }
 
 /// Write an equation out under the full preset `style`, so exports follow the active preset.
-fn write_math_with_style(
+pub(crate) fn write_math_with_style(
     math: &mt_core::Math,
     to: Format,
     style: &LayoutStyle,
@@ -484,6 +484,16 @@ fn write_math_with_style(
         Format::Mtef => mt_mtef::write(math),
         Format::Svg | Format::Png | Format::Eps => render_image_with_style(math, to, style, scale)?,
     })
+}
+
+/// Lay the equation out and serialise it as an Enhanced Metafile, for preview pictures that
+/// have to stay vector in their host.
+pub(crate) fn write_emf(math: &mt_core::Math, style: &LayoutStyle) -> Vec<u8> {
+    let Some(metrics) = FaceMetrics::parse(MATH_FONT, 0) else {
+        return Vec::new();
+    };
+    let boxes = layout(math, &metrics, style);
+    mt_render::render_emf(&boxes, style, metrics.face(), &mt_render::RenderOptions::default())
 }
 
 fn execute(job: Job) -> Result<(), String> {
