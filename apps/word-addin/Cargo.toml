@@ -14,6 +14,7 @@ crate-type = ["cdylib"]
 mt-core.workspace = true
 mt-docx.workspace = true
 mt-html.workspace = true
+mt-batch.workspace = true
 mt-layout.workspace = true
 mt-omml.workspace = true
 mt-render.workspace = true

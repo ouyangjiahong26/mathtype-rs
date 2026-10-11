@@ -8,6 +8,7 @@
 //!   (WPS loads its add-ins as web pages).
 
 mod library;
+mod batch;
 mod serve;
 
 use std::sync::Arc;
@@ -18,7 +19,7 @@ use eframe::egui::{
 };
 use mt_core::{Font, MathStyle, Side};
 use mt_edit::{Cursor, Editor, PaletteItem, palettes};
-use mt_layout::{layout, layout_with_anchors, to_svg, Box as LayoutBox, LayoutStyle, RowAnchor};
+use mt_layout::{Box as LayoutBox, LayoutStyle, RowAnchor, layout, layout_with_anchors, to_svg};
 use mt_render::metrics::{FaceMetrics, MATH_FONT};
 use mt_style_preset::StylePreset;
 
@@ -104,7 +105,9 @@ pub(crate) fn validate_size(size: f64) -> Result<f64, String> {
     if size.is_finite() && (MIN_SIZE..=MAX_SIZE).contains(&size) {
         Ok(size)
     } else {
-        Err(format!("size must be between {MIN_SIZE} and {MAX_SIZE} points"))
+        Err(format!(
+            "size must be between {MIN_SIZE} and {MAX_SIZE} points"
+        ))
     }
 }
 
@@ -120,12 +123,25 @@ pub(crate) fn validate_scale(scale: f64) -> Result<f64, String> {
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--serve") {
-        let port = args.get(1).and_then(|value| value.parse().ok()).unwrap_or(8760);
+        let port = args
+            .get(1)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(8760);
         if let Err(error) = serve::serve(port) {
             eprintln!("{error}");
             std::process::exit(1);
         }
         return Ok(());
+    }
+    if args.first().map(String::as_str) == Some("batch-convert") {
+        let code = match batch::run(&args[1..]) {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("{message}");
+                2
+            }
+        };
+        std::process::exit(code);
     }
     if args.first().map(String::as_str) == Some("export-html") {
         return match export_html(&args[1..]) {
@@ -137,7 +153,10 @@ fn main() -> eframe::Result<()> {
         };
     }
     if args.first().map(String::as_str) == Some("--edit") {
-        let path = args.get(1).cloned().unwrap_or_else(|| "equation.tex".to_owned());
+        let path = args
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| "equation.tex".to_owned());
         return run_editor(std::path::PathBuf::from(path));
     }
     if let Some(code) = run_cli(&args) {
@@ -148,7 +167,11 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default().with_inner_size([900.0, 560.0]),
         ..Default::default()
     };
-    eframe::run_native("mathtype-rs", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+    eframe::run_native(
+        "mathtype-rs",
+        options,
+        Box::new(|cc| Ok(Box::new(App::new(cc)))),
+    )
 }
 
 /// `mathtype export-html <in.docx> <outdir> [--script=...] [--math=...]`: the document to a
@@ -163,7 +186,9 @@ fn export_html(args: &[String]) -> Result<(), String> {
         index += 1;
         match argument {
             "--help" | "-h" => {
-                println!("mathtype export-html <in.docx> <outdir> [--script=none|mathjax|katex] [--math=mathml|image]");
+                println!(
+                    "mathtype export-html <in.docx> <outdir> [--script=none|mathjax|katex] [--math=mathml|image]"
+                );
                 return Ok(());
             }
             "--script" => {
@@ -206,9 +231,17 @@ fn export_html(args: &[String]) -> Result<(), String> {
 /// This is the hand-off used when an embedded object is opened from a document: the object server
 /// writes the equation out, starts this process, and picks the result up afterwards.
 fn run_editor(path: std::path::PathBuf) -> eframe::Result<()> {
-    let title = format!("公式编辑器 — {}", path.file_name().map_or_else(|| "equation".into(), |name| name.to_string_lossy().into_owned()));
+    let title = format!(
+        "公式编辑器 — {}",
+        path.file_name().map_or_else(
+            || "equation".into(),
+            |name| name.to_string_lossy().into_owned()
+        )
+    );
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([900.0, 560.0]).with_title(title),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([900.0, 560.0])
+            .with_title(title),
         ..Default::default()
     };
     eframe::run_native(
@@ -256,7 +289,7 @@ fn usage() {
          Examples:\n\
          mathtype '\\frac{{a}}{{b}}' --to omml\n\
          mathtype --from omml --to latex --in equation.xml\n\
-         mathtype export-html doc.docx web/   # --script=mathjax|katex|none, --math=mathml|image\n\
+         mathtype batch-convert doc.docx --to omath --mode replace --json   # 文档级批量转换\n\
          mathtype export-html doc.docx web/  # --script=mathjax|katex|none, --math=mathml|image\n\
          mathtype --serve 8760   # POST /convert?from=latex&to=omml for host add-ins"
     );
@@ -295,7 +328,8 @@ fn parse_job(args: &[String]) -> Result<Option<Job>, String> {
                 let value: f64 = read_value(args, &mut index, "--scale")?
                     .parse()
                     .map_err(|_| "--scale needs a positive number".to_owned())?;
-                job.scale = validate_scale(value).map_err(|message| format!("--scale {message}"))?;
+                job.scale =
+                    validate_scale(value).map_err(|message| format!("--scale {message}"))?;
             }
             other if other.starts_with("--") => return Err(format!("unknown option: {other}")),
             other => job.input = Some(other.to_owned()),
@@ -305,7 +339,10 @@ fn parse_job(args: &[String]) -> Result<Option<Job>, String> {
 }
 
 fn read_value(args: &[String], index: &mut usize, option: &str) -> Result<String, String> {
-    let value = args.get(*index).cloned().ok_or_else(|| format!("{option} needs a value"))?;
+    let value = args
+        .get(*index)
+        .cloned()
+        .ok_or_else(|| format!("{option} needs a value"))?;
     *index += 1;
     Ok(value)
 }
@@ -335,11 +372,18 @@ pub(crate) fn read_math(bytes: &[u8], from: Format) -> Result<mt_core::Math, Str
     match from {
         Format::Latex => {
             let text = as_text(bytes)?;
-            mt_tex::parse(text).map_err(|error| format!("LaTeX error at byte {}: {}", error.offset, error.message))
+            mt_tex::parse(text)
+                .map_err(|error| format!("LaTeX error at byte {}: {}", error.offset, error.message))
         }
-        Format::MathMl => mt_mathml::parse(as_text(bytes)?).map_err(|error| format!("MathML error: {error}")),
-        Format::Omml => mt_omml::parse(as_text(bytes)?).map_err(|error| format!("OMML error: {error}")),
-        Format::Mtef => mt_mtef::parse(bytes).map_err(|error| format!("equation stream error: {error}")),
+        Format::MathMl => {
+            mt_mathml::parse(as_text(bytes)?).map_err(|error| format!("MathML error: {error}"))
+        }
+        Format::Omml => {
+            mt_omml::parse(as_text(bytes)?).map_err(|error| format!("OMML error: {error}"))
+        }
+        Format::Mtef => {
+            mt_mtef::parse(bytes).map_err(|error| format!("equation stream error: {error}"))
+        }
         Format::Svg | Format::Png | Format::Eps => {
             Err(format!("{} cannot be read as an equation", from.name()))
         }
@@ -381,7 +425,10 @@ fn render_image_with_style(
     match to {
         Format::Svg => Ok(to_svg(&boxes, style).into_bytes()),
         Format::Png => {
-            let options = mt_render::RenderOptions { scale, ..Default::default() };
+            let options = mt_render::RenderOptions {
+                scale,
+                ..Default::default()
+            };
             // The bounds decide the allocation inside `render_png`, so measure them first and
             // refuse the ones that would exhaust the address space.
             let (width, height) = mt_render::image_size(&boxes, style, metrics.face(), &options);
@@ -419,12 +466,13 @@ fn write_math_with_style(
 fn execute(job: Job) -> Result<(), String> {
     let bytes = match (&job.input, &job.input_file) {
         (Some(text), _) => text.clone().into_bytes(),
-        (None, Some(path)) => {
-            std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?
-        }
+        (None, Some(path)) => std::fs::read(path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?,
         (None, None) => return Err("no input given: pass the text or use --in <file>".to_owned()),
     };
-    let from = job.from.unwrap_or_else(|| detect_format(&String::from_utf8_lossy(&bytes)));
+    let from = job
+        .from
+        .unwrap_or_else(|| detect_format(&String::from_utf8_lossy(&bytes)));
     let math = read_math(&bytes, from)?;
     let produced = write_math(&math, job.to, job.size, job.scale)?;
     match &job.out {
@@ -510,7 +558,11 @@ const STYLE_CHOICES: [(MathStyle, &str); 4] = [
 ];
 
 fn math_style_name(style: MathStyle) -> &'static str {
-    STYLE_CHOICES.iter().find(|(s, _)| *s == style).map(|(_, name)| *name).unwrap_or("?")
+    STYLE_CHOICES
+        .iter()
+        .find(|(s, _)| *s == style)
+        .map(|(_, name)| *name)
+        .unwrap_or("?")
 }
 
 /// Apply a font to the selection (or record it for the next keystroke), reporting a math change.
@@ -852,11 +904,19 @@ impl App {
         let mut style = self.style;
         style.size = style.size.min(16.0);
         let boxes = layout(&math, &self.metrics, &style);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), Sense::hover());
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 56.0), Sense::hover());
         let painter = ui.painter_at(rect);
         let origin = Pos2::new(rect.left() + 8.0, rect.center().y);
         let font_id = |size: f64| FontId::new(size as f32, FontFamily::Name(MATH_FAMILY.into()));
-        draw_boxes(&painter, &boxes, origin, &self.metrics, ui.visuals().weak_text_color(), &font_id);
+        draw_boxes(
+            &painter,
+            &boxes,
+            origin,
+            &self.metrics,
+            ui.visuals().weak_text_color(),
+            &font_id,
+        );
     }
 
     /// Write the equation to a file in the requested image format.
@@ -888,7 +948,12 @@ impl App {
                         }
                     }
                 }
-                egui::Event::Key { key, pressed: true, modifiers, .. } => match key {
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => match key {
                     egui::Key::Backspace => {
                         self.dirty |= self.editor.backspace();
                     }
@@ -923,7 +988,13 @@ impl App {
     }
 
     /// Draw the insertion point where the caret currently sits.
-    fn draw_caret(&self, painter: &egui::Painter, origin: Pos2, anchors: &[RowAnchor], color: Color32) {
+    fn draw_caret(
+        &self,
+        painter: &egui::Painter,
+        origin: Pos2,
+        anchors: &[RowAnchor],
+        color: Color32,
+    ) {
         let cursor = self.editor.cursor();
         let Some(anchor) = anchors.iter().find(|anchor| &anchor.path == &cursor.path) else {
             return;
@@ -1099,7 +1170,10 @@ impl eframe::App for App {
                 ui.separator();
                 let shown_style = self.editor.typing_style();
                 for (style, name) in STYLE_CHOICES {
-                    if ui.selectable_label(shown_style == Some(style), name).clicked() {
+                    if ui
+                        .selectable_label(shown_style == Some(style), name)
+                        .clicked()
+                    {
                         self.dirty |= apply_style_choice(&mut self.editor, style);
                     }
                 }
@@ -1151,13 +1225,16 @@ impl eframe::App for App {
                 if let Some(failure) = &self.parse_error {
                     let marker = error_marker(&self.tex_input, failure.offset);
                     ui.monospace(
-                        egui::RichText::new(marker).color(ui.visuals().error_fg_color).family(egui::FontFamily::Monospace),
+                        egui::RichText::new(marker)
+                            .color(ui.visuals().error_fg_color)
+                            .family(egui::FontFamily::Monospace),
                     );
                 }
                 ui.weak(style_status(&self.editor));
                 ui.horizontal(|ui| {
                     ui.label("输入");
-                    let input = egui::TextEdit::singleline(&mut self.tex_input).desired_width(520.0);
+                    let input =
+                        egui::TextEdit::singleline(&mut self.tex_input).desired_width(520.0);
                     let input_response = ui.add(input);
                     let convert = ui.button("导入公式").clicked();
                     let submitted = input_response.lost_focus()
@@ -1243,8 +1320,15 @@ fn caret_at(anchors: &[RowAnchor], origin: Pos2, point: Pos2) -> Option<Cursor> 
         for (index, offset) in anchor.offsets.iter().enumerate() {
             let x = origin.x + (anchor.origin.0 + offset) as f32;
             let cost = (point.x - x).abs() + (point.y - baseline).abs() * 8.0;
-            if cost <= MAX_HIT_COST && best.as_ref().is_none_or(|(best_cost, _)| cost < *best_cost) {
-                best = Some((cost, Cursor { path: anchor.path.clone(), index }));
+            if cost <= MAX_HIT_COST && best.as_ref().is_none_or(|(best_cost, _)| cost < *best_cost)
+            {
+                best = Some((
+                    cost,
+                    Cursor {
+                        path: anchor.path.clone(),
+                        index,
+                    },
+                ));
             }
         }
     }
@@ -1327,14 +1411,25 @@ fn current_font(editor: &Editor) -> Font {
 }
 
 fn font_name(font: Font) -> &'static str {
-    FONT_CHOICES.iter().find(|(f, _)| *f == font).map(|(_, name)| *name).unwrap_or("其他字体")
+    FONT_CHOICES
+        .iter()
+        .find(|(f, _)| *f == font)
+        .map(|(_, name)| *name)
+        .unwrap_or("其他字体")
 }
 
 /// One-line style state for the status area: what a style command will act on.
 fn style_status(editor: &Editor) -> String {
-    let scope = if editor.selection().is_some() { "选区" } else { "输入" };
+    let scope = if editor.selection().is_some() {
+        "选区"
+    } else {
+        "输入"
+    };
     let style = editor.typing_style().map(math_style_name).unwrap_or("继承");
-    format!("{scope}样式：字体 {}，字号 {style}", font_name(current_font(editor)))
+    format!(
+        "{scope}样式：字体 {}，字号 {style}",
+        font_name(current_font(editor))
+    )
 }
 
 /// One-line preset summary for the side panel.
@@ -1357,9 +1452,10 @@ fn preset_status(preset: &StylePreset) -> String {
 /// Register the math face, plus a system face for the CJK interface labels when one loads.
 fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
-    fonts
-        .font_data
-        .insert(MATH_FAMILY.to_owned(), Arc::new(FontData::from_static(MATH_FONT)));
+    fonts.font_data.insert(
+        MATH_FAMILY.to_owned(),
+        Arc::new(FontData::from_static(MATH_FONT)),
+    );
     fonts
         .families
         .entry(FontFamily::Name(MATH_FAMILY.into()))
@@ -1374,9 +1470,15 @@ fn install_fonts(ctx: &egui::Context) {
         if ttf_parser::Face::parse(&bytes, 0).is_err() {
             continue;
         }
-        fonts.font_data.insert("ui-cjk".to_owned(), Arc::new(FontData::from_owned(bytes)));
+        fonts
+            .font_data
+            .insert("ui-cjk".to_owned(), Arc::new(FontData::from_owned(bytes)));
         for family in [FontFamily::Proportional, FontFamily::Monospace] {
-            fonts.families.entry(family).or_default().push("ui-cjk".to_owned());
+            fonts
+                .families
+                .entry(family)
+                .or_default()
+                .push("ui-cjk".to_owned());
         }
         break;
     }
@@ -1400,13 +1502,27 @@ fn draw_boxes(
                 draw_boxes(painter, item, origin, metrics, color, font_id);
             }
         }
-        LayoutBox::Glyph { ch, font, x, y, size, yscale } => {
+        LayoutBox::Glyph {
+            ch,
+            font,
+            x,
+            y,
+            size,
+            yscale,
+        } => {
             let size = size * yscale;
             let position = origin + Vec2::new(*x as f32, (*y - metrics.ascender() * size) as f32);
             let _ = font;
             painter.text(position, Align2::LEFT_TOP, ch, font_id(size), color);
         }
-        LayoutBox::Rule { x, y, width, height, depth, dashed } => {
+        LayoutBox::Rule {
+            x,
+            y,
+            width,
+            height,
+            depth,
+            dashed,
+        } => {
             let top = origin + Vec2::new(*x as f32, (*y - *height) as f32);
             let bottom = origin + Vec2::new((*x + *width) as f32, (*y + *depth) as f32);
             let rect = Rect::from_min_max(top, bottom);
@@ -1427,15 +1543,27 @@ fn dashed_rect(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
     let mut x = rect.left();
     while x < rect.right() {
         let end = (x + DASH).min(rect.right());
-        painter.line_segment([Pos2::new(x, rect.top()), Pos2::new(end, rect.top())], stroke);
-        painter.line_segment([Pos2::new(x, rect.bottom()), Pos2::new(end, rect.bottom())], stroke);
+        painter.line_segment(
+            [Pos2::new(x, rect.top()), Pos2::new(end, rect.top())],
+            stroke,
+        );
+        painter.line_segment(
+            [Pos2::new(x, rect.bottom()), Pos2::new(end, rect.bottom())],
+            stroke,
+        );
         x += DASH * 2.0;
     }
     let mut y = rect.top();
     while y < rect.bottom() {
         let end = (y + DASH).min(rect.bottom());
-        painter.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.left(), end)], stroke);
-        painter.line_segment([Pos2::new(rect.right(), y), Pos2::new(rect.right(), end)], stroke);
+        painter.line_segment(
+            [Pos2::new(rect.left(), y), Pos2::new(rect.left(), end)],
+            stroke,
+        );
+        painter.line_segment(
+            [Pos2::new(rect.right(), y), Pos2::new(rect.right(), end)],
+            stroke,
+        );
         y += DASH * 2.0;
     }
 }
@@ -1557,7 +1685,8 @@ mod tests {
         let point = move |item: usize| {
             let mid = (root.offsets[item] + root.offsets[item + 1]) / 2.0;
             // Nudge right of the midpoint so the nearest insertion point is unambiguous.
-            let x = root.origin.0 + mid + (root.offsets[item + 1] - root.offsets[item]).max(2.0) * 0.1;
+            let x =
+                root.origin.0 + mid + (root.offsets[item + 1] - root.offsets[item]).max(2.0) * 0.1;
             Pos2::new(x as f32, root.origin.1 as f32)
         };
         (editor, anchors, Box::new(point))
@@ -1566,22 +1695,60 @@ mod tests {
     #[test]
     fn drag_press_then_move_grows_the_selection() {
         let (mut editor, anchors, point) = drag_fixture();
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(1), PointerPhase::Press);
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(1),
+            PointerPhase::Press,
+        );
         assert_eq!(editor.selection(), None, "a press alone selects nothing");
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(3), PointerPhase::Drag);
-        assert_eq!(editor.selection(), Some((2, 4)), "drag covers items 2 and 3");
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(3),
+            PointerPhase::Drag,
+        );
+        assert_eq!(
+            editor.selection(),
+            Some((2, 4)),
+            "drag covers items 2 and 3"
+        );
     }
 
     #[test]
     fn clicking_blank_canvas_drops_the_selection_without_moving_the_caret() {
         let (mut editor, anchors, point) = drag_fixture();
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(1), PointerPhase::Press);
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(3), PointerPhase::Drag);
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(1),
+            PointerPhase::Press,
+        );
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(3),
+            PointerPhase::Drag,
+        );
         assert!(editor.selection().is_some());
         let before = editor.cursor().clone();
-        assert!(!apply_pointer(&mut editor, &anchors, Pos2::ZERO, Pos2::new(9000.0, 9000.0), PointerPhase::Click));
+        assert!(!apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            Pos2::new(9000.0, 9000.0),
+            PointerPhase::Click
+        ));
         assert_eq!(editor.selection(), None, "blank click clears the selection");
-        assert_eq!(editor.cursor(), &before, "blank click leaves the caret alone");
+        assert_eq!(
+            editor.cursor(),
+            &before,
+            "blank click leaves the caret alone"
+        );
     }
 
     #[test]
@@ -1594,11 +1761,27 @@ mod tests {
     #[test]
     fn font_choice_applies_to_the_selection_and_reports_the_change() {
         let (mut editor, anchors, point) = drag_fixture();
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(0), PointerPhase::Press);
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(1), PointerPhase::Drag);
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(0),
+            PointerPhase::Press,
+        );
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(1),
+            PointerPhase::Drag,
+        );
         assert_eq!(editor.selection(), Some((1, 2)));
         assert!(apply_font_choice(&mut editor, Font::Bold));
-        assert_eq!(current_font(&editor), Font::Bold, "the panel reflects the selection");
+        assert_eq!(
+            current_font(&editor),
+            Font::Bold,
+            "the panel reflects the selection"
+        );
         let latex = mt_tex::to_latex(editor.math());
         assert!(latex.contains("\\mathbf"), "{latex}");
         // With no selection the same command only arms the typing font.
@@ -1611,8 +1794,20 @@ mod tests {
     #[test]
     fn style_choice_applies_a_size_preset_to_the_selection() {
         let (mut editor, anchors, point) = drag_fixture();
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(1), PointerPhase::Press);
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(2), PointerPhase::Drag);
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(1),
+            PointerPhase::Press,
+        );
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(2),
+            PointerPhase::Drag,
+        );
         assert!(apply_style_choice(&mut editor, MathStyle::Script));
         assert_eq!(editor.typing_style(), Some(MathStyle::Script));
         let latex = mt_tex::to_latex(editor.math());
@@ -1622,8 +1817,16 @@ mod tests {
     #[test]
     fn style_status_names_the_font_and_scope() {
         let editor = Editor::new();
-        assert!(style_status(&editor).contains("输入"), "{}", style_status(&editor));
-        assert!(style_status(&editor).contains("变量体"), "{}", style_status(&editor));
+        assert!(
+            style_status(&editor).contains("输入"),
+            "{}",
+            style_status(&editor)
+        );
+        assert!(
+            style_status(&editor).contains("变量体"),
+            "{}",
+            style_status(&editor)
+        );
     }
 
     #[test]
@@ -1634,17 +1837,43 @@ mod tests {
         assert_eq!(lines.next(), Some("        ^"), "caret sits under byte 8");
         // Offsets on later lines indent the caret accordingly.
         let marker = error_marker("x + y\n\\sqrt{", 8);
-        assert_eq!(marker.lines().nth(1), Some("  ^"), "byte 8 is column 2 of line 2");
+        assert_eq!(
+            marker.lines().nth(1),
+            Some("  ^"),
+            "byte 8 is column 2 of line 2"
+        );
     }
 
     #[test]
     fn acceptance_drag_bold_template_undo_redo_keeps_every_step() {
         let (mut editor, anchors, point) = drag_fixture();
         // 1. drag-select `b`.
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(0), PointerPhase::Press);
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(0), PointerPhase::Drag);
-        assert_eq!(editor.selection(), None, "dragging within one item selects nothing");
-        apply_pointer(&mut editor, &anchors, Pos2::ZERO, point(1), PointerPhase::Drag);
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(0),
+            PointerPhase::Press,
+        );
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(0),
+            PointerPhase::Drag,
+        );
+        assert_eq!(
+            editor.selection(),
+            None,
+            "dragging within one item selects nothing"
+        );
+        apply_pointer(
+            &mut editor,
+            &anchors,
+            Pos2::ZERO,
+            point(1),
+            PointerPhase::Drag,
+        );
         // 2. apply bold to the selection.
         assert!(apply_font_choice(&mut editor, Font::Bold));
         let bolded = mt_tex::to_latex(editor.math());

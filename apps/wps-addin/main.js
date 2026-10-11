@@ -280,6 +280,99 @@ function OnExportHtml(control) {
   xhr.send(data);
 }
 
+// Batch-convert every formula of the document through the bridge (#13). The document is
+// read as bytes, POSTed to /batch, and the answer is JSON: the report plus, in replace
+// mode, the rewritten .docx base64-encoded. The converted document is saved next to the
+// original as <名>-converted.docx; the original is never touched in place.
+function OnBatchConvert(control) {
+  var app = hostApp();
+  var doc = app.ActiveDocument;
+  if (!doc || !doc.FullName || !doc.Path) {
+    alert('请先保存文档，再执行“批量转换”。');
+    return;
+  }
+  var sep = doc.Path.indexOf('\\') >= 0 ? '\\' : '/';
+  var outPath = doc.Path + sep + stripExtension(doc.Name) + '-converted.docx';
+  var format = 'omath';
+  try {
+    var asked = window.prompt('目标格式：latex / mathml / omath / png', 'omath');
+    if (asked === null) return;
+    asked = (asked || '').replace(/\s/g, '').toLowerCase();
+    if (asked === 'latex' || asked === 'mathml' || asked === 'omath' || asked === 'png') {
+      format = asked;
+    }
+  } catch (e) { /* keep the default */ }
+  var data;
+  try {
+    data = app.FileSystem.readAsBinaryString(doc.FullName);
+  } catch (e) {
+    alert('读取文档失败：' + (e && e.message ? e.message : e));
+    return;
+  }
+  var xhr = new XMLHttpRequest();
+  // x-user-defined keeps the .docx bytes one-character-per-byte on the way in.
+  xhr.open('POST', BRIDGE_BASE + '/batch?to=' + format + '&mode=replace', true);
+  xhr.overrideMimeType('text/plain; charset=x-user-defined');
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4) return;
+    if (xhr.status !== 200) {
+      alert(bridgeUnreachableMessage('HTTP ' + xhr.status + ': ' + xhr.responseText));
+      return;
+    }
+    var answer;
+    try {
+      answer = JSON.parse(xhr.responseText);
+    } catch (e) {
+      alert('批量转换返回了无法解析的结果：' + (e && e.message ? e.message : e));
+      return;
+    }
+    var report = answer.report || {};
+    if (report.mode !== 'replace' || typeof answer.docx !== 'string') {
+      alert('批量转换返回了意外的结果形态。');
+      return;
+    }
+    try {
+      writeBinaryFile(outPath, base64ToBinary(answer.docx));
+    } catch (e) {
+      alert('写入转换后的文档失败：' + (e && e.message ? e.message : e) + '\n路径：' + outPath);
+      return;
+    }
+    var summary = '批量转换完成：共 ' + (report.total || 0) + ' 个，成功 ' +
+      (report.succeeded || 0) + '，失败 ' + ((report.failures || []).length) + '。\n' +
+      '已另存为：' + outPath;
+    var failures = report.failures || [];
+    for (var i = 0; i < failures.length && i < 5; i++) {
+      summary += '\n  #' + failures[i].index + ' ' + failures[i].location + '：' + failures[i].error;
+    }
+    if (failures.length > 5) summary += '\n  …（其余见转换服务日志）';
+    summary += '\n注意：整篇文档级转换；原文档未被修改。';
+    alert(summary);
+  };
+  xhr.onerror = function () { alert(bridgeUnreachableMessage('网络错误')); };
+  xhr.send(data);
+}
+
+// Decode standard base64 back into a one-character-per-byte binary string.
+function base64ToBinary(text) {
+  var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  var out = [];
+  var buffer = 0, bits = 0;
+  for (var i = 0; i < text.length; i++) {
+    var ch = text.charAt(i);
+    if (ch === '=') break;
+    var value = alphabet.indexOf(ch);
+    if (value < 0) continue;
+    buffer = (buffer << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push(String.fromCharCode((buffer >> bits) & 0xff));
+    }
+  }
+  return out.join('');
+}
+
 // Probe the bridge and report the result.
 function OnCheckBridge(control) {
   bridgeGet('/health', function (err, body) {

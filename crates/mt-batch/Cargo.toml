@@ -1,0 +1,19 @@
+[package]
+name = "mt-batch"
+description = "Document-level batch conversion of every formula in a Word document."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core.workspace = true
+mt-docx.workspace = true
+mt-layout.workspace = true
+mt-mathml.workspace = true
+mt-omml.workspace = true
+mt-render.workspace = true
+mt-tex.workspace = true
+
+[dev-dependencies]
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
