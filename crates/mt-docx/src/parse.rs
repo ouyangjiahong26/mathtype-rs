@@ -104,7 +104,7 @@ impl<'a> Scanner<'a> {
             match event {
                 Event::Start(start) => match start.local_name().as_ref() {
                     "p" => {
-                        let paragraph = self.scan_paragraph(range.start, 0)?;
+                        let paragraph = self.scan_paragraph(range.start, range.end, 0)?;
                         blocks.push(Block::Paragraph(paragraph));
                     }
                     "tbl" => {
@@ -189,7 +189,7 @@ impl<'a> Scanner<'a> {
             match event {
                 Event::Start(start) => match start.local_name().as_ref() {
                     "p" => {
-                        let paragraph = self.scan_paragraph(range.start, depth)?;
+                        let paragraph = self.scan_paragraph(range.start, range.end, depth)?;
                         blocks.push(Block::Paragraph(paragraph));
                     }
                     "tbl" => {
@@ -213,9 +213,15 @@ impl<'a> Scanner<'a> {
     }
 
     /// Indexes one `w:p`: its style, whether it is part of a list, and its item sequence.
-    fn scan_paragraph(&mut self, start: usize, table_depth: usize) -> Result<Paragraph, DocxError> {
+    fn scan_paragraph(
+        &mut self,
+        start: usize,
+        open_tag_end: usize,
+        table_depth: usize,
+    ) -> Result<Paragraph, DocxError> {
         let mut style = None;
         let mut numbered = false;
+        let mut properties_open_end = None;
         let mut items: Vec<Item> = Vec::new();
         // The start of a stretch of unrecognised content, closed when a recognised item begins.
         let mut pending: Option<usize> = None;
@@ -223,6 +229,8 @@ impl<'a> Scanner<'a> {
             let Some((event, range)) = self.next()? else {
                 return Ok(Paragraph {
                     range: start..self.length,
+                    open_tag_end,
+                    properties_open_end,
                     content_end: self.length,
                     style,
                     numbered,
@@ -233,6 +241,7 @@ impl<'a> Scanner<'a> {
             match event {
                 Event::Start(start) => match start.local_name().as_ref() {
                     "pPr" => {
+                        properties_open_end = Some(range.end);
                         pending.get_or_insert(range.start);
                         self.read_paragraph_properties(&mut style, &mut numbered)?;
                     }
@@ -272,6 +281,8 @@ impl<'a> Scanner<'a> {
                     close_pending(&mut pending, &mut items, range.start);
                     break Ok(Paragraph {
                         range: start..range.end,
+                        open_tag_end,
+                        properties_open_end,
                         content_end: range.start,
                         style,
                         numbered,
@@ -485,6 +496,8 @@ struct PictureFindings {
 fn empty_paragraph(range: &Range<usize>) -> Paragraph {
     Paragraph {
         range: range.clone(),
+        open_tag_end: range.end,
+        properties_open_end: None,
         content_end: range.end,
         style: None,
         numbered: false,

@@ -1194,6 +1194,7 @@ dependencies = [
  "mt-layout",
  "mt-mathml",
  "mt-mtef",
+ "mt-numbering",
  "mt-omml",
  "mt-render",
  "mt-style-preset",
@@ -1224,6 +1225,7 @@ dependencies = [
  "mt-docx",
  "mt-html",
  "mt-layout",
+ "mt-numbering",
  "mt-omml",
  "mt-render",
  "mt-tex",
@@ -1351,6 +1353,18 @@ dependencies = [
  "cfb",
  "mt-core",
  "mt-tex",
+]
+
+[[package]]
+name = "mt-numbering"
+version = "0.1.0"
+dependencies = [
+ "mt-core",
+ "mt-docx",
+ "mt-omml",
+ "mt-tex",
+ "quick-xml 0.42.0",
+ "zip",
 ]
 
 [[package]]

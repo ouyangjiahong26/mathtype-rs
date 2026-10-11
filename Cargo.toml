@@ -24,6 +24,7 @@ mt-docx = { path = "crates/mt-docx" }
 mt-html = { path = "crates/mt-html" }
 mt-style-preset = { path = "crates/mt-style-preset" }
 mt-batch = { path = "crates/mt-batch" }
+mt-numbering = { path = "crates/mt-numbering" }
 
 [profile.release]
 lto = "thin"

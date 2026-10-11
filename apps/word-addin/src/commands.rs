@@ -348,6 +348,79 @@ fn absent_member(error: &windows::core::Error) -> bool {
     error.code() == DISP_E_MEMBERNOTFOUND || error.code() == DISP_E_UNKNOWNNAME
 }
 
+/// The document's whole markup as Word writes it, the add-in's view of what is already there.
+fn document_xml(application: &Object) -> Result<String, String> {
+    let document = word::active_document(application).map_err(failed("the document could not be read"))?;
+    let content = document.get_object("Content").map_err(failed("the document could not be read"))?;
+    content.get_string("WordOpenXML").map_err(failed("the document could not be read"))
+}
+
+/// Inserts raw WordprocessingML at the selection, replacing it.
+fn insert_xml(selection: &Object, xml: &str) -> Result<(), String> {
+    let range = selection.get_object("Range").map_err(failed("the selection could not be read"))?;
+    range.call("InsertXML", vec![Variant::bstr(xml)]).map_err(failed("the markup could not be inserted"))?;
+    Ok(())
+}
+
+/// Inserts the selected LaTeX as a numbered equation: the equation, a tab, and the number as a
+/// Word field, wrapped in the bookmark a cross-reference points at (#11).
+///
+/// The style and side come from the document's numbering settings (the hidden `MTNumberSettings`
+/// marker), so a document numbered in one shape keeps that shape.
+pub fn insert_numbered_equation(application: &Object) -> Outcome {
+    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
+    let latex = selected_latex(&selection)?;
+    let math = mt_tex::parse(&latex).map_err(|error| format!("not LaTeX: {error}"))?;
+    let xml = document_xml(application)?;
+    let (style, side) = mt_numbering::parse_settings(&xml);
+    let (bookmark, id) = mt_numbering::unique_bookmark_in_xml(&xml);
+    let markup = mt_numbering::numbered_paragraph_standalone(
+        &mt_omml::write(&math),
+        style,
+        side,
+        &bookmark,
+        id,
+    );
+    insert_xml(&selection, &markup)?;
+    Ok(format!("numbered equation inserted as {bookmark}: {latex}"))
+}
+
+/// Inserts the paragraph of reset fields that starts a new numbering chapter (#11).
+pub fn insert_chapter_break(application: &Object) -> Outcome {
+    insert_break(application, mt_numbering::BreakKind::Chapter)
+}
+
+/// Inserts the paragraph of reset fields that starts a new numbering section (#11).
+pub fn insert_section_break(application: &Object) -> Outcome {
+    insert_break(application, mt_numbering::BreakKind::Section)
+}
+
+fn insert_break(application: &Object, kind: mt_numbering::BreakKind) -> Outcome {
+    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
+    let xml = document_xml(application)?;
+    let index = mt_numbering::break_count_in_xml(&xml, kind) + 1;
+    let markup = mt_numbering::break_paragraph_standalone(kind, index);
+    insert_xml(&selection, &markup)?;
+    Ok(format!("{} break {} inserted; update fields to renumber", kind.as_str(), index))
+}
+
+/// Inserts a cross-reference to the most recently numbered equation (#11): a REF field on its
+/// bookmark, at the selection.
+pub fn insert_cross_reference(application: &Object) -> Outcome {
+    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
+    let xml = document_xml(application)?;
+    let numbered = mt_numbering::numbered_in_xml(&xml);
+    let Some((number, bookmark)) = numbered.last() else {
+        return Err("the document holds no numbered equation to reference".to_string());
+    };
+    let markup = format!(
+        "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{}</w:p>",
+        mt_numbering::reference_runs(bookmark, *number)
+    );
+    insert_xml(&selection, &markup)?;
+    Ok(format!("cross-reference to equation {number} ({bookmark}) inserted"))
+}
+
 /// A command the ribbon can invoke.
 ///
 /// The name is the member Office finds with `GetIDsOfNames`; the id is what the object answers to
@@ -368,11 +441,19 @@ pub enum Command {
     ExportHtml,
     /// `BatchConvertDocument`: every formula of the document (or selection) becomes Office Math.
     BatchConvert,
+    /// `InsertNumberedEquation`: the selected LaTeX becomes an equation with a field number.
+    InsertNumberedEquation,
+    /// `InsertChapterBreak`: the reset fields that start a new numbering chapter.
+    InsertChapterBreak,
+    /// `InsertSectionBreak`: the reset fields that start a new numbering section.
+    InsertSectionBreak,
+    /// `InsertCrossReference`: a REF field on the most recent number.
+    InsertCrossReference,
 }
 
 impl Command {
     /// Every command, for the name and member id lookups.
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 11] = [
         Self::InsertObject,
         Self::ToEquation,
         Self::ToLatex,
@@ -380,6 +461,10 @@ impl Command {
         Self::ExportPng,
         Self::ExportHtml,
         Self::BatchConvert,
+        Self::InsertNumberedEquation,
+        Self::InsertChapterBreak,
+        Self::InsertSectionBreak,
+        Self::InsertCrossReference,
     ];
 
     /// The member name Office finds the command under.
@@ -392,6 +477,10 @@ impl Command {
             Self::ExportPng => "ExportSelectionPng",
             Self::ExportHtml => "ExportDocumentHtml",
             Self::BatchConvert => "BatchConvertDocument",
+            Self::InsertNumberedEquation => "InsertNumberedEquation",
+            Self::InsertChapterBreak => "InsertChapterBreak",
+            Self::InsertSectionBreak => "InsertSectionBreak",
+            Self::InsertCrossReference => "InsertCrossReference",
         }
     }
 
@@ -405,6 +494,10 @@ impl Command {
             Self::ExportPng => 104,
             Self::ExportHtml => 105,
             Self::BatchConvert => 106,
+            Self::InsertNumberedEquation => 107,
+            Self::InsertChapterBreak => 108,
+            Self::InsertSectionBreak => 109,
+            Self::InsertCrossReference => 110,
         }
     }
 
@@ -428,6 +521,10 @@ impl Command {
             Self::ExportPng => export_png(application),
             Self::ExportHtml => export_html(application),
             Self::BatchConvert => batch_convert(application),
+            Self::InsertNumberedEquation => insert_numbered_equation(application),
+            Self::InsertChapterBreak => insert_chapter_break(application),
+            Self::InsertSectionBreak => insert_section_break(application),
+            Self::InsertCrossReference => insert_cross_reference(application),
         }
     }
 }

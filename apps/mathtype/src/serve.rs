@@ -9,6 +9,8 @@
 //! POST /svg?latex=...&size=18             -> svg document
 //! POST /export-html?script=mathjax body=.docx -> one self-contained HTML page
 //! POST /batch?to=&mode=&dpi= body=.docx -> JSON report (+ base64 docx in replace mode)
+//! POST /number?style=&side=&at= body=.docx -> JSON {"docx": base64, "count": n}
+//! POST /crossref?to=N|latest body=.docx -> JSON {"docx": base64, "bookmark": name}
 //! ```
 //!
 //! Only the loopback interface is bound, and the server stops when its process does.
@@ -147,6 +149,8 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("POST", "/svg") => svg(&mut stream, &query, &request.body),
         ("POST", "/export-html") => export_html(&mut stream, &query, &request.body),
         ("POST", "/batch") => batch(&mut stream, &query, &request.body),
+        ("POST", "/number") => number(&mut stream, &query, &request.body),
+        ("POST", "/crossref") => crossref(&mut stream, &query, &request.body),
         ("GET", _) | ("POST", _) => respond(&mut stream, 404, "text/plain", "unknown path"),
         _ => respond(&mut stream, 405, "text/plain", "method not allowed"),
     }?;
@@ -350,6 +354,109 @@ fn batch(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, String
         format!("{}{}}}", &json[..json.len() - 1], docx)
     };
     respond(stream, 200, "application/json", &json)
+}
+
+/// POST /number?style=plain|chapter|section|paragraph&side=right|left[&at=N], body a .docx
+/// container: equation numbering (#11), the same work `mathtype number` does.
+///
+/// The answer is JSON like /batch in replace mode: `{"count": n, "docx": "<base64>"}` — the
+/// rewritten container, base64 so a browser host can write it out byte-for-byte.
+fn number(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, String> {
+    fn bad(stream: &mut TcpStream, message: String) -> Result<u16, String> {
+        respond(stream, 400, "text/plain", &message)
+    }
+    let style = match parameter(query, "style") {
+        None => mt_numbering::NumberStyle::Plain,
+        Some(value) => match mt_numbering::NumberStyle::parse(&value) {
+            Some(style) => style,
+            None => {
+                return bad(
+                    stream,
+                    format!("unknown ?style= {value}: plain, chapter, section, or paragraph"),
+                );
+            }
+        },
+    };
+    let side = match parameter(query, "side") {
+        None => mt_numbering::Side::Right,
+        Some(value) => match mt_numbering::Side::parse(&value) {
+            Some(side) => side,
+            None => return bad(stream, format!("unknown ?side= {value}: right or left")),
+        },
+    };
+    let at = match parameter(query, "at") {
+        Some(value) => match value.parse() {
+            Ok(at) => Some(at),
+            Err(_) => return bad(stream, "?at= must be a 1-based equation number".to_owned()),
+        },
+        None => None,
+    };
+    let opened = mt_docx::Document::open(body);
+    let mut document = match opened {
+        Ok(document) => document,
+        Err(error) => return bad(stream, format!("cannot open the document: {error}")),
+    };
+    let outcome = mt_numbering::number_existing(&mut document, style, side, at)
+        .and_then(|count| mt_numbering::write_settings(&mut document, style, side).map(|()| count));
+    let count = match outcome {
+        Ok(count) => count,
+        Err(error) => return bad(stream, format!("numbering failed: {error}")),
+    };
+    let bytes = match document.into_bytes() {
+        Ok(bytes) => bytes,
+        Err(error) => return bad(stream, format!("writing the document failed: {error}")),
+    };
+    // The bridge's own log is where a host watches the work go by.
+    println!("number {count} equations, {} style, {} side", style.as_str(), side.as_str());
+    respond(
+        stream,
+        200,
+        "application/json",
+        &format!("{{\"count\":{count},\"docx\":\"{}\"}}", base64(&bytes)),
+    )
+}
+
+/// POST /crossref?to=N|latest, body a .docx container: a cross-reference to a numbered
+/// equation (#11), appended at the end of the body — the same work `mathtype crossref` does.
+///
+/// The answer is JSON: `{"bookmark": name, "docx": "<base64>"}`.
+fn crossref(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, String> {
+    fn bad(stream: &mut TcpStream, message: String) -> Result<u16, String> {
+        respond(stream, 400, "text/plain", &message)
+    }
+    let target = match parameter(query, "to") {
+        None => mt_numbering::ReferenceTarget::Latest,
+        Some(value) if value.eq_ignore_ascii_case("latest") => {
+            mt_numbering::ReferenceTarget::Latest
+        }
+        Some(value) => match value.parse() {
+            Ok(number) => mt_numbering::ReferenceTarget::Number(number),
+            Err(_) => return bad(stream, "?to= must be an equation number or latest".to_owned()),
+        },
+    };
+    let mut document = match mt_docx::Document::open(body) {
+        Ok(document) => document,
+        Err(error) => return bad(stream, format!("cannot open the document: {error}")),
+    };
+    let bookmark = match mt_numbering::insert_reference(
+        &mut document,
+        mt_docx::Position::BodyEnd,
+        target,
+    ) {
+        Ok(bookmark) => bookmark,
+        Err(error) => return bad(stream, format!("inserting the cross-reference failed: {error}")),
+    };
+    let bytes = match document.into_bytes() {
+        Ok(bytes) => bytes,
+        Err(error) => return bad(stream, format!("writing the document failed: {error}")),
+    };
+    println!("crossref to {bookmark}");
+    respond(
+        stream,
+        200,
+        "application/json",
+        &format!("{{\"bookmark\":\"{bookmark}\",\"docx\":\"{}\"}}", base64(&bytes)),
+    )
 }
 
 /// Standard base64 of the bytes, for the docx the bridge hands back.
@@ -721,6 +828,70 @@ mod tests {
             document.equations().is_empty(),
             "the one formula became text"
         );
+    }
+
+    #[test]
+    fn number_returns_a_numbered_docx() {
+        let bytes = tiny_docx();
+        let mut raw = format!(
+            "POST /number?style=chapter&side=right HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\n\r\n",
+            bytes.len()
+        )
+        .into_bytes();
+        raw.extend_from_slice(&bytes);
+        let response = request(&raw);
+        assert_eq!(status(&response), "HTTP/1.1 200 OK");
+        let json = body(&response);
+        assert!(json.contains("\"count\":1"), "{json}");
+        let encoded = json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap();
+        let document = mt_docx::Document::open(&base64_decode(encoded)).expect("the container opens");
+        assert_eq!(mt_numbering::enumerate(&document).len(), 1);
+        assert_eq!(
+            mt_numbering::read_settings(&document),
+            (mt_numbering::NumberStyle::Chapter, mt_numbering::Side::Right)
+        );
+    }
+
+    #[test]
+    fn number_rejects_an_unknown_style() {
+        let response =
+            request(b"POST /number?style=roman HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n");
+        assert_eq!(status(&response), "HTTP/1.1 400 Bad Request");
+    }
+
+    #[test]
+    fn crossref_returns_a_referencing_docx() {
+        // Number first, so the cross-reference has a target.
+        let bytes = tiny_docx();
+        let mut raw = format!(
+            "POST /number HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\n\r\n",
+            bytes.len()
+        )
+        .into_bytes();
+        raw.extend_from_slice(&bytes);
+        let json = body(&request(&raw));
+        let numbered = base64_decode(json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap());
+
+        let mut raw = format!(
+            "POST /crossref?to=1 HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\n\r\n",
+            numbered.len()
+        )
+        .into_bytes();
+        raw.extend_from_slice(&numbered);
+        let response = request(&raw);
+        assert_eq!(status(&response), "HTTP/1.1 200 OK");
+        let json = body(&response);
+        assert!(json.contains("\"bookmark\":\"_RefMTEq1\""), "{json}");
+        let encoded = json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap();
+        let document = mt_docx::Document::open(&base64_decode(encoded)).expect("the container opens");
+        assert!(document.document_xml().contains(" REF _RefMTEq1 \\h "));
+    }
+
+    #[test]
+    fn crossref_without_a_target_is_refused() {
+        let response =
+            request(b"POST /crossref HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n");
+        assert_eq!(status(&response), "HTTP/1.1 400 Bad Request");
     }
 
     #[test]

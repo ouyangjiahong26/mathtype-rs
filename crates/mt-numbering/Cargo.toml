@@ -1,0 +1,17 @@
+[package]
+name = "mt-numbering"
+description = "Equation numbering and cross-references for Word documents, built from Word fields."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core.workspace = true
+mt-docx.workspace = true
+mt-omml.workspace = true
+quick-xml = "0.42"
+
+[dev-dependencies]
+mt-tex.workspace = true
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
