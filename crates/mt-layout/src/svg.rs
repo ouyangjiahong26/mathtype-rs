@@ -4,7 +4,7 @@
 //! no external references, so it can be shown in a browser, embedded in a report or diffed in a
 //! test.
 
-use crate::constants::SVG_PADDING;
+use crate::constants::{PLACEHOLDER_DASH, PLACEHOLDER_STROKE, SVG_PADDING};
 use crate::{Box, LayoutStyle};
 
 /// Font stack every glyph is set in.
@@ -12,12 +12,6 @@ const FONT_FAMILY: &str = "Latin Modern Math, STIX Two Math, Cambria Math, serif
 
 /// Stroke colour of the dashed empty-slot placeholder.
 const PLACEHOLDER_COLOR: &str = "#888888";
-
-/// Stroke width of the dashed empty-slot placeholder, in points.
-const PLACEHOLDER_STROKE: f64 = 0.5;
-
-/// Dash pattern of the empty-slot placeholder, in points.
-const PLACEHOLDER_DASH: &str = "1 1";
 
 /// The rectangle `to_svg` draws into, as `x`, `y`, `width` and `height`.
 ///
@@ -73,8 +67,9 @@ fn write_box(svg: &mut String, node: &Box) {
             let top = number(y - height);
             let (x, width, full_height) = (number(*x), number(*width), number(height + depth));
             if *dashed {
+                let dash = number(PLACEHOLDER_DASH);
                 svg.push_str(&format!(
-                    "<rect x=\"{x}\" y=\"{top}\" width=\"{width}\" height=\"{full_height}\" fill=\"none\" stroke=\"{PLACEHOLDER_COLOR}\" stroke-width=\"{}\" stroke-dasharray=\"{PLACEHOLDER_DASH}\"/>\n",
+                    "<rect x=\"{x}\" y=\"{top}\" width=\"{width}\" height=\"{full_height}\" fill=\"none\" stroke=\"{PLACEHOLDER_COLOR}\" stroke-width=\"{}\" stroke-dasharray=\"{dash} {dash}\"/>\n",
                     number(PLACEHOLDER_STROKE)
                 ));
             } else {

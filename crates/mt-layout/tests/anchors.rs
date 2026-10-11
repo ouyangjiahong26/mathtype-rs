@@ -97,14 +97,17 @@ fn every_row_of_the_tree_gets_exactly_one_anchor() {
 }
 
 #[test]
-fn empty_rows_report_the_placeholder_width() {
+fn empty_rows_report_a_single_insertion_point() {
     let math = Math::new(Node::row([Node::variable('x'), Node::empty()]));
     let (_, anchors) = layout_with_anchors(&math, &ApproxMetrics, &style());
     assert_eq!(anchors.len(), 2);
     let empty = anchor(&anchors, &Path::root().child(1));
     close(empty.origin.0, 5.0);
     close(empty.origin.1, 0.0);
-    assert_eq!(empty.offsets, vec![0.0, c::EMPTY_SLOT_WIDTH * 10.0]);
+    // An empty row has `row.len() == 0`, so the contract `offsets.len() == row.len() + 1` leaves
+    // exactly one insertion point, at its left edge. A right edge offset would name caret index
+    // `1`, which the caret rejects.
+    assert_eq!(empty.offsets, vec![0.0]);
 }
 
 #[test]
@@ -142,9 +145,9 @@ fn matrix_cells_are_addressed_row_major() {
     close(last.origin.0 - first.origin.0, 10.0);
     assert!(last.origin.1 > first.origin.1, "the second row sits lower");
     assert_eq!(first.offsets, vec![0.0, 5.0]);
-    // The two empty cells are placeholders of their own width.
+    // Each empty cell still draws a placeholder, but reports its single insertion point.
     let empty = anchor(&anchors, &Path::root().child(1));
-    assert_eq!(empty.offsets, vec![0.0, c::EMPTY_SLOT_WIDTH * 10.0]);
+    assert_eq!(empty.offsets, vec![0.0]);
 }
 
 #[test]

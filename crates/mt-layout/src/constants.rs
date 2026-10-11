@@ -128,5 +128,11 @@ pub const EMPTY_SLOT_HEIGHT: f64 = 0.7;
 /// Depth of the placeholder drawn for an empty argument slot, below the baseline.
 pub const EMPTY_SLOT_DEPTH: f64 = 0.2;
 
+/// Stroke width of the dashed outline drawn around an empty argument slot, in points.
+pub const PLACEHOLDER_STROKE: f64 = 0.5;
+
+/// Length of one dash (and of the gap after it) in the placeholder outline, in points.
+pub const PLACEHOLDER_DASH: f64 = 1.0;
+
 /// Padding added around the root box when building an SVG `viewBox`, in em.
 pub const SVG_PADDING: f64 = 0.3;

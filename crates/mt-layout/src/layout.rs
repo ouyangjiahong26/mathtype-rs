@@ -172,8 +172,8 @@ pub fn layout(math: &Math, metrics: &dyn FontMetrics, style: &LayoutStyle) -> Bo
 /// Like [`layout`], but also report the caret geometry of every row it visited.
 ///
 /// Anchors come out outermost first, in the same coordinate space as the returned box, and cover
-/// the root row as well as every row inside a template slot, including empty rows, whose two
-/// offsets are zero and the width of the placeholder drawn in their place.
+/// the root row as well as every row inside a template slot. An empty row reports a single
+/// insertion point at its left edge, matching its zero-length contents.
 pub fn layout_with_anchors(
     math: &Math,
     metrics: &dyn FontMetrics,
@@ -255,8 +255,10 @@ fn layout_row(row: &[Node], ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let mut offsets: Vec<f64> = Vec::with_capacity(row.len() + 1);
     if row.is_empty() {
         let laid = placeholder(ctx, ox, oy);
+        // An empty row has no items, so the contract `offsets.len() == row.len() + 1` leaves a
+        // single insertion point: the row's left edge. Reporting a second one would name caret
+        // index `1`, which is outside the `0..=row.len()` the caret accepts.
         offsets.push(0.0);
-        offsets.push(laid.w);
         ctx.finish_row(anchor, offsets);
         return laid;
     }

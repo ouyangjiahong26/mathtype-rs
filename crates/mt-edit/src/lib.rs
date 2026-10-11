@@ -275,7 +275,7 @@ pub struct Editor {
     redo: Vec<Snapshot>,
     /// Font applied to characters typed next, as chosen in the toolbar.
     typing_font: Font,
-    /// Style applied to newly inserted templates.
+    /// Size style wrapped around the next node inserted at the caret, as chosen in the toolbar.
     typing_style: Option<MathStyle>,
 }
 
@@ -410,6 +410,15 @@ impl Editor {
 
     /// Insert a node at the caret and move past it.
     pub fn insert_node(&mut self, node: Node) {
+        let node = match self.typing_style {
+            Some(style) => Node::Styled(Box::new(Styled {
+                body: node,
+                style: Some(style),
+                font: None,
+                class: None,
+            })),
+            None => node,
+        };
         self.push_undo();
         self.delete_selection_in_place();
         let index = self.cursor.index;
@@ -526,32 +535,12 @@ impl Editor {
         let Some((row_path, owner_index)) = owner_path.split_last() else {
             return false;
         };
-        let removable = match self.math.node_at(&owner_path) {
-            Some(Node::Scripts(scripts)) => {
-                scripts.base.is_empty_slot()
-                    && scripts.sub.as_ref().is_none_or(Node::is_empty_slot)
-                    && scripts.sup.as_ref().is_none_or(Node::is_empty_slot)
-            }
-            Some(Node::Frac(frac)) => frac.num.is_empty_slot() && frac.den.is_empty_slot(),
-            Some(Node::Sqrt(sqrt)) => {
-                sqrt.radicand.is_empty_slot() && sqrt.index.as_ref().is_none_or(Node::is_empty_slot)
-            }
-            Some(Node::Fence(fence)) => fence.body.is_empty_slot(),
-            Some(Node::Matrix(matrix)) => matrix.rows.iter().all(|row| row.iter().all(Node::is_empty_slot)),
-            Some(Node::Accent(accent)) => accent.base.is_empty_slot(),
-            Some(Node::Big(big)) => {
-                big.base.is_empty_slot()
-                    && big.sub.as_ref().is_none_or(Node::is_empty_slot)
-                    && big.sup.as_ref().is_none_or(Node::is_empty_slot)
-            }
-            Some(Node::Limits(limits)) => {
-                limits.base.is_empty_slot()
-                    && limits.under.as_ref().is_none_or(Node::is_empty_slot)
-                    && limits.over.as_ref().is_none_or(Node::is_empty_slot)
-            }
-            Some(Node::Styled(styled)) => styled.body.is_empty_slot(),
-            _ => false,
-        };
+        // A template is removable exactly when every slot it owns is still empty. Asking the node's
+        // own slot interface keeps this in step with any template added to `mt-core` later; the
+        // owner cannot be a plain row, which is not a template and is left in place.
+        let removable = self.math.node_at(&owner_path).is_some_and(|owner| {
+            !owner.is_row() && !owner.slots().is_empty() && owner.slots().iter().all(|slot| slot.is_empty_slot())
+        });
         if !removable {
             return false;
         }
@@ -959,6 +948,37 @@ mod tests {
         assert!(editor.backspace());
         assert_eq!(editor.math().body.slot_count(), 0);
         assert_eq!(editor.cursor().path.to_string(), ".");
+    }
+
+    #[test]
+    fn a_recorded_style_wraps_the_next_inserted_node() {
+        let mut editor = Editor::new();
+        editor.apply_style(MathStyle::Script);
+        editor.insert_char('x');
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        assert_eq!(row.len(), 1);
+        let Node::Styled(styled) = &row[0] else { panic!("expected a styled node, got {:?}", row[0]) };
+        assert_eq!(styled.style, Some(MathStyle::Script));
+        assert_eq!(styled.body, Node::variable('x'));
+    }
+
+    #[test]
+    fn backspace_keeps_a_matrix_holding_one_filled_cell() {
+        let mut editor = Editor::new();
+        editor.insert_template(Template::Matrix {
+            rows: 2,
+            cols: 2,
+            kind: MatrixKind::Matrix,
+            delims: None,
+        });
+        editor.insert_char('a');
+        // Park the caret in a still-empty cell and try to leave the template.
+        editor.cursor = Cursor { path: Path::root().child(0).child(1), index: 0 };
+        assert!(!editor.backspace(), "a matrix with a filled cell must not be deleted");
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        assert_eq!(row.len(), 1);
+        let Node::Matrix(matrix) = &row[0] else { panic!("expected a matrix, got {:?}", row[0]) };
+        assert_eq!(matrix.rows[0][0], Node::row([Node::variable('a')]));
     }
 
     #[test]

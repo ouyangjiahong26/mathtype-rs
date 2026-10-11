@@ -862,11 +862,6 @@ impl Path {
     pub fn as_slice(&self) -> &[usize] {
         &self.0
     }
-
-    /// Nearest ancestor that is not an empty row, i.e. the construct the cursor is inside.
-    pub fn nearest_slot(&self) -> Option<(Self, usize)> {
-        self.split_last()
-    }
 }
 
 impl FromIterator<usize> for Path {
