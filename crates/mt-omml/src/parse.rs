@@ -337,7 +337,12 @@ fn group_character(e: &Elem) -> Result<Node, ParseError> {
     allowed(e, &["groupChrPr", "e"])?;
     let character = character_property(e, "groupChrPr", "chr", '{')?;
     let under = position(e, "groupChrPr", character)?;
-    let kind = group_character_kind(character).unwrap_or(AccentKind::OverBrace);
+    // `m:groupChr` is the schema's way to draw a mark above or below the base, so any accent
+    // character can ride in it: `write` uses it for a mark drawn under the base, which `m:acc`
+    // cannot say. A brace-like character keeps its own kind.
+    let kind = group_character_kind(character)
+        .or_else(|| accent_kind(character))
+        .unwrap_or(AccentKind::OverBrace);
     Ok(Node::Accent(Box::new(Accent { kind: orient(kind, under), base: required_argument(e, "e")?, under })))
 }
 
@@ -417,12 +422,18 @@ fn table(e: &Elem) -> Result<Matrix, ParseError> {
         }
         rows.push(row);
     }
-    let (align, columns) = fold_columns(column_alignment(e)?);
+    let width = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+    let (align, columns) = fold_columns(column_alignment(e, width)?);
     Ok(Matrix { rows, delims: None, kind: MatrixKind::Matrix, align, columns, rules: false })
 }
 
 /// The per-column justification `m:mcs` describes; `m:baseJc` and `m:plcHide` have no field.
-fn column_alignment(e: &Elem) -> Result<Vec<Side>, ParseError> {
+///
+/// `m:count` says how many columns a justification covers, but a document is free to claim an
+/// arbitrarily large number: the run of columns is capped at `limit`, the table's own width, so
+/// that a hostile count cannot ask for a huge allocation. A table's columns are exactly its
+/// widest row, so nothing meaningful is lost by the cap.
+fn column_alignment(e: &Elem, limit: usize) -> Result<Vec<Side>, ParseError> {
     let Some(matrix_properties) = e.child("mPr") else {
         return Ok(Vec::new());
     };
@@ -444,6 +455,9 @@ fn column_alignment(e: &Elem) -> Result<Vec<Side>, ParseError> {
                 Some(value) => side_of_name(value).ok_or_else(|| invalid_property("mcJc", "val", value))?,
             };
             for _ in 0..count.max(1) {
+                if columns.len() >= limit {
+                    break;
+                }
                 columns.push(side);
             }
         }

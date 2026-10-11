@@ -245,6 +245,27 @@ fn every_accent_shape_round_trips_on_both_sides() {
 }
 
 #[test]
+fn an_under_accent_is_written_as_a_grouped_character_not_a_position_on_acc() {
+    let accented = Node::Accent(Box::new(Accent { kind: AccentKind::Hat, base: variable('x'), under: true }));
+    let document = write(&Math::new(accented.clone()));
+    // `m:acc` has no position attribute in the schema, so the mark below the base is grouped
+    // under it instead; the position lives where the schema allows it.
+    assert!(
+        document.contains("<m:groupChr><m:groupChrPr><m:chr m:val=\"^\"/><m:pos m:val=\"bot\"/></m:groupChrPr>"),
+        "{document}"
+    );
+    assert!(!document.contains("<m:acc"), "{document}");
+    assert_eq!(parse(&document).unwrap().body, accented);
+
+    // An accent above the base keeps the plain `m:acc` spelling, without any position.
+    let over = Node::Accent(Box::new(Accent { kind: AccentKind::Hat, base: variable('x'), under: false }));
+    let document = write(&Math::new(over.clone()));
+    assert!(document.contains("<m:acc><m:accPr><m:chr m:val=\"^\"/></m:accPr>"), "{document}");
+    assert!(!document.contains("m:pos"), "{document}");
+    assert_eq!(parse(&document).unwrap().body, over);
+}
+
+#[test]
 fn a_brace_accent_drawn_on_the_other_side_reads_back_as_that_side_variant() {
     let accented = Node::Accent(Box::new(Accent { kind: AccentKind::OverBrace, base: variable('x'), under: true }));
     let document = write(&Math::new(accented));

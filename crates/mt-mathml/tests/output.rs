@@ -1,6 +1,6 @@
 //! Output fixtures: namespace declarations and escaping in what `write` emits.
 
-use mt_core::{Class, Delim, Fence, Font, Frac, FracKind, Math, MathStyle, Node, Scripts, TextRun};
+use mt_core::{Char, Class, Delim, Fence, Font, Frac, FracKind, Math, MathStyle, Node, Scripts, Sqrt, TextRun};
 use mt_mathml::{parse, write};
 
 /// An expression using most of the tree.
@@ -78,6 +78,17 @@ fn every_face_produces_a_mathvariant_or_a_marker() {
         assert!(document.contains("<m:mtext"), "{document}");
         assert_eq!(parse(&document).unwrap().body, Node::Text(Box::new(TextRun { text: "abc".to_owned(), font })));
     }
+}
+
+#[test]
+fn an_indexed_root_writes_its_base_before_its_index() {
+    let radicand = Node::variable('x');
+    let index = Node::Char(Char { ch: '3', class: Class::Ord, font: Font::Upright });
+    let document = write(&Math::new(Node::Sqrt(Box::new(Sqrt::nth(index.clone(), radicand.clone())))));
+    // MathML's `mroot` takes the base first and the index second; the tree lists them the other
+    // way round, so the writer has to reorder them.
+    assert!(document.contains("<m:mroot><m:mi>x</m:mi><m:mn>3</m:mn></m:mroot>"), "{document}");
+    assert_eq!(parse(&document).unwrap().body, Node::Sqrt(Box::new(Sqrt::nth(index, radicand))));
 }
 
 #[test]

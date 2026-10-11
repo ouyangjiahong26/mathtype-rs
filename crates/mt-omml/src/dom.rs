@@ -10,6 +10,14 @@ use quick_xml::escape::{resolve_predefined_entity, unescape};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 
+/// The deepest element nesting the reader accepts.
+///
+/// The converters walk the element tree with recursion, so a document nested deeper than this is
+/// rejected with [`ParseError::Nesting`] before the walk starts rather than overflowing the
+/// stack. Real equations nest a few dozen levels at most, so the limit only ever bites on
+/// hostile input.
+pub(crate) const MAX_DEPTH: usize = 128;
+
 /// One child of an element.
 pub(crate) enum Xml {
     /// Nested markup.
@@ -84,7 +92,12 @@ pub(crate) fn document(xml: &str) -> Result<Elem, ParseError> {
     loop {
         let event = reader.read_event().map_err(|error| ParseError::Xml(error.to_string()))?;
         match event {
-            Event::Start(start) => open.push(element(&start)?),
+            Event::Start(start) => {
+                if open.len() >= MAX_DEPTH {
+                    return Err(ParseError::Nesting);
+                }
+                open.push(element(&start)?);
+            }
             Event::Empty(start) => attach(&mut open, &mut root, element(&start)?)?,
             Event::End(_) => {
                 let closed = open.pop().ok_or_else(|| ParseError::Xml("a closing tag has no opening tag".to_owned()))?;

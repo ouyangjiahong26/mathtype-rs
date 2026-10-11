@@ -230,10 +230,10 @@ fn zero_length(value: &str) -> bool {
     number.trim().parse::<f64>() == Ok(0.0)
 }
 
-/// `mroot`: an indexed radical.
+/// `mroot`: an indexed radical, whose two children are the base followed by the index.
 fn radical(e: &Elem) -> Result<Node, ParseError> {
     let children = fixed(e, 2)?;
-    Ok(Node::Sqrt(Box::new(Sqrt { index: optional(node_of(children[0])?), radicand: node_of(children[1])? })))
+    Ok(Node::Sqrt(Box::new(Sqrt { index: optional(node_of(children[1])?), radicand: node_of(children[0])? })))
 }
 
 /// `msub`/`msup`: one attached script.

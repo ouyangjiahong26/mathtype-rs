@@ -71,8 +71,8 @@ fn node(out: &mut String, value: &Node) {
             }
             Some(index) => {
                 open(out, "m:mroot", &[]);
-                node(out, index);
                 node(out, &radical.radicand);
+                node(out, index);
                 close(out, "m:mroot");
             }
         },

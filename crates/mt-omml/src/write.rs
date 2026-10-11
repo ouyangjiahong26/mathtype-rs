@@ -288,7 +288,9 @@ fn accent_element(out: &mut String, accent: &Accent) {
         out.push_str("</m:barPr>");
         argument(out, "m:e", &accent.base);
         out.push_str("</m:bar>");
-    } else if is_group_character(accent.kind) {
+    } else if is_group_character(accent.kind) || accent.under {
+        // `m:acc` has no position attribute in the schema, so a mark below the base is written
+        // as the character grouped under it, which `parse` reads back as the same accent.
         out.push_str("<m:groupChr><m:groupChrPr>");
         valued(out, "m:chr", mark);
         valued(out, "m:pos", if accent.under { "bot" } else { "top" });
@@ -298,9 +300,6 @@ fn accent_element(out: &mut String, accent: &Accent) {
     } else {
         out.push_str("<m:acc><m:accPr>");
         valued(out, "m:chr", mark);
-        if accent.under {
-            valued(out, "m:pos", "bot");
-        }
         out.push_str("</m:accPr>");
         argument(out, "m:e", &accent.base);
         out.push_str("</m:acc>");

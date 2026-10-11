@@ -33,6 +33,19 @@
 //!   the only child of `math`, which is how `write` records a size preset above full size.
 //! * Scripts, limits and accents whose base is a large operator character read as
 //!   [`mt_core::Node::Big`], since that is the tree's spelling for an operator with limits.
+//!
+//! # Slot order
+//!
+//! Every element writes its children in the order its specification names, which is not always
+//! the field order of the tree: `mroot` takes its base first and its index second, while
+//! [`mt_core::Sqrt`] lists the index first. Reading and writing both follow the markup order, so
+//! the two round trip exactly.
+//!
+//! # Limits
+//!
+//! The reader is the boundary this crate stands at, so it refuses input it cannot handle instead
+//! of panicking: elements nested deeper than 128 levels are rejected with
+//! [`ParseError::Nesting`] before any recursive walk begins.
 
 #![forbid(unsafe_code)]
 
@@ -59,6 +72,8 @@ pub enum ParseError {
     UnknownElement(String),
     /// A known element is used in a way the equation tree cannot represent.
     Structure(String),
+    /// The elements nest deeper than the reader accepts (128 levels); see the crate docs.
+    Nesting,
     /// An attribute value could not be interpreted.
     InvalidAttribute { element: String, attribute: String, value: String },
 }
@@ -70,6 +85,7 @@ impl std::fmt::Display for ParseError {
             ParseError::Root(name) => write!(f, "expected a <math> root element, found <{name}>"),
             ParseError::UnknownElement(name) => write!(f, "unsupported MathML element <{name}>"),
             ParseError::Structure(detail) => f.write_str(detail),
+            ParseError::Nesting => write!(f, "elements nest deeper than the reader accepts"),
             ParseError::InvalidAttribute { element, attribute, value } => {
                 write!(f, "unsupported value {value:?} for {attribute} on <{element}>")
             }

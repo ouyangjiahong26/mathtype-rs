@@ -144,8 +144,9 @@ fn a_square_root_and_an_indexed_root() {
         parse("<math><msqrt><mi>x</mi></msqrt></math>").unwrap(),
         math(Node::Sqrt(Box::new(Sqrt::square(variable('x')))))
     );
+    // MathML spells `mroot` as the base followed by the index, so `∛x` reads as `\sqrt[3]{x}`.
     assert_eq!(
-        parse("<math><mroot><mn>3</mn><mi>x</mi></mroot></math>").unwrap(),
+        parse("<math><mroot><mi>x</mi><mn>3</mn></mroot></math>").unwrap(),
         math(Node::Sqrt(Box::new(Sqrt::nth(digit('3'), variable('x')))))
     );
 }

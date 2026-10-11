@@ -288,6 +288,16 @@ fn a_table_reads_its_rows_cells_and_column_justification() {
 }
 
 #[test]
+fn a_column_count_larger_than_the_table_is_capped() {
+    // `m:count` used to size a loop directly, so a tiny document could ask for gigabytes; it is
+    // capped at the table's own column count.
+    let markup = "<m:m><m:mPr><m:mcs><m:mc><m:mcPr><m:count m:val=\"4000000000\"/><m:mcJc m:val=\"right\"/></m:mcPr></m:mc></m:mcs></m:mPr><m:mr><m:e/><m:e/></m:mr></m:m>";
+    let mut matrix = Matrix::empty(1, 2);
+    matrix.align = Side::Right;
+    assert_eq!(parse(&document(markup)).unwrap(), math(Node::Matrix(Box::new(matrix))));
+}
+
+#[test]
 fn a_column_justification_of_every_column_folds_into_the_default() {
     let markup = "<m:m><m:mPr><m:mcs><m:mc><m:mcPr><m:count m:val=\"2\"/><m:mcJc m:val=\"right\"/></m:mcPr></m:mc></m:mcs></m:mPr><m:mr><m:e/><m:e/></m:mr></m:m>";
     let mut matrix = Matrix::empty(1, 2);
@@ -338,6 +348,12 @@ fn accents_read_from_their_character_and_position() {
             "<m:groupChr><m:groupChrPr><m:chr m:val=\"[\"/><m:pos m:val=\"top\"/></m:groupChrPr><m:e><m:r><m:t>x</m:t></m:r></m:e></m:groupChr>",
             AccentKind::OverBracket,
             false,
+        ),
+        // `m:acc` cannot draw a mark under the base, so a mark under it rides in `m:groupChr`.
+        (
+            "<m:groupChr><m:groupChrPr><m:chr m:val=\"^\"/><m:pos m:val=\"bot\"/></m:groupChrPr><m:e><m:r><m:t>x</m:t></m:r></m:e></m:groupChr>",
+            AccentKind::Hat,
+            true,
         ),
     ];
     for (markup, kind, under) in cases {

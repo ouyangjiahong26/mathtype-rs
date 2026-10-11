@@ -116,6 +116,22 @@ fn attributes_that_the_model_drops_are_accepted() {
 }
 
 #[test]
+fn elements_that_nest_too_deeply_are_rejected() {
+    // The reader walks the tree with recursion, so a document this deep has to be turned away
+    // before the walk starts: otherwise it overflows the stack, which aborts the process.
+    let nested = |levels: usize| {
+        format!(
+            "<math>{}<m:mi>x</m:mi>{}</math>",
+            "<m:mrow>".repeat(levels),
+            "</m:mrow>".repeat(levels)
+        )
+    };
+    assert_eq!(error(&nested(200)), ParseError::Nesting);
+    // Just inside the documented limit is still read.
+    assert!(parse(&nested(100)).is_ok());
+}
+
+#[test]
 fn an_error_never_panics_on_a_prefix_of_a_valid_document() {
     let document = "<math display=\"block\"><mrow><mi>x</mi><mo>=</mo><mfrac><mn>1</mn><mn>2</mn></mfrac></mrow></math>";
     for end in 0..=document.len() {

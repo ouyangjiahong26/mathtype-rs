@@ -33,6 +33,11 @@
 //! * A brace-like accent is drawn on the side its kind names, so `OverBrace`/`OverBracket`/
 //!   `OverParen` read back above the base and their `Under…` variants below it; a kind that
 //!   disagrees with its side reads back as the variant matching the side.
+//! * `m:acc` has no position attribute in the schema, so an accent drawn below the base that is
+//!   not a rule or a brace-like character is written as `m:groupChr` with `m:pos` set to `bot`,
+//!   which reads back as the same accent with `under` set.
+//! * `m:mcs`'s `m:count` is capped at the table's own column count, so a justification claiming
+//!   more columns than the table has is read as though it claimed exactly the table's columns.
 //! * [`mt_core::Styled`] carries a style and a face that `m:box` cannot hold; only
 //!   [`mt_core::Class::Inner`] survives, as `m:borderBox`.
 //! * The equation's size preset is not an OMML concept: [`mt_core::Math::style`] always reads
@@ -41,6 +46,12 @@
 //!   [`mt_core::Node::Text`].
 //! * The width of a [`mt_core::Node::Space`] is written as the matching Unicode space character;
 //!   the negative widths become zero-width spaces, which reserve no space when rendered.
+//!
+//! # Limits
+//!
+//! The reader is the boundary this crate stands at, so it refuses input it cannot handle instead
+//! of panicking: elements nested deeper than 128 levels are rejected with [`ParseError::Nesting`]
+//! before any recursive walk begins.
 
 #![forbid(unsafe_code)]
 
@@ -67,6 +78,8 @@ pub enum ParseError {
     UnknownElement(String),
     /// A known element is used in a way the equation tree cannot represent.
     Structure(String),
+    /// The elements nest deeper than the reader accepts (128 levels); see the crate docs.
+    Nesting,
     /// An attribute value could not be interpreted.
     InvalidAttribute { element: String, attribute: String, value: String },
 }
@@ -80,6 +93,7 @@ impl std::fmt::Display for ParseError {
             }
             ParseError::UnknownElement(name) => write!(f, "unsupported Office Math element <{name}>"),
             ParseError::Structure(detail) => f.write_str(detail),
+            ParseError::Nesting => write!(f, "elements nest deeper than the reader accepts"),
             ParseError::InvalidAttribute { element, attribute, value } => {
                 write!(f, "unsupported value {value:?} for {attribute} on <{element}>")
             }
