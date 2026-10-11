@@ -184,6 +184,48 @@ fn unbarred_and_linear_fractions_keep_their_arguments() {
     );
 }
 
+/// A slash fraction, `a ⁄ b` set with a literal slash instead of a rule.
+fn slash_frac_of(numerator: Node, denominator: Node) -> Node {
+    let mut frac = Frac::new(numerator, denominator);
+    frac.kind = mt_core::FracKind::Slash;
+    Node::Frac(Box::new(frac))
+}
+
+#[test]
+fn slash_fraction_places_the_slash_between_its_arguments() {
+    let metrics = ApproxMetrics;
+    let width = |glyph: Glyph| metrics.advance(glyph.ch, glyph.font) * glyph.size;
+    let kern = c::FRAC_SLASH_KERN * 10.0;
+
+    // At the start of a line the fraction's origin is 0, so the slash must sit one kern after
+    // the numerator and the denominator one kern after the slash.
+    let boxes = lay(slash_frac_of(Node::variable('a'), Node::variable('b')));
+    let (a, slash, b) = (glyph(&boxes, 'a'), glyph(&boxes, '/'), glyph(&boxes, 'b'));
+    close(a.x, 0.0);
+    close(slash.x, a.x + width(a) + kern);
+    close(b.x, slash.x + width(slash) + kern);
+    // The stacked-slash shift still applies vertically.
+    close(a.y, -c::FRAC_SLASH_SHIFT * 10.0);
+    close(slash.y, 0.0);
+    close(b.y, c::FRAC_SLASH_SHIFT * 10.0);
+
+    // Nested after a sibling: everything is offset by the fraction's origin, the slash included.
+    let boxes = lay(Node::row([Node::variable('m'), slash_frac_of(
+        Node::variable('a'),
+        Node::variable('b'),
+    )]));
+    let (m, a, slash, b) = (
+        glyph(&boxes, 'm'),
+        glyph(&boxes, 'a'),
+        glyph(&boxes, '/'),
+        glyph(&boxes, 'b'),
+    );
+    close(m.x, 0.0);
+    close(a.x, m.x + width(m));
+    close(slash.x, a.x + width(a) + kern);
+    close(b.x, slash.x + width(slash) + kern);
+}
+
 #[test]
 fn fraction_grows_when_the_numerator_carries_limits() {
     let metrics = ApproxMetrics;

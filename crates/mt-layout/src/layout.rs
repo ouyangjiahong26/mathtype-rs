@@ -626,6 +626,8 @@ fn layout_slash_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64, stacked: bool) ->
 
     let slash_x = ox + numerator.w + kern;
     let denominator_x = slash_x + slash.w + kern;
+    let mut slash_node = slash.node;
+    place(&mut slash_node, ctx, slash_x, oy);
     let mut numerator_node = numerator.node;
     place(&mut numerator_node, &numerator_ctx, ox, oy - shift);
     let mut denominator_node = denominator.node;
@@ -634,7 +636,7 @@ fn layout_slash_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64, stacked: bool) ->
     let width = numerator.w + kern + slash.w + kern + denominator.w;
     let height = (shift + numerator.h).max(slash.h).max(denominator.h - shift);
     let depth = (shift + denominator.d).max(slash.d).max(numerator.d - shift);
-    let items = vec![numerator_node, slash.node, denominator_node];
+    let items = vec![numerator_node, slash_node, denominator_node];
     Laid::new(Box::HBox { items, width, height, depth }, width, height, depth)
 }
 

@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 mod eps;
+pub mod metrics;
 mod outline;
 mod raster;
 
@@ -139,6 +140,17 @@ fn collect(tree: &LBox, face: &Face<'_>) -> Vec<Item> {
     items
 }
 
+/// The ink rectangle of already-collected `items`, `(x0, y0, x1, y1)`, in points, padded by `pad`.
+///
+/// It is the root box's own extent, grown by every glyph outline and rule that sticks out of it.
+fn ink_bounds(items: &[Item], tree: &LBox, pad: f64) -> (f64, f64, f64, f64) {
+    let mut bbox = (0.0, -tree.height(), tree.width(), tree.depth());
+    for item in items {
+        item.extend(&mut bbox);
+    }
+    (bbox.0 - pad, bbox.1 - pad, bbox.2 + pad, bbox.3 + pad)
+}
+
 /// The rectangle the image covers, `(x0, y0, x1, y1)`, in points.
 ///
 /// It is the root box's own extent, grown by every glyph outline and rule that sticks out of it,
@@ -149,12 +161,8 @@ pub fn image_bounds(
     face: &Face<'_>,
     options: &RenderOptions,
 ) -> (f64, f64, f64, f64) {
-    let mut bbox = (0.0, -tree.height(), tree.width(), tree.depth());
-    for item in collect(tree, face) {
-        item.extend(&mut bbox);
-    }
-    let pad = options.padding_em * style.size;
-    (bbox.0 - pad, bbox.1 - pad, bbox.2 + pad, bbox.3 + pad)
+    let items = collect(tree, face);
+    ink_bounds(&items, tree, options.padding_em * style.size)
 }
 
 /// Image dimensions in device pixels for `options`, without rendering.
@@ -180,14 +188,7 @@ pub fn render(
     options: &RenderOptions,
 ) -> Image {
     let items = collect(tree, face);
-    let bounds = {
-        let mut bbox = (0.0, -tree.height(), tree.width(), tree.depth());
-        for item in &items {
-            item.extend(&mut bbox);
-        }
-        let pad = options.padding_em * style.size;
-        (bbox.0 - pad, bbox.1 - pad, bbox.2 + pad, bbox.3 + pad)
-    };
+    let bounds = ink_bounds(&items, tree, options.padding_em * style.size);
     let (bx0, by0, _, _) = bounds;
     let scale = options.scale.max(0.0);
     let (width, height) = (
@@ -250,14 +251,7 @@ pub fn render_eps(
     options: &RenderOptions,
 ) -> String {
     let items = collect(tree, face);
-    let bounds = {
-        let mut bbox = (0.0, -tree.height(), tree.width(), tree.depth());
-        for item in &items {
-            item.extend(&mut bbox);
-        }
-        let pad = options.padding_em * style.size;
-        (bbox.0 - pad, bbox.1 - pad, bbox.2 + pad, bbox.3 + pad)
-    };
+    let bounds = ink_bounds(&items, tree, options.padding_em * style.size);
     eps::render(&items, bounds, options.foreground)
 }
 
