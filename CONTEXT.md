@@ -36,6 +36,7 @@ MathType 的功能面与文档互通能力。
 | `mt-mathml` | Presentation MathML ⇄ 公式树 |
 | `mt-omml` | Office 原生公式 ⇄ 公式树 |
 | `mt-mtef` | 嵌入对象数据流与偏好预设的读写 |
+| `mt-docx` | .docx 容器读写与轻索引：定位段落/公式/嵌入对象/图片，替换与插入，未触碰部件原样写回 |
 | `mt-layout` | 公式树 → 带位置的盒子树；字形度量抽象 |
 | `mt-render` | 盒子树 → 屏幕 / PNG / SVG / EPS / WMF |
 | `mt-edit` | 编辑模型：光标导航、模板插入、撤销、面板内容 |

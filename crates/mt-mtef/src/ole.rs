@@ -44,6 +44,25 @@ pub fn write_into_ole(ole: &[u8], stream: &[u8]) -> Result<Vec<u8>, MtefError> {
     Ok(compound.into_inner().into_inner())
 }
 
+/// Build a fresh compound file whose equation stream is `stream`.
+///
+/// The file holds only the `Equation Native` stream — none of the bookkeeping streams (CompObj,
+/// the preview picture) a host writes when it embeds an object itself. That is enough for a
+/// document to carry an equation and for this crate to read it back, and hosts open such a file
+/// without complaint; they only miss the preview until the object is edited once.
+pub fn create_ole(stream: &[u8]) -> Result<Vec<u8>, MtefError> {
+    let mut compound = CompoundFile::create(Cursor::new(Vec::new())).map_err(ole_error)?;
+    {
+        let mut target = compound
+            .create_stream(std::path::Path::new(STREAM_NAMES[0]))
+            .map_err(ole_error)?;
+        target.write_all(stream).map_err(ole_error)?;
+        target.flush().map_err(ole_error)?;
+    }
+    compound.flush().map_err(ole_error)?;
+    Ok(compound.into_inner().into_inner())
+}
+
 /// The path of the equation stream of a compound file.
 fn equation_stream<F>(compound: &CompoundFile<F>) -> Option<PathBuf> {
     compound
@@ -61,4 +80,21 @@ fn equation_stream<F>(compound: &CompoundFile<F>) -> Option<PathBuf> {
 
 fn ole_error(error: std::io::Error) -> MtefError {
     MtefError::Ole(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh compound file carries the stream it was built with, and a replacement keeps the
+    /// stream readable.
+    #[test]
+    fn created_and_rewritten_files_round_trip() {
+        let stream = vec![1, 2, 3, 4, 5];
+        let ole = create_ole(&stream).expect("a fresh compound file");
+        assert_eq!(read_from_ole(&ole).expect("readable"), Some(stream.clone()));
+
+        let rewritten = write_into_ole(&ole, &[9, 9, 9]).expect("a rewritten file");
+        assert_eq!(read_from_ole(&rewritten).expect("readable"), Some(vec![9, 9, 9]));
+    }
 }

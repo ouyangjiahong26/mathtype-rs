@@ -1,0 +1,17 @@
+[package]
+name = "mt-docx"
+description = "Reader, light index and editor for the parts of a Word document the equation tools touch."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core.workspace = true
+mt-omml.workspace = true
+mt-mtef.workspace = true
+zip = "2.4"
+quick-xml = "0.42"
+
+[dev-dependencies]
+mt-tex.workspace = true
