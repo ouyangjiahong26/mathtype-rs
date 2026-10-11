@@ -21,7 +21,7 @@ Word/WPS 的加载项和多种外部格式的互通。这些能力差异很大�
 3. **按"数据流向"切 crate：** 输入输出格式各自成 crate（`mt-tex`、`mt-mathml`、
    `mt-omml`、`mt-mtef`），排版（`mt-layout`）与绘制（`mt-render`）分离，编辑模型
    （`mt-edit`）不依赖任何图形库，界面与加载项放在 `apps/`。
-4. **crate 之间只依赖 `mt-core`。** 转换器不互相调用；需要组合时由上层（应用或加载项）
+4. **转换器只依赖 `mt-core`；`mt-render` 依赖 `mt-layout`（消费其盒子树）。** 转换器不互相调用；需要组合时由上层（应用或加载项）
    串联，避免出现隐式的转换链。
 
 ## 备选方案
@@ -54,5 +54,6 @@ Word/WPS 的加载项和多种外部格式的互通。这些能力差异很大�
 | `eframe` + `egui` | `apps/mathtype` | 窗口与即时模式界面。自建平台层会让编辑器与核心的边界复杂化，而界面不是本项目的技术风险所在。 |
 | `windows` / `windows-core` | `apps/ole-server`、`apps/word-addin` | COM/OLE 互操作（接口定义、注册、剪贴板、存储）。手写 vtable 与 GUID 不可维护。 |
 
-字体资源：`assets/fonts/latinmodern-math.otf` 为 OFL 许可（许可文件随字体一同入库），作为排版
+字体资源：`assets/fonts/latinmodern-math.otf` 为 Latin Modern Math，采用 GUST Font License +
+LPPL 1.3c 许可（`assets/fonts/LM-MATH-LICENSE.txt` 随字体一同入库），作为排版
 与渲染的默认字形；其它字体一律运行时从本机读取，不入库。

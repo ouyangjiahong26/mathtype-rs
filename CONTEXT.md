@@ -40,8 +40,9 @@ MathType 的功能面与文档互通能力。
 | `mt-render` | 盒子树 → 屏幕 / PNG / SVG / EPS / WMF |
 | `mt-edit` | 编辑模型：光标导航、模板插入、撤销、面板内容 |
 | `apps/mathtype` | 桌面编辑器；同一份二进制还提供转换命令行与回环 HTTP 转换接口（供宿主加载项调用） |
+| `apps/ole-server` | 嵌入对象服务器：宿主双击激活与保存写回（ADR 0002 为准） |
 | `apps/word-addin` | Word 加载项：在文档里插入/转换公式 |
-| `apps/wps-addin` | WPS 加载项：命令面与 Word 一侧对齐 |
+| `apps/wps-addin` | WPS 加载项：命令面为 Word 子集——插入（OLE 或图片）、转 LaTeX、导出 PNG、检查转换服务 |
 
 ## 约定
 
