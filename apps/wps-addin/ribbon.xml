@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Custom ribbon for the WPS 文字 add-in. WPS parses this file, builds the tab,
+     and dispatches each button's onAction to the like-named global function in main.js. -->
+<customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" onLoad="OnAddinLoad">
+  <ribbon startFromScratch="false">
+    <tabs>
+      <tab id="MathTypeRsTab" label="公式">
+        <group id="MathTypeRsGroup" label="公式">
+          <button id="btnInsertEquation" label="插入公式" onAction="OnInsertEquation" size="large"/>
+          <button id="btnEquationToLatex" label="转为 LaTeX" onAction="OnEquationToLatex" size="large"/>
+          <button id="btnExportPng" label="导出 PNG" onAction="OnExportPng" size="large"/>
+          <button id="btnCheckBridge" label="检查转换服务" onAction="OnCheckBridge" size="large"/>
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>
