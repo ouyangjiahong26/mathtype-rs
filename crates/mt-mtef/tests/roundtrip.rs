@@ -4,7 +4,10 @@ use mt_core::{
     Accent, AccentKind, BigOp, Char, Class, Delim, Fence, Font, Frac, FracKind, Limits, Math,
     Matrix, MatrixKind, Node, Scripts, Side, Sqrt, Space,
 };
-use mt_mtef::{parse, parse_bare, write, write_bare};
+use mt_mtef::{
+    parse, parse_bare, read, write, write_bare, write_with_preferences, Dimension, Preferences,
+    StyleDef, Unit,
+};
 
 /// Equations covering every construct the format spells: fractions, radicals, scripts, fences,
 /// tables, accents, large operators with limits, and the spacing the format can carry.
@@ -300,4 +303,43 @@ fn trees_built_from_the_model_round_trip() {
         "long division",
     );
     check(table(vec![Vec::new(), Vec::new()], None, MatrixKind::Matrix, Side::Center, false), "empty table");
+}
+
+#[test]
+fn an_under_vector_accent_keeps_its_position() {
+    let math = Math::new(Node::row([accent(
+        AccentKind::Vector,
+        Node::row([Node::variable('x'), Node::variable('y')]),
+        true,
+    )]));
+    let read = parse(&write(&math)).unwrap();
+    let mut expected = math.body.clone();
+    expected.normalize();
+    let mut read = read.body;
+    read.normalize();
+    assert_eq!(read, expected, "a vector accent written under its contents reads back under");
+}
+
+#[test]
+fn written_preferences_round_trip() {
+    let mut styles = vec![
+        StyleDef { font: Some(1), style: 0 },
+        StyleDef { font: Some(2), style: 3 },
+    ];
+    styles.resize(12, StyleDef { font: None, style: 0 });
+    let preferences = Preferences {
+        sizes: vec![
+            Dimension { unit: Unit::Points, value: "11".to_owned() },
+            Dimension { unit: Unit::Centimeters, value: "0.4".to_owned() },
+        ],
+        spaces: vec![Dimension { unit: Unit::Percent, value: "120".to_owned() }],
+        styles,
+    };
+    let math = Math::new(Node::variable('x'));
+
+    let parsed = read(&write_with_preferences(&math, &preferences)).unwrap();
+    assert_eq!(parsed.header.preferences, preferences, "stream preferences round trip");
+
+    let bare = mt_mtef::read_bare(&mt_mtef::write_bare_with_preferences(&math, &preferences)).unwrap();
+    assert_eq!(bare.header.preferences, preferences, "bare stream preferences round trip");
 }

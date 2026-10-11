@@ -8,7 +8,7 @@
 use mt_core::{Class, Delim, Font, FracKind, Math, MathStyle, Matrix, MatrixKind, Node, Row};
 
 use crate::tables::*;
-use crate::Unit;
+use crate::{Dimension, Preferences, StyleDef};
 
 /// The twenty-four bytes an equation object carries in front of the equation data.
 ///
@@ -34,15 +34,49 @@ pub(crate) fn stream(math: &Math) -> Vec<u8> {
 
 /// A bare equation byte stream, without the preamble.
 pub(crate) fn document(math: &Math) -> Vec<u8> {
+    document_with_preferences(math, &default_preferences())
+}
+
+/// The preferences a stream written without explicit ones declares.
+pub(crate) fn default_preferences() -> Preferences {
+    Preferences {
+        sizes: DEFAULT_SIZES
+            .iter()
+            .map(|(unit, value)| Dimension { unit: *unit, value: (*value).to_owned() })
+            .collect(),
+        spaces: DEFAULT_SPACES
+            .iter()
+            .map(|(unit, value)| Dimension { unit: *unit, value: (*value).to_owned() })
+            .collect(),
+        styles: DEFAULT_STYLES
+            .iter()
+            .map(|(font, style)| StyleDef { font: *font, style: *style })
+            .collect(),
+    }
+}
+
+/// A bare equation byte stream, declaring the given equation preferences.
+pub(crate) fn document_with_preferences(math: &Math, preferences: &Preferences) -> Vec<u8> {
     let mut fonts = Vec::new();
     collect_fonts(&math.body, &mut fonts);
-    let mut writer = Writer { out: Vec::new(), fonts };
+    let mut writer = Writer { out: Vec::new(), fonts, prefs: preferences };
     writer.header();
     writer.definitions();
     writer.size(math.style);
     writer.write_line(&Slot::Node(&math.body));
     writer.out.push(TAG_END);
     writer.out
+}
+
+/// A complete stream: the preamble followed by the equation data, declaring the given equation
+/// preferences.
+pub(crate) fn stream_with_preferences(math: &Math, preferences: &Preferences) -> Vec<u8> {
+    let body = document_with_preferences(math, preferences);
+    let mut out = Vec::with_capacity(body.len() + STREAM_HEADER_LENGTH as usize);
+    out.extend_from_slice(&STREAM_HEADER_LENGTH.to_le_bytes());
+    out.extend_from_slice(&HOST_HEADER);
+    out.extend_from_slice(&body);
+    out
 }
 
 /// One slot of a template: a line, or a line that is not drawn.
@@ -57,14 +91,16 @@ enum Slot<'a> {
     Ordered(&'a [u8]),
 }
 
-struct Writer {
+struct Writer<'a> {
     out: Vec<u8>,
     /// Extra faces the tree uses, in first-use order. Index `i` is font definition `5 + i` and
     /// font style `i + 1`.
     fonts: Vec<(String, u8)>,
+    /// The equation preferences the stream declares.
+    prefs: &'a Preferences,
 }
 
-impl Writer {
+impl Writer<'_> {
     // ------------------------------------------------------------- sections
 
     fn header(&mut self) {
@@ -100,17 +136,40 @@ impl Writer {
     fn preferences(&mut self) {
         self.out.push(TAG_EQN_PREFS);
         self.out.push(0);
-        self.dimensions(&DEFAULT_SIZES);
-        self.dimensions(&DEFAULT_SPACES);
-        self.out.push(DEFAULT_STYLES.len() as u8);
-        for (font, style) in DEFAULT_STYLES {
-            match font {
+        self.dimension_array(&self.prefs.sizes);
+        self.dimension_array(&self.prefs.spaces);
+        self.out.push(self.prefs.styles.len() as u8);
+        for style in &self.prefs.styles {
+            match style.font {
                 Some(index) => {
                     self.unsigned(index);
-                    self.out.push(style);
+                    self.out.push(style.style);
                 }
                 None => self.unsigned(0),
             }
+        }
+    }
+
+    fn dimension_array(&mut self, dimensions: &[Dimension]) {
+        self.out.push(dimensions.len() as u8);
+        let mut nibbles = Vec::new();
+        for dimension in dimensions {
+            nibbles.push(dimension.unit.code());
+            for ch in dimension.value.chars() {
+                match ch {
+                    '0'..='9' => nibbles.push(ch as u8 - b'0'),
+                    '.' => nibbles.push(0x0A),
+                    '-' => nibbles.push(0x0B),
+                    _ => {}
+                }
+            }
+            nibbles.push(0x0F);
+        }
+        if nibbles.len() % 2 != 0 {
+            nibbles.push(0);
+        }
+        for pair in nibbles.chunks(2) {
+            self.out.push((pair[0] << 4) | pair[1]);
         }
     }
 
@@ -249,8 +308,8 @@ impl Writer {
     }
 
     /// A writer that shares this one's font definitions and collects records of its own.
-    fn blank(&self) -> Writer {
-        Writer { out: Vec::new(), fonts: self.fonts.clone() }
+    fn blank(&self) -> Writer<'_> {
+        Writer { out: Vec::new(), fonts: self.fonts.clone(), prefs: self.prefs }
     }
 
     /// A table record, whose cell lines carry the writer's font definitions.
@@ -417,30 +476,6 @@ impl Writer {
         }
     }
 
-    /// A dimension array: a count, then the units and digits of each dimension as nibbles.
-    fn dimensions(&mut self, dimensions: &[(Unit, &str)]) {
-        self.out.push(dimensions.len() as u8);
-        let mut nibbles = Vec::new();
-        for (unit, value) in dimensions {
-            nibbles.push(unit.code());
-            for ch in value.chars() {
-                match ch {
-                    '0'..='9' => nibbles.push(ch as u8 - b'0'),
-                    '.' => nibbles.push(0x0A),
-                    '-' => nibbles.push(0x0B),
-                    _ => {}
-                }
-            }
-            nibbles.push(0x0F);
-        }
-        if nibbles.len() % 2 != 0 {
-            nibbles.push(0);
-        }
-        for pair in nibbles.chunks(2) {
-            self.out.push((pair[0] << 4) | pair[1]);
-        }
-    }
-
     fn unsigned(&mut self, value: usize) {
         match u8::try_from(value) {
             Ok(byte) if byte < 0xFF => self.out.push(byte),
@@ -572,11 +607,16 @@ fn collect_fonts(node: &Node, fonts: &mut Vec<(String, u8)>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::LazyLock;
 
-    fn writer() -> Writer {
-        Writer { out: Vec::new(), fonts: Vec::new() }
+    use super::*;
+    use crate::Unit;
+
+    fn writer() -> Writer<'static> {
+        Writer { out: Vec::new(), fonts: Vec::new(), prefs: &DEFAULT_PREFERENCES }
     }
+
+    static DEFAULT_PREFERENCES: LazyLock<Preferences> = LazyLock::new(default_preferences);
 
     #[test]
     fn values_are_written_in_their_short_or_long_form() {
@@ -608,7 +648,10 @@ mod tests {
     #[test]
     fn dimensions_are_packed_two_to_a_byte() {
         let mut writer = writer();
-        writer.dimensions(&[(Unit::Points, "12"), (Unit::Percent, "0.5")]);
+        writer.dimension_array(&[
+            Dimension { unit: Unit::Points, value: "12".to_owned() },
+            Dimension { unit: Unit::Percent, value: "0.5".to_owned() },
+        ]);
         // A unit nibble, the digits of the value, a terminator nibble, and a padding nibble to
         // fill the last byte out.
         assert_eq!(writer.out, vec![2, 0x21, 0x2F, 0x40, 0xA5, 0xF0]);

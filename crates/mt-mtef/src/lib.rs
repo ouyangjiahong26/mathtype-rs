@@ -350,6 +350,19 @@ pub fn write_bare(math: &Math) -> Vec<u8> {
     write::document(math)
 }
 
+/// Write an equation as a complete stream, declaring the given equation preferences.
+///
+/// The preferences are the sizes, spacings and styles the stream lists before the equation, so
+/// a stream saved with the preferences a reader captured round-trips unchanged.
+pub fn write_with_preferences(math: &Math, preferences: &Preferences) -> Vec<u8> {
+    write::stream_with_preferences(math, preferences)
+}
+
+/// Write an equation as a bare equation stream, declaring the given equation preferences.
+pub fn write_bare_with_preferences(math: &Math, preferences: &Preferences) -> Vec<u8> {
+    write::document_with_preferences(math, preferences)
+}
+
 // --------------------------------------------------------------------------- errors
 
 /// Why a stream could not be read or written.

@@ -116,3 +116,21 @@ fn writing_is_idempotent() {
     let read = parse(&paragraph).unwrap();
     assert_eq!(write(&read), write(&parse(&write(&read)).unwrap()));
 }
+
+#[test]
+fn control_characters_are_dropped_not_written_raw() {
+    // `U+0001`..`U+0008` are illegal in XML 1.0; tab, line feed and carriage return are kept.
+    let equation = Math::new(Node::row([Node::text("a\u{0001}b\u{0007}c\td\ne\rf")]));
+    let document = write(&equation);
+    for forbidden in ['\u{0001}', '\u{0007}'] {
+        assert!(!document.contains(forbidden), "illegal character {forbidden:?} written raw in {document}");
+    }
+    // Tab and line feed survive raw; carriage return must be escaped (`&#13;`) because XML
+    // parsers normalize a raw CR to LF, which would silently lose the character.
+    assert!(document.contains('\t'), "tab dropped in {document}");
+    assert!(document.contains('\n'), "line feed dropped in {document}");
+    assert!(document.contains("&#13;"), "carriage return neither escaped nor kept in {document}");
+    // What the writer emits is well-formed enough for the reader to take back.
+    let read = parse(&document).unwrap();
+    assert_eq!(read.body, Math::new(Node::row([Node::text("abc\td\ne\rf")])).body);
+}

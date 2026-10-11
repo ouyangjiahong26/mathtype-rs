@@ -345,7 +345,7 @@ fn text_element(out: &mut String, text: &str) {
         out.push_str(" xml:space=\"preserve\"");
     }
     out.push('>');
-    out.push_str(&escape(text));
+    out.push_str(&escape(&valid_xml(text)));
     out.push_str("</m:t>");
 }
 
@@ -354,8 +354,22 @@ fn valued(out: &mut String, name: &str, value: &str) {
     out.push('<');
     out.push_str(name);
     out.push_str(" m:val=\"");
-    out.push_str(&escape(value));
+    out.push_str(&escape(&valid_xml(value)));
     out.push_str("\"/>");
+}
+
+/// Drops the characters XML 1.0 forbids, keeping tab, line feed and carriage return.
+///
+/// MTEF carries characters as raw bytes, so a record can hold a control character such as
+/// `U+0001`; written through it would make the XML ill-formed.
+fn valid_xml(text: &str) -> String {
+    text.chars()
+        .filter(|ch| match ch {
+            '\u{0009}' | '\u{000A}' | '\u{000D}' => true,
+            ch if (*ch as u32) < 0x20 => false,
+            ch => matches!(ch, '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'),
+        })
+        .collect()
 }
 
 /// Writes a closing tag.

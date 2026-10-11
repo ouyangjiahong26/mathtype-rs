@@ -423,7 +423,7 @@ pub(crate) fn template_of_accent(kind: AccentKind, under: bool) -> (u8, u32, Opt
         AccentKind::OverBracket => (25, 0x0001, glyph),
         AccentKind::UnderBracket => (25, 0x0000, glyph),
         AccentKind::OverParen | AccentKind::UnderParen => (34, 0, glyph),
-        AccentKind::Vector => (31, 0x0002, glyph),
+        AccentKind::Vector => (31, 0x0002 | if under { 0x0004 } else { 0 }, glyph),
         AccentKind::Strike => (36, 0x0001, None),
         AccentKind::ArrowRight | AccentKind::ArrowLeft if !under => {
             (14, if kind == AccentKind::ArrowLeft { 0x10 } else { 0x20 }, glyph)
