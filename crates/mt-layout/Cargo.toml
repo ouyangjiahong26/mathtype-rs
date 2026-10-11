@@ -1,0 +1,10 @@
+[package]
+name = "mt-layout"
+description = "Layout engine: turns the shared equation tree into positioned boxes and SVG previews."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core = { workspace = true }

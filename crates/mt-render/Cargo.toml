@@ -1,0 +1,13 @@
+[package]
+name = "mt-render"
+description = "Raster and vector backends that turn a laid-out equation into PNG and EPS output."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core = { workspace = true }
+mt-layout = { workspace = true }
+ttf-parser = "0.25"
+png = "0.18"
