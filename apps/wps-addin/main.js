@@ -94,7 +94,9 @@ function tempPngPath() {
   var dir = '';
   try { dir = hostApp().Env.GetTempPath(); } catch (e) { dir = ''; }
   if (!dir) dir = '';
-  if (dir && !/[\\\/]$/.test(dir)) dir += '\\';
+  // Append the separator the platform actually uses: GetTempPath returns a
+  // Windows path on Windows hosts and a POSIX path on the Linux ones.
+  if (dir && !/[\\\/]$/.test(dir)) dir += dir.indexOf('\\') >= 0 ? '\\' : '/';
   var name = 'mathtype-rs-' + new Date().getTime() + '.png';
   return dir + name;
 }
@@ -218,7 +220,9 @@ function OnExportPng(control) {
   var doc = app.ActiveDocument;
   var outPath;
   if (doc && doc.Path) {
-    outPath = doc.Path + '\\' + stripExtension(doc.Name) + '.png';
+    // doc.Path is a Windows path on Windows hosts and a POSIX one on Linux.
+    outPath = doc.Path + (doc.Path.indexOf('\\') >= 0 ? '\\' : '/') +
+      stripExtension(doc.Name) + '.png';
   } else {
     outPath = tempPngPath();
   }
