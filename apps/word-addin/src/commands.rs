@@ -107,6 +107,29 @@ pub fn export_png(application: &Object) -> Outcome {
     Ok(format!("image written to {}", target.display()))
 }
 
+/// Exports the whole document as a web page directory next to it: `index.html` plus `media/`,
+/// formulas as inline MathML.
+pub fn export_html(application: &Object) -> Outcome {
+    let document = word::active_document(application).map_err(failed("the document could not be read"))?;
+    let directory = document.get_string("Path").map_err(failed("the document could not be read"))?;
+    let name = document.get_string("Name").map_err(failed("the document could not be read"))?;
+    let path = document.get_string("FullName").map_err(failed("the document could not be read"))?;
+    if path.is_empty() || directory.is_empty() {
+        return Err("the document has never been saved".to_owned());
+    }
+    let bytes = std::fs::read(&path).map_err(|error| format!("{path} could not be read: {error}"))?;
+    let opened = mt_docx::Document::open(&bytes)
+        .map_err(|error| format!("{path} could not be opened: {error}"))?;
+    let stem = Path::new(&name).file_stem().map_or_else(
+        || "document".to_string(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    let target = PathBuf::from(&directory).join(format!("{stem}-web"));
+    let page = mt_html::export_files(&opened, &mt_html::Options::default(), &target)
+        .map_err(|error| format!("the web page could not be written: {error}"))?;
+    Ok(format!("web page written to {}", page.display()))
+}
+
 /// The class of the object server that provides the embedded equation.
 const OBJECT_SERVER: &str = "MathTypeRs.Equation.1";
 
@@ -228,11 +251,13 @@ pub enum Command {
     Toggle,
     /// `ExportSelectionPng`: the selected LaTeX is rendered next to the document.
     ExportPng,
+    /// `ExportDocumentHtml`: the document becomes a web page directory next to itself.
+    ExportHtml,
 }
 
 impl Command {
     /// Every command, for the name and member id lookups.
-    const ALL: [Self; 5] = [Self::InsertObject, Self::ToEquation, Self::ToLatex, Self::Toggle, Self::ExportPng];
+    const ALL: [Self; 6] = [Self::InsertObject, Self::ToEquation, Self::ToLatex, Self::Toggle, Self::ExportPng, Self::ExportHtml];
 
     /// The member name Office finds the command under.
     pub const fn name(self) -> &'static str {
@@ -242,6 +267,7 @@ impl Command {
             Self::ToLatex => "ConvertSelectionToLatex",
             Self::Toggle => "TeXToggle",
             Self::ExportPng => "ExportSelectionPng",
+            Self::ExportHtml => "ExportDocumentHtml",
         }
     }
 
@@ -253,6 +279,7 @@ impl Command {
             Self::ToLatex => 102,
             Self::Toggle => 103,
             Self::ExportPng => 104,
+            Self::ExportHtml => 105,
         }
     }
 
@@ -274,6 +301,7 @@ impl Command {
             Self::ToLatex => to_latex(application),
             Self::Toggle => toggle(application),
             Self::ExportPng => export_png(application),
+            Self::ExportHtml => export_html(application),
         }
     }
 }

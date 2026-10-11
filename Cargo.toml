@@ -21,6 +21,7 @@ mt-edit = { path = "crates/mt-edit" }
 mt-render = { path = "crates/mt-render" }
 mt-mtef = { path = "crates/mt-mtef" }
 mt-docx = { path = "crates/mt-docx" }
+mt-html = { path = "crates/mt-html" }
 
 [profile.release]
 lto = "thin"

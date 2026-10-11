@@ -7,6 +7,7 @@
 //! GET  /health                            -> "ok"
 //! POST /convert?from=latex&to=omml   body -> converted text, or a message with status 400
 //! POST /svg?latex=...&size=18             -> svg document
+//! POST /export-html?script=mathjax body=.docx -> one self-contained HTML page
 //! ```
 //!
 //! Only the loopback interface is bound, and the server stops when its process does.
@@ -123,6 +124,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("GET", "/health") => respond(&mut stream, 200, "text/plain", "ok"),
         ("POST", "/convert") => convert(&mut stream, &query, &request.body),
         ("POST", "/svg") => svg(&mut stream, &query, &request.body),
+        ("POST", "/export-html") => export_html(&mut stream, &query, &request.body),
         ("GET", _) | ("POST", _) => respond(&mut stream, 404, "text/plain", "unknown path"),
         _ => respond(&mut stream, 405, "text/plain", "method not allowed"),
     }?;
@@ -193,6 +195,26 @@ fn svg(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, String> 
             respond(stream, 200, "image/svg+xml", &text)
         }
         Err(message) => respond(stream, 400, "text/plain", &message),
+    }
+}
+
+/// POST /export-html?script=mathjax|katex|none, body a .docx container: a single self-contained
+/// HTML page, every picture inlined as a data URI — the only shape a host that can write one
+/// file (the WPS add-in) can save directly.
+fn export_html(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, String> {
+    let mut options = mt_html::Options { embed: true, ..Default::default() };
+    if let Some(value) = parameter(query, "script") {
+        options.script = mt_html::Script::parse(&value)
+            .ok_or_else(|| format!("unknown ?script= {value}: none, mathjax, or katex"))?;
+    }
+    if let Some(value) = parameter(query, "math") {
+        options.math = mt_html::MathMode::parse(&value)
+            .ok_or_else(|| format!("unknown ?math= {value}: mathml or image"))?;
+    }
+    let result = mt_docx::Document::open(body).and_then(|document| Ok(mt_html::export(&document, &options)));
+    match result {
+        Ok(output) => respond(stream, 200, "text/html; charset=utf-8", &output.html),
+        Err(error) => respond(stream, 400, "text/plain", &format!("cannot export: {error}")),
     }
 }
 
@@ -394,6 +416,75 @@ mod tests {
             b"POST /convert?from=latex&to=png&scale=1000000 HTTP/1.1\r\nHost: test\r\nContent-Length: 1\r\n\r\nx",
         );
         assert!(status(&response).contains("400"), "{}", status(&response));
+    }
+
+    /// A one-paragraph .docx holding one Office Math formula, zipped like a real container.
+    fn tiny_docx() -> Vec<u8> {
+        use std::io::Write;
+        let math = mt_tex::parse("x^2").expect("the test equation parses");
+        let document = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+             <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" \
+             xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><w:body>\
+             <w:p><w:r><w:t>a</w:t></w:r>{omath}</w:p></w:body></w:document>",
+            omath = mt_omml::write(&math)
+        );
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        let parts: [(&str, String); 4] = [
+            (
+                "[Content_Types].xml",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+                 <Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\
+                 <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\
+                 <Default Extension=\"xml\" ContentType=\"application/xml\"/>\
+                 <Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>"
+                    .to_owned(),
+            ),
+            (
+                "_rels/.rels",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+                 <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\
+                 <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>"
+                    .to_owned(),
+            ),
+            ("word/document.xml", document),
+            (
+                "word/_rels/document.xml.rels",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+                 <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"/>"
+                    .to_owned(),
+            ),
+        ];
+        for (name, data) in parts {
+            writer.start_file(name, options).expect("start part");
+            writer.write_all(data.as_bytes()).expect("write part");
+        }
+        writer.finish().expect("close container").into_inner()
+    }
+
+    #[test]
+    fn export_html_returns_a_self_contained_page() {
+        let bytes = tiny_docx();
+        let mut raw = format!(
+            "POST /export-html HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\n\r\n",
+            bytes.len()
+        )
+        .into_bytes();
+        raw.extend_from_slice(&bytes);
+        let response = request(&raw);
+        assert_eq!(status(&response), "HTTP/1.1 200 OK");
+        let page = body(&response);
+        assert!(page.contains("<!DOCTYPE html>"), "{page}");
+        assert!(page.contains("<math"), "{page}");
+        assert!(page.contains("<p>a"), "{page}");
+    }
+
+    #[test]
+    fn export_html_rejects_a_broken_container() {
+        let response =
+            request(b"POST /export-html HTTP/1.1\r\nHost: test\r\nContent-Length: 3\r\n\r\nabc");
+        assert_eq!(status(&response), "HTTP/1.1 400 Bad Request");
     }
 
     #[test]

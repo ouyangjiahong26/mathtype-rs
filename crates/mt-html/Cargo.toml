@@ -1,0 +1,20 @@
+[package]
+name = "mt-html"
+description = "Export a Word document to a web page: structure to HTML, formulas to inline MathML or PNG."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mt-core.workspace = true
+mt-docx.workspace = true
+mt-layout.workspace = true
+mt-omml.workspace = true
+mt-mathml.workspace = true
+mt-render.workspace = true
+mt-tex.workspace = true
+
+[dev-dependencies]
+mt-mtef.workspace = true
+zip = { version = "2.4", default-features = false, features = ["deflate"] }

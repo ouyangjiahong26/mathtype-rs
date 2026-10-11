@@ -234,6 +234,48 @@ function OnExportPng(control) {
   });
 }
 
+// Export the whole document as a self-contained web page (inline MathML, embedded pictures).
+// The bridge returns the HTML text with each byte as one character, so it is written back out
+// byte-for-byte with writeAsBinaryString.
+function OnExportHtml(control) {
+  var app = hostApp();
+  var doc = app.ActiveDocument;
+  if (!doc || !doc.FullName || !doc.Path) {
+    alert('请先保存文档，再执行“导出网页”。');
+    return;
+  }
+  var outPath = doc.Path + '\\' + stripExtension(doc.Name) + '.html';
+  var data;
+  try {
+    data = app.FileSystem.readAsBinaryString(doc.FullName);
+  } catch (e) {
+    alert('读取文档失败：' + (e && e.message ? e.message : e));
+    return;
+  }
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', BRIDGE_BASE + '/export-html', true);
+  // x-user-defined keeps the .docx bytes one-character-per-byte on the way in, and hands the
+  // HTML back the same way on the way out — the old-Chromium binary transport this host needs.
+  xhr.overrideMimeType('text/plain; charset=x-user-defined');
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4) return;
+    if (xhr.status !== 200) {
+      alert(bridgeUnreachableMessage('HTTP ' + xhr.status + ': ' + xhr.responseText));
+      return;
+    }
+    try {
+      writeBinaryFile(outPath, xhr.responseText);
+    } catch (e) {
+      alert('写入网页失败：' + (e && e.message ? e.message : e) + '\n路径：' + outPath);
+      return;
+    }
+    alert('已导出：' + outPath);
+  };
+  xhr.onerror = function () { alert(bridgeUnreachableMessage('网络错误')); };
+  xhr.send(data);
+}
+
 // Probe the bridge and report the result.
 function OnCheckBridge(control) {
   bridgeGet('/health', function (err, body) {

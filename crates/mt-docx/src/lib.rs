@@ -236,7 +236,7 @@ impl Document {
                         item: item_index,
                         kind: EquationKind::Ole {
                             prog_id: prog_id.clone(),
-                            part: data_rel_id.as_deref().and_then(|id| self.part_of_relationship(id)),
+                            part: data_rel_id.as_deref().and_then(|id| self.relationship_part(id)),
                         },
                         math: self.object_tree(data_rel_id),
                     }),
@@ -376,15 +376,17 @@ impl Document {
         }
     }
 
-    /// The part an `r:id` of the main part points at.
-    fn part_of_relationship(&self, id: &str) -> Option<String> {
+    /// The part an `r:id` of the main part points at, if it is internal to the container.
+    ///
+    /// Exporters use this to reach the bytes a picture or object relationship names.
+    pub fn relationship_part(&self, id: &str) -> Option<String> {
         let rel = self.rels.by_id(id)?;
         (!rel.external).then(|| rels::resolve("word", &rel.target))
     }
 
     /// The equation tree inside the object a relationship points at, if there is one.
     fn object_tree(&self, data_rel_id: &Option<String>) -> Option<Math> {
-        let part = self.part_of_relationship(data_rel_id.as_deref()?)?;
+        let part = self.relationship_part(data_rel_id.as_deref()?)?;
         let bytes = self.part(&part).and_then(|result| result.ok())?;
         let stream = mt_mtef::read_from_ole(&bytes).ok()??;
         mt_mtef::parse(&stream).ok()
@@ -438,7 +440,7 @@ impl Document {
     ) -> Result<(String, String, Option<String>), DocxError> {
         let stream = mt_mtef::write(math);
         if let Some(rel_id) = &target.rel_id {
-            if let Some(part) = self.part_of_relationship(rel_id) {
+            if let Some(part) = self.relationship_part(rel_id) {
                 if let Some(Ok(existing)) = self.package.part(&part) {
                     if let Ok(rewritten) = mt_mtef::write_into_ole(&existing, &stream) {
                         self.package.set_part(&part, rewritten);

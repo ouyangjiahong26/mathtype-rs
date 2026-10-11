@@ -9,6 +9,7 @@
           <button id="btnInsertEquation" label="插入公式" onAction="OnInsertEquation" size="large"/>
           <button id="btnEquationToLatex" label="转为 LaTeX" onAction="OnEquationToLatex" size="large"/>
           <button id="btnExportPng" label="导出 PNG" onAction="OnExportPng" size="large"/>
+          <button id="btnExportHtml" label="导出网页" onAction="OnExportHtml" size="large"/>
           <button id="btnCheckBridge" label="检查转换服务" onAction="OnCheckBridge" size="large"/>
         </group>
       </tab>
