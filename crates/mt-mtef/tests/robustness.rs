@@ -47,3 +47,54 @@ fn damaged_streams_do_not_panic() {
     assert!(matches!(read_bare(&[0x00; 64]), Err(MtefError::Version(0))));
     assert_eq!(read_bare(&[]).unwrap_err(), MtefError::Truncated);
 }
+
+/// The header of a bare equation stream: version, platform, producer and the equation options.
+fn bare_header() -> Vec<u8> {
+    vec![5, 1, 0, 0, 0, 0x00, 0x00]
+}
+
+#[test]
+fn a_ruler_line_nesting_in_itself_is_rejected() {
+    // Each `TAG_LINE` with `OPT_LP_RULER` reads another record, which is another line: the
+    // recursion never enters an object list, so before the gate this looped until the stack or
+    // the input ran out.
+    let mut bytes = bare_header();
+    for _ in 0..10_000 {
+        bytes.extend_from_slice(&[0x01, 0x02]); // TAG_LINE, OPT_LP_RULER
+    }
+    assert_eq!(read_bare(&bytes).unwrap_err(), MtefError::Nesting);
+}
+
+#[test]
+fn a_ruler_pile_nesting_in_itself_is_rejected() {
+    let mut bytes = bare_header();
+    for _ in 0..10_000 {
+        // TAG_PILE, OPT_LP_RULER, then the two alignment bytes.
+        bytes.extend_from_slice(&[0x04, 0x02, 0x00, 0x00]);
+    }
+    assert_eq!(read_bare(&bytes).unwrap_err(), MtefError::Nesting);
+}
+
+#[test]
+fn a_chain_of_scripts_is_bounded() {
+    let mut bytes = bare_header();
+    for _ in 0..2_000 {
+        // TAG_TMPL, no options, selector 27 (scripts), variation 0, template options, END.
+        bytes.extend_from_slice(&[0x03, 0x00, 0x1B, 0x00, 0x00, 0x00]);
+    }
+    bytes.push(0x00); // END the outer list
+    assert_eq!(read_bare(&bytes).unwrap_err(), MtefError::Nesting);
+}
+
+#[test]
+fn a_chain_of_embellishments_is_bounded() {
+    let mut bytes = bare_header();
+    // TAG_CHAR, OPT_CHAR_EMBELL, typeface 0, a two-byte character code.
+    bytes.extend_from_slice(&[0x02, 0x01, 0x80, 0x00, 0x00]);
+    for _ in 0..2_000 {
+        // TAG_EMBELL, no options, embellishment type 2 (a dot).
+        bytes.extend_from_slice(&[0x06, 0x00, 0x02]);
+    }
+    bytes.push(0x00); // END the embellishment list and the outer list
+    assert_eq!(read_bare(&bytes).unwrap_err(), MtefError::Nesting);
+}

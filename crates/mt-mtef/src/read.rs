@@ -14,6 +14,13 @@ use crate::{Dimension, FontDef, Header, MtefError, Parsed, Preferences, Report, 
 /// Object-list nesting the reader accepts before it gives up on the stream.
 const MAX_DEPTH: usize = 48;
 
+/// Records the reader accepts in a chain that wraps the previous node without recursing.
+///
+/// Scripts and embellishments each nest the node they decorate by one level while the reader
+/// loops instead of recursing, so the depth gate never sees them. Bounding the chain keeps the
+/// resulting tree shallow enough for the recursive walks that follow (normalize, walk, drop).
+const MAX_CHAIN: usize = 512;
+
 /// Read a bare equation byte stream, i.e. one that starts at the version byte.
 pub(crate) fn document(body: &[u8]) -> Result<Parsed, MtefError> {
     let mut parser = Parser::new(body)?;
@@ -201,6 +208,8 @@ impl<'a> Parser<'a> {
     fn list_inner(&mut self) -> Result<Vec<Node>, MtefError> {
         let mut out: Vec<Node> = Vec::new();
         let mut pending: Option<(Option<Node>, Option<Node>)> = None;
+        // A run of scripts wraps the same node over and over, which the depth gate does not see.
+        let mut chain = 0usize;
         let push = |out: &mut Vec<Node>, node: Node, pending: &mut Option<_>| {
             out.push(match pending.take() {
                 Some((sub, sup)) => attach(node, sub, sup),
@@ -215,16 +224,22 @@ impl<'a> Parser<'a> {
             }
             match self.item(false)? {
                 Item::Nodes(nodes) => {
+                    chain = 0;
                     for node in nodes {
                         push(&mut out, node, &mut pending);
                     }
                 }
                 Item::Line(row) => {
+                    chain = 0;
                     for node in row {
                         push(&mut out, node, &mut pending);
                     }
                 }
                 Item::Script { sub, sup, precedes: false } => {
+                    chain += 1;
+                    if chain > MAX_CHAIN {
+                        return Err(MtefError::Nesting);
+                    }
                     let base = out.pop().unwrap_or_else(Node::empty);
                     out.push(attach(base, sub, sup));
                 }
@@ -348,7 +363,10 @@ impl<'a> Parser<'a> {
             self.reader.u16()?;
         }
         if options & OPT_LP_RULER != 0 {
-            self.item(true)?;
+            self.enter()?;
+            let result = self.item(true);
+            self.leave();
+            result?;
         }
         if options & OPT_LINE_NULL != 0 {
             return Ok(if lines { Item::Line(Row::new()) } else { Item::Nodes(Vec::new()) });
@@ -390,6 +408,9 @@ impl<'a> Parser<'a> {
     fn embellishments(&mut self, node: Node) -> Result<Node, MtefError> {
         self.enter()?;
         let mut dressed = node;
+        // Each embellishment adds one accent around the same base, which the depth gate does not
+        // see: bound the chain so the tree stays shallow.
+        let mut chain = 0usize;
         let result = loop {
             if self.reader.peek()? == TAG_END {
                 self.reader.u8()?;
@@ -402,6 +423,10 @@ impl<'a> Parser<'a> {
                 let kind = self.embellishment_type()?;
                 match accent_of_embellishment(kind) {
                     Some((accent, under)) => {
+                        chain += 1;
+                        if chain > MAX_CHAIN {
+                            break Err(MtefError::Nesting);
+                        }
                         dressed = Node::Accent(Box::new(Accent { kind: accent, base: dressed, under }));
                     }
                     None => self.report.skipped += 1,
@@ -697,7 +722,10 @@ impl<'a> Parser<'a> {
         let horizontal = self.reader.u8()?;
         let _vertical = self.reader.u8()?;
         if options & OPT_LP_RULER != 0 {
-            self.item(true)?;
+            self.enter()?;
+            let result = self.item(true);
+            self.leave();
+            result?;
         }
         let rows = self.rows()?;
         Ok(Item::Nodes(vec![Node::Matrix(Box::new(Matrix {

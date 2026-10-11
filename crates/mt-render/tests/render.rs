@@ -227,6 +227,36 @@ fn eps_bounding_box_matches_the_image_box() {
 }
 
 #[test]
+fn eps_rule_rectangle_spans_the_rule_box() {
+    let face = face();
+    let rule = LBox::Rule { x: 5.0, y: 0.0, width: 10.0, height: 1.0, depth: 1.0, dashed: false };
+    let tree = LBox::HBox { items: vec![rule], width: 20.0, height: 1.0, depth: 1.0 };
+    let options = RenderOptions::default();
+    let (bx0, _, _, by1) = image_bounds(&tree, &style(), &face, &options);
+    let eps = render_eps(&tree, &style(), &face, &options);
+
+    // The rule is filled as `newpath <llx> <lly> <width> <height> rectfill`, after the y flip.
+    let line = eps
+        .lines()
+        .find(|line| line.ends_with("rectfill"))
+        .expect("the rule is filled with a rectangle");
+    let values: Vec<f64> = line
+        .split_whitespace()
+        .filter_map(|token| token.parse().ok())
+        .collect();
+    assert_eq!(values.len(), 4, "a corner, width and height: {line}");
+    let (llx, lly, width, height) = (values[0], values[1], values[2], values[3]);
+
+    // The rectangle runs from the depth edge (layout y + depth) up to the top edge (y - height).
+    assert!((llx - (5.0 - bx0)).abs() < 1e-3, "left edge at {llx}, expected {}", 5.0 - bx0);
+    assert!((width - 10.0).abs() < 1e-3, "width {width}");
+    assert!(height > 0.0, "the rectangle height must be positive, got {height}");
+    assert!((height - 2.0).abs() < 1e-3, "height spans -1..1 in layout points, got {height}");
+    assert!((lly - (by1 - 1.0)).abs() < 1e-3, "lower edge at {lly}, expected {}", by1 - 1.0);
+    assert!((lly + height - (by1 + 1.0)).abs() < 1e-3, "upper edge at {}", lly + height);
+}
+
+#[test]
 fn an_empty_hbox_still_renders_a_valid_tiny_image() {
     let face = face();
     let tree = LBox::HBox { items: vec![], width: 0.0, height: 0.0, depth: 0.0 };

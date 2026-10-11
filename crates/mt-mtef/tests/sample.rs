@@ -7,12 +7,21 @@ use mt_core::{MathStyle, Node};
 use mt_mtef::{parse, read, write, Stream};
 
 /// Path of the extracted equation object.
+///
+/// The object is not part of the repository; this is where it was extracted on the development
+/// machine. Set `MTEF_SAMPLE` to read a copy from somewhere else.
 const SAMPLE: &str = r"C:\Users\ouyan\tools\mt-re\out\blank__ObjectPool__1277023402_Equation_Native.bin";
+
+/// The path the sample is read from: `MTEF_SAMPLE` when set, the development path otherwise.
+fn sample_path() -> String {
+    std::env::var("MTEF_SAMPLE").unwrap_or_else(|_| SAMPLE.to_owned())
+}
 
 #[test]
 fn reads_a_blank_equation_object() {
-    let Ok(bytes) = std::fs::read(SAMPLE) else {
-        println!("skipping: {SAMPLE} is not on this machine");
+    let path = sample_path();
+    let Ok(bytes) = std::fs::read(&path) else {
+        println!("skipping: {path} is not on this machine (set MTEF_SAMPLE to override)");
         return;
     };
     assert_eq!(bytes.len(), 220, "the object is the blank equation");

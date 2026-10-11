@@ -23,16 +23,12 @@ mod eps;
 mod outline;
 mod raster;
 
+use mt_layout::constants::{PLACEHOLDER_DASH, PLACEHOLDER_STROKE};
 use mt_layout::{Box as LBox, LayoutStyle};
 use ttf_parser::Face;
 
 use outline::{Path, glyph_path};
 use raster::Mask;
-
-/// Padding of the dashed empty-slot placeholder, in points.
-const PLACEHOLDER_STROKE: f64 = 0.5;
-/// Dash length of the empty-slot placeholder, in points.
-const PLACEHOLDER_DASH: f64 = 1.0;
 
 /// How the tree is turned into pixels or points.
 #[derive(Clone, Copy, Debug, PartialEq)]

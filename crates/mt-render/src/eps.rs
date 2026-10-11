@@ -5,11 +5,10 @@
 //! the image and `y` is flipped, so the origin is the bottom-left corner of the image box and the
 //! integer `%%BoundingBox` is `0 0 ceil(width) ceil(height)` in points.
 
+use mt_layout::constants::{PLACEHOLDER_DASH, PLACEHOLDER_STROKE};
+
 use crate::outline::Path;
 use crate::Item;
-
-/// Stroke width of the dashed empty-slot placeholder, in points.
-const DASH_STROKE: f64 = 0.5;
 
 /// Emit a complete EPS document for the collected items.
 ///
@@ -132,7 +131,7 @@ fn emit_rule(
     // PostScript rectangle lower-left corner plus size, after the `y` flip.
     let ll = ps([x, bottom], origin);
     let w = width;
-    let h = top - bottom;
+    let h = bottom - top;
     if dashed {
         out.push_str("newpath\n");
         out.push_str(&format!("{} {} moveto\n", number(ll[0]), number(ll[1])));
@@ -144,8 +143,12 @@ fn emit_rule(
         ));
         out.push_str(&format!("{} {} lineto\n", number(ll[0]), number(ll[1] + h)));
         out.push_str("closepath\n");
-        out.push_str(&format!("{} setlinewidth\n", number(DASH_STROKE)));
-        out.push_str("[1 1] 0 setdash\n");
+        out.push_str(&format!("{} setlinewidth\n", number(PLACEHOLDER_STROKE)));
+        out.push_str(&format!(
+            "[{} {}] 0 setdash\n",
+            number(PLACEHOLDER_DASH),
+            number(PLACEHOLDER_DASH)
+        ));
         out.push_str("stroke\n");
         out.push_str("[] 0 setdash\n");
     } else {
