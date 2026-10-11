@@ -62,39 +62,51 @@
 //! # Canonical forms
 //!
 //! The equation tree can express a few things this format has no record for, and this format can
-//! express a few things the tree has no node for. The round trip is exact for everything else,
-//! and these are the documented exceptions:
+//! express a few things the tree has no node for. The round trip is exact for everything else —
+//! writing a tree, reading it back and writing it again reproduces the first byte stream exactly,
+//! which the fidelity corpus in `tests/fidelity.rs` checks — and these are the documented
+//! exceptions:
 //!
-//! * A style or font override ([`mt_core::Node::Styled`]) has no record; the body is written as
-//!   it stands, and a parse never produces one.
+//! * A style or font override ([`mt_core::Node::Styled`]) has no record of its own. A font
+//!   override is written by putting the covered characters in the overridden face, so it reads
+//!   back as those characters without the wrapper; a style or class override is dropped, and a
+//!   parse never produces one.
+//! * The atom class of a character comes from the character itself — the function style forces
+//!   [`mt_core::Class::Op`], and every other face recomputes the class from the glyph — so a
+//!   class the tree carries but the glyph does not spell is lost.
 //! * Literal text ([`mt_core::Node::Text`]) is written as its characters and reads back as a row
 //!   of characters, and a construct the reader cannot represent ([`mt_core::Node::Error`]) is
 //!   written as its text for the same reason.
-//! * Explicit spacing ([`mt_core::Node::Space`]) is written as a space in the spacing style and
-//!   reads back as [`mt_core::Space::Thin`], which is what the record can express.
+//! * Explicit spacing ([`mt_core::Node::Space`]) is written as a space in the spacing style; the
+//!   record carries no width, so every kind reads back as [`mt_core::Space::Thin`].
 //! * An alignment point ([`mt_core::Node::Align`]) has no record and is dropped.
 //! * A delimiter that spells one of the drawn fences ([`mt_core::Delim::Custom`] holding one of
-//!   `()[]{}` or a bar) reads back as that fence's delimiter, and
-//!   [`mt_core::Delim::Norm`]/[`mt_core::Delim::DoubleBar`] and
+//!   the glyphs a fence template draws) is written with that template and reads back as that
+//!   fence's delimiter, and [`mt_core::Delim::Norm`]/[`mt_core::Delim::DoubleBar`] and
 //!   [`mt_core::Delim::Arrow`]/[`mt_core::Delim::Angle`] are spellings of the same template.
 //! * A [`mt_core::Fence`] whose body is directly a [`mt_core::Matrix`] reads back as a matrix
 //!   carrying those delimiters, which is the same construct spelled the other way round.
 //! * A [`mt_core::Matrix`] reads back with an empty column list: the format aligns a whole table
 //!   in one step. A table that draws cell rules reads back as
 //!   [`mt_core::MatrixKind::Array`], one without as [`mt_core::MatrixKind::Matrix`], and
-//!   [`mt_core::MatrixKind::Aligned`] has no spelling at all.
-//! * [`mt_core::FracKind::NoBar`] is spelled as a slash fraction aligned on the baseline, which
-//!   no drawing in this format uses.
-//! * A doubled bar template reads as [`mt_core::AccentKind::Line`] and writes back as one.
-//! * A hat, arc or point accent carries the glyph it draws, so the accent kinds this crate cannot
-//!   spell as a template are written as the nearest one and read back from that glyph.
-//! * An empty slot inside a script, a limit or a root index reads as absent, because the format
-//!   writes both as a line that is not drawn.
+//!   [`mt_core::MatrixKind::Aligned`] has no spelling at all. A long division without a
+//!   quotient row reads back with an empty one.
+//! * A large operator template takes a single operator glyph, so a [`mt_core::Big`] whose base
+//!   spells more — a function name like `lim` — is written as the limits template with its
+//!   scripts as under/over material when it carries any, and as the text it spells when it
+//!   carries none; both read back without the operator wrapper.
+//! * The alignment of a [`mt_core::Limits`] node has no record and reads back as centred.
+//! * A slot that is drawn but empty — an empty script, limit or root index — is written as an
+//!   empty line and reads back as present and empty; a line that is not drawn at all reads back
+//!   as an absent slot.
 //! * A row holding a single item is written as that item, because the format has no way to tell
 //!   a wrapped item from a bare one.
 //! * The size preset of the equation is written as a size record; the text preset has no record
 //!   of its own and reads back as the full preset.
 //!
+//! A doubled bar template reads as [`mt_core::AccentKind::Line`] and writes back as one, and a
+//! hat, arc or point accent carries the glyph it draws, so the accent kinds this crate cannot
+//! spell as a template are written as the nearest one and read back from that glyph.
 //! ```
 //! use mt_core::{Math, Node};
 //! use mt_mtef::{parse_bare, write_bare};
