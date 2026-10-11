@@ -112,7 +112,7 @@ mod tables;
 mod write;
 
 pub use mt_core::Math;
-pub use ole::{read_from_ole, write_into_ole};
+pub use ole::{create_ole, read_from_ole, write_into_ole};
 
 use std::fmt;
 

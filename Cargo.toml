@@ -20,6 +20,7 @@ mt-layout = { path = "crates/mt-layout" }
 mt-edit = { path = "crates/mt-edit" }
 mt-render = { path = "crates/mt-render" }
 mt-mtef = { path = "crates/mt-mtef" }
+mt-docx = { path = "crates/mt-docx" }
 
 [profile.release]
 lto = "thin"
