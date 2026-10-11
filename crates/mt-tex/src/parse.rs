@@ -70,16 +70,34 @@ enum Mode {
     Aligned,
 }
 
+/// Maximum nesting depth of recursive grammar constructs (groups, `\left...\right`,
+/// environments, script arguments). Deeper input is rejected rather than overflowing the
+/// stack, mirroring the readers in mt-mathml and mt-omml.
+const MAX_DEPTH: usize = 128;
+
 struct Parser {
     src: Vec<(usize, char)>,
     pos: usize,
     base: usize,
     input_len: usize,
+    depth: usize,
 }
 
 impl Parser {
     fn new(input: &str, base: usize) -> Self {
-        Self { src: input.char_indices().collect(), pos: 0, base, input_len: input.len() }
+        Self { src: input.char_indices().collect(), pos: 0, base, input_len: input.len(), depth: 0 }
+    }
+
+    /// Enter one level of nesting, rejecting input deeper than [`MAX_DEPTH`].
+    ///
+    /// The matching decrement sits on the success path only; every failure aborts the whole
+    /// parse, so a leaked increment on an error return is harmless.
+    fn enter(&mut self) -> Result<(), ParseError> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            return Err(self.err("input nests deeper than the parser accepts"));
+        }
+        Ok(())
     }
 
     fn peek(&self) -> Option<char> {
@@ -161,6 +179,7 @@ impl Parser {
 
     /// Parse a sequence of atoms until a terminator owned by the caller is reached.
     fn parse_row(&mut self, mode: Mode, bracket: bool) -> Result<Vec<Node>, ParseError> {
+        self.enter()?;
         let mut out: Vec<Node> = Vec::new();
         let mut over: Option<Vec<Node>> = None;
         let mut pending_style: Option<MathStyle> = None;
@@ -218,6 +237,7 @@ impl Parser {
                 class: None,
             }))];
         }
+        self.depth -= 1;
         Ok(out)
     }
 
@@ -261,12 +281,11 @@ impl Parser {
     ///
     /// A single atom is returned bare, matching the canonical slot form.
     fn parse_arg(&mut self) -> Result<Node, ParseError> {
+        self.enter()?;
         self.skip_spaces();
-        if self.peek() == Some('{') {
-            self.parse_group()
-        } else {
-            self.parse_atom()
-        }
+        let arg = if self.peek() == Some('{') { self.parse_group() } else { self.parse_atom() };
+        self.depth -= 1;
+        arg
     }
 
     /// Attach `^`/`_` scripts (and `\limits`/`\nolimits`) to a base.
@@ -396,6 +415,31 @@ impl Parser {
                 let font = font_macro(&name);
                 let body = self.parse_arg()?;
                 Ok(styled_font(font, body))
+            }
+            "mathord" | "mathbin" | "mathrel" | "mathopen" | "mathclose" | "mathpunct" => {
+                let class = match name.as_str() {
+                    "mathord" => Class::Ord,
+                    "mathbin" => Class::Bin,
+                    "mathrel" => Class::Rel,
+                    "mathopen" => Class::Open,
+                    "mathclose" => Class::Close,
+                    _ => Class::Punct,
+                };
+                let body = self.parse_arg()?;
+                match body {
+                    // A single character carries the class itself, matching the canonical form
+                    // mt-mathml spells as a `mt-class-*` marker on the token element.
+                    Node::Char(mut ch) => {
+                        ch.class = class;
+                        Ok(Node::Char(ch))
+                    }
+                    other => Ok(Node::Styled(Box::new(Styled {
+                        body: other,
+                        style: None,
+                        font: None,
+                        class: Some(class),
+                    }))),
+                }
             }
             "hspace" => self.parse_hspace(),
             "quad" => Ok(Node::Space(Space::Quad)),
@@ -747,7 +791,7 @@ fn char_node_with(ch: char, class: Class, font: Font) -> Node {
 }
 
 /// Atom class for a plain character typed directly in math mode.
-fn char_class(ch: char) -> Class {
+pub(crate) fn char_class(ch: char) -> Class {
     match ch {
         '(' | '[' => Class::Open,
         ')' | ']' => Class::Close,

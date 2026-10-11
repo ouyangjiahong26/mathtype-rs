@@ -366,3 +366,32 @@ fn a_nested_expression_round_trips_as_a_whole() {
     ]));
     round_trip(&equation);
 }
+
+#[test]
+fn a_text_base_with_limits_stays_a_large_operator() {
+    // `\lim` and friends: the writer spells `Node::Big` over a text base as under/over
+    // elements, so the reader must not demote it to `Node::Limits` (or `Node::Scripts`).
+    let base = || Node::Text(Box::new(TextRun { text: "lim".to_owned(), font: Font::Upright }));
+    for big in [
+        Node::Big(Box::new(BigOp { base: base(), sub: None, sup: None, limits: true })),
+        Node::Big(Box::new(BigOp { base: base(), sub: Some(digit('0')), sup: None, limits: true })),
+        Node::Big(Box::new(BigOp { base: base(), sub: None, sup: Some(digit('2')), limits: true })),
+        Node::Big(Box::new(BigOp {
+            base: base(),
+            sub: Some(digit('0')),
+            sup: Some(digit('2')),
+            limits: true,
+        })),
+        // `\lim\nolimits_0`: no limits, spelled with sub/sup elements.
+        Node::Big(Box::new(BigOp { base: base(), sub: Some(digit('0')), sup: None, limits: false })),
+    ] {
+        round_trip(&Math::new(big));
+    }
+    // A genuine limit over a character base keeps its variant.
+    round_trip(&Math::new(Node::Limits(Box::new(Limits {
+        base: variable('x'),
+        under: None,
+        over: Some(digit('2')),
+        align: Side::Center,
+    }))));
+}

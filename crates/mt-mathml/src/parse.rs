@@ -253,7 +253,9 @@ fn subscript_superscript(e: &Elem) -> Result<Node, ParseError> {
 
 /// A scripted or limited base: a large operator with limits becomes [`Node::Big`].
 fn attached(base: Node, sub: Option<Node>, sup: Option<Node>, limits: bool) -> Node {
-    if large_operator(&base) {
+    // A text base (`\lim` and friends) is only scripted as a large operator: the writer spells
+    // `Node::Big` over a text base as these very elements, so it reads back as `Node::Big`.
+    if large_operator(&base) || matches!(base, Node::Text(_)) {
         Node::Big(Box::new(BigOp { base, sub, sup, limits }))
     } else {
         Node::Scripts(Box::new(Scripts { base, sub, sup }))
@@ -283,6 +285,11 @@ fn under_over(e: &Elem) -> Result<Node, ParseError> {
         }
     }
     if large_operator(&base) {
+        return Ok(Node::Big(Box::new(BigOp { base, sub: under, sup: over, limits: true })));
+    }
+    // A text base in an under/over element is a large operator (`\lim` and friends): the
+    // writer spells `Node::Big` over a text base the same way, so it reads back as `Node::Big`.
+    if matches!(base, Node::Text(_)) {
         return Ok(Node::Big(Box::new(BigOp { base, sub: under, sup: over, limits: true })));
     }
     let align = match e.attr("align") {

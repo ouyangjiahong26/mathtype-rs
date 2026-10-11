@@ -2,8 +2,8 @@
 //! serialiser, and the error paths.
 
 use mt_core::{
-    Accent, AccentKind, BigOp, Class, Delim, Fence, Font, Frac, FracKind, Limits, Math, Matrix,
-    MatrixKind, Node, Scripts, Side, Space, Sqrt, Styled, TextRun,
+    Accent, AccentKind, BigOp, Char, Class, Delim, Fence, Font, Frac, FracKind, Limits, Math,
+    Matrix, MatrixKind, Node, Scripts, Side, Space, Sqrt, Styled, TextRun,
 };
 
 use crate::{parse, to_latex, to_latex_fragment};
@@ -906,4 +906,117 @@ fn mismatched_end_is_an_error() {
 #[test]
 fn newcommand_is_rejected() {
     assert!(parse("\\newcommand{\\x}{1}").is_err());
+}
+
+// ------------------------------------------------------------------ nesting limit
+
+#[test]
+fn deeply_nested_input_is_rejected_not_crashed() {
+    for input in [
+        "{".repeat(129),
+        format!("{0}{1}{0}", "{".repeat(129), "x"),
+        format!("{}x", "\\left(".repeat(129)),
+        format!("\\frac{}{{b}}", "\\frac{a}".repeat(90)),
+    ] {
+        let error = match parse(&input) {
+            Ok(_) => panic!("deeply nested input parsed: {}", input.chars().take(24).collect::<String>()),
+            Err(error) => error,
+        };
+        assert!(
+            error.message.contains("nests deeper"),
+            "unexpected error for {}: {error}",
+            input.chars().take(24).collect::<String>()
+        );
+    }
+    // Just inside the limit the parser still reports the real syntax error, not the depth gate.
+    let error = parse(&"{".repeat(64)).unwrap_err();
+    assert!(error.message.contains("unclosed"), "unexpected message: {error}");
+}
+
+// ------------------------------------------------------------------ font and class round trips
+
+#[test]
+fn forced_font_characters_keep_their_face() {
+    // What the MathML reader produces for `<mi mathvariant="bold">a</mi>`: the face rides on
+    // the character itself. Writing it wraps the character in the font macro, and re-parsing
+    // keeps the face.
+    for font in [Font::Bold, Font::DoubleStruck, Font::Monospace, Font::SansSerifItalic] {
+        let node = Node::Char(Char { ch: 'a', class: Class::Ord, font });
+        let latex = to_latex_fragment(&node);
+        assert!(
+            latex.starts_with('\\'),
+            "forced font `{font:?}` must be spelled with a macro, got `{latex}`"
+        );
+        let reparsed = parse(&latex).unwrap_or_else(|error| panic!("`{latex}` failed: {error}"));
+        assert!(
+            fragment_has_font(reparsed.body, font),
+            "font `{font:?}` lost in `{latex}`"
+        );
+    }
+    // Default face writes directly with no macro.
+    assert_eq!(to_latex_fragment(&v('x')), "x");
+}
+
+/// Whether the node, or a single-item font wrapper inside it, carries `font`.
+fn fragment_has_font(node: Node, font: Font) -> bool {
+    match node {
+        Node::Char(ch) => ch.font == font,
+        Node::Styled(styled) => styled.font == Some(font) || fragment_has_font(styled.body, font),
+        Node::Row(row) => row.into_iter().any(|item| fragment_has_font(item, font)),
+        _ => false,
+    }
+}
+
+#[test]
+fn forced_class_characters_keep_their_class() {
+    // What the MathML reader produces for `<mo class="mt-class-bin">x</mo>`.
+    let node = Node::Char(Char { ch: 'x', class: Class::Bin, font: Font::Italic });
+    let latex = to_latex_fragment(&node);
+    assert_eq!(latex, "\\mathbin{x}");
+    assert_eq!(body(&latex), sym('x', Class::Bin));
+    // A forced class on a symbol written as a macro wraps the macro.
+    let node = Node::Char(Char { ch: '→', class: Class::Ord, font: Font::Upright });
+    assert_eq!(to_latex_fragment(&node), "\\mathord{\\to}");
+    assert_eq!(body("\\mathord{\\to}"), sym('→', Class::Ord));
+    // Natural classes write directly.
+    assert_eq!(to_latex_fragment(&sym('+', Class::Bin)), "+");
+    // Class macros parse onto single characters and larger bodies alike.
+    assert_eq!(body("\\mathrel{ab}"), ro(vec![Node::Styled(Box::new(Styled {
+        body: ro(vec![v('a'), v('b')]),
+        style: None,
+        font: None,
+        class: Some(Class::Rel),
+    }))]));
+}
+
+// ------------------------------------------------------------------ lossy output spells parseably
+
+#[test]
+fn align_writes_parseably_in_its_contexts() {
+    // Top level: no parseable spelling for an alignment point, so a placeholder space.
+    let latex = to_latex_fragment(&Node::Align);
+    assert_eq!(latex, "\\;");
+    assert_eq!(body(&latex), Node::Space(Space::Thick));
+    // Inside an `aligned` cell the alignment point round trips.
+    let matrix = Matrix {
+        rows: vec![vec![ro(vec![v('a'), Node::Align, v('b')])]],
+        delims: None,
+        kind: MatrixKind::Aligned,
+        align: Side::Center,
+        columns: Vec::new(),
+        rules: false,
+    };
+    assert_round_trips(Node::Matrix(Box::new(matrix)));
+}
+
+#[test]
+fn error_nodes_write_escaped_text() {
+    let node = Node::Error("a & b {c}".to_owned());
+    let latex = to_latex_fragment(&node);
+    assert_eq!(latex, "\\text{a \\& b \\{c\\}}");
+    // The output parses; the error nature is dropped (documented exception).
+    assert_eq!(body(&latex), Node::Text(Box::new(TextRun {
+        text: "a & b {c}".to_owned(),
+        font: Font::Upright,
+    })));
 }
