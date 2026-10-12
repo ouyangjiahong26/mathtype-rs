@@ -70,6 +70,9 @@ $utf8NoBom   = New-Object System.Text.UTF8Encoding($false)
 $script:Failures = New-Object System.Collections.Generic.List[string]
 $script:Notes    = New-Object System.Collections.Generic.List[string]
 $script:StartedEditors = New-Object System.Collections.Generic.List[int]
+# The `mathtype` processes that were running when the run started, so the editor this run opens can
+# be told apart from the editor a machine that also has MathType 7 already has up.
+$script:EditorsBefore = @()
 
 function Ok([string]$m)   { Write-Host "[ok]   $m" -ForegroundColor Green }
 function Fail([string]$m) { $script:Failures.Add($m) | Out-Null; Write-Host "[FAIL] $m" -ForegroundColor Red }
@@ -174,6 +177,9 @@ try {
     $doc = $word.Documents.Add()
     Ok "Word started, document created (pid $((Get-Process -Name WINWORD -ErrorAction SilentlyContinue |
         Sort-Object StartTime -Descending | Select-Object -First 1).Id))"
+    # Word asks the object to show itself (`OLEIVERB_SHOW`) while it inserts it, so this run's
+    # editor can already be up before step 4 asks for one. This is what "this run's editor" means.
+    $script:EditorsBefore = @(Get-Process -Name mathtype -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
     $shape = $doc.InlineShapes.AddOLEObject($progId)
     if ($null -eq $shape) {
         Fail 'AddOLEObject returned nothing'
@@ -209,6 +215,17 @@ if ($null -ne $shape) {
                 Where-Object { $before -notcontains $_.Id })
             if ($new.Count -gt 0) { $editor = $new[0] }
             else { Start-Sleep -Milliseconds 200 }
+        }
+        if ($null -eq $editor) {
+            # The insertion itself may have opened the editor: it is this run's editor even though
+            # it appeared before this step, and the hand-off file it is editing belongs to the
+            # object this run inserted.
+            $opened = @(Get-Process -Name mathtype -ErrorAction SilentlyContinue |
+                Where-Object { $script:EditorsBefore -notcontains $_.Id })
+            if ($opened.Count -gt 0) {
+                $editor = $opened[0]
+                Note "the editor was already running from the insertion: mathtype pid=$($editor.Id)"
+            }
         }
         if ($null -eq $editor) {
             Fail "no mathtype editor process appeared within $EditorTimeoutSeconds seconds of DoVerb($verb)"
