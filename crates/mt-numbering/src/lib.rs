@@ -696,9 +696,11 @@ pub fn insert_numbered(
             let fragment = numbered_inline(&math_xml, style, side, &bookmark, id);
             document.insert_fragment(position, &fragment)
         }
-        Position::ParagraphPropertiesStart { .. } => Err(DocxError::Xml(
-            "numbering is content, not paragraph properties; name a content position".to_owned(),
-        )),
+        Position::ParagraphPropertiesStart { .. } | Position::AfterParagraph { .. } => {
+            Err(DocxError::Xml(
+                "numbering is content inside a paragraph; name a content position".to_owned(),
+            ))
+        }
     }
 }
 

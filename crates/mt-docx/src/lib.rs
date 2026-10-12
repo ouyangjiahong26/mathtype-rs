@@ -146,6 +146,8 @@ pub enum Position {
     /// begins. The XML must therefore be property elements (`<w:tabs/>`, say) in the first case
     /// and a whole `w:pPr` in the second.
     ParagraphPropertiesStart { block: usize },
+    /// After the paragraph's closing tag: whole paragraphs (`<w:p>…</w:p>`) go here.
+    AfterParagraph { block: usize },
 }
 
 /// A Word document opened for reading and editing.
@@ -343,6 +345,10 @@ impl Document {
                 let paragraph = self.paragraph_at_block(block)?;
                 paragraph.properties_open_end.unwrap_or(paragraph.open_tag_end)
             }
+            Position::AfterParagraph { block } => {
+                let paragraph = self.paragraph_at_block(block)?;
+                paragraph.range.end
+            }
             Position::BeforeItem { block, item } | Position::AfterItem { block, item } => {
                 let paragraph = self.paragraph_at(block, item)?;
                 let range = paragraph.items[item].edit_range();
@@ -484,6 +490,19 @@ impl Document {
             }
         }
         // No usable object behind the item: a new minimal one.
+        self.create_equation_object(math, wanted_prog_id.unwrap_or(DEFAULT_PROG_ID), wanted_preview)
+    }
+
+    /// Creates a fresh equation object — a compound-file part holding `math`, an optional
+    /// preview picture part — and returns the relationship id, the ProgID, and the preview
+    /// markup to embed.
+    fn create_equation_object(
+        &mut self,
+        math: &Math,
+        prog_id: &str,
+        preview: Option<&ImageData>,
+    ) -> Result<(String, String, Option<String>), DocxError> {
+        let stream = mt_mtef::write(math);
         let bytes = mt_mtef::create_ole(&stream)
             .map_err(|error| DocxError::Xml(format!("building an object failed: {error}")))?;
         let part = self.unused_part_name("word/embeddings", "oleObject", "bin");
@@ -494,8 +513,7 @@ impl Document {
         self.package.set_part(&part, bytes);
         let rel_id = self.rels.add(kinds::OLE_OBJECT, &rel_target, false);
         self.dirty_rels = true;
-        let prog_id = wanted_prog_id.unwrap_or(DEFAULT_PROG_ID).to_owned();
-        let preview = match wanted_preview {
+        let preview = match preview {
             Some(picture) => {
                 let image_rel = self.add_media_part(picture)?;
                 let id = self.take_generated_id();
@@ -503,7 +521,21 @@ impl Document {
             }
             None => None,
         };
-        Ok((rel_id, prog_id, preview))
+        Ok((rel_id, prog_id.to_owned(), preview))
+    }
+
+    /// The run markup embedding a fresh equation object, ready to splice into any paragraph:
+    /// the object's compound file (holding `math`) and optional preview picture become parts of
+    /// the container, referenced by the returned `w:r`.
+    pub fn new_equation_object_runs(
+        &mut self,
+        math: &Math,
+        prog_id: &str,
+        preview: Option<&ImageData>,
+    ) -> Result<String, DocxError> {
+        let (rel_id, _prog_id, preview) = self.create_equation_object(math, prog_id, preview)?;
+        let id = self.take_generated_id();
+        Ok(fragment::object_run(&rel_id, prog_id, preview.as_deref(), id))
     }
 
     /// Drops the relationship of an object that is being replaced by something else, when no
