@@ -1,7 +1,7 @@
 //! Style-preset application: how a `LayoutStyle` built from a preset changes the same tree.
 
 use mt_core::{Class, Math, Node};
-use mt_layout::{layout, math_variant, ApproxMetrics, Box as LBox, LayoutStyle, StyleFonts};
+use mt_layout::{ApproxMetrics, Box as LBox, LayoutStyle, StyleFonts, layout, math_variant};
 
 /// Width of the laid-out `math`, in points.
 fn width(math: &Math, style: &LayoutStyle) -> f64 {
@@ -45,7 +45,8 @@ fn a_bigger_thick_space_widens_a_relation() {
     let mut wide = LayoutStyle::display(10.0);
     wide.spacing.thick_kern = mt_layout::constants::THICK_KERN * 2.0;
     assert!(
-        width(&math, &wide) > width(&math, &LayoutStyle::display(10.0)) + 2.0 * wide.spacing.thick_kern,
+        width(&math, &wide)
+            > width(&math, &LayoutStyle::display(10.0)) + 2.0 * wide.spacing.thick_kern,
         "two thick kerns must grow the row"
     );
 }
@@ -86,7 +87,10 @@ fn the_variable_slot_reletters_the_glyph() {
 
 #[test]
 fn number_and_greek_slots_restyle_their_roles() {
-    let math = Math::new(Node::row([Node::char_with('7', Class::Ord, mt_core::Font::Upright), Node::char_with('α', Class::Ord, mt_core::Font::Italic)]));
+    let math = Math::new(Node::row([
+        Node::char_with('7', Class::Ord, mt_core::Font::Upright),
+        Node::char_with('α', Class::Ord, mt_core::Font::Italic),
+    ]));
     let mut bold = LayoutStyle::display(10.0);
     bold.fonts.number = mt_core::Font::Bold;
     bold.fonts.greek = mt_core::Font::Upright;
@@ -97,7 +101,10 @@ fn number_and_greek_slots_restyle_their_roles() {
             glyphs.push((*ch, *font));
         }
     });
-    assert_eq!(glyphs[0], (math_variant('7', mt_core::Font::Bold), mt_core::Font::Bold));
+    assert_eq!(
+        glyphs[0],
+        (math_variant('7', mt_core::Font::Bold), mt_core::Font::Bold)
+    );
     assert_eq!(glyphs[1], ('α', mt_core::Font::Upright));
 }
 
@@ -116,16 +123,25 @@ fn explicit_faces_survive_any_slot() {
             glyphs.push((*ch, *font));
         }
     });
-    assert_eq!(glyphs[0], (math_variant('x', mt_core::Font::Fraktur), mt_core::Font::Fraktur));
-    assert_eq!(glyphs[1], (math_variant('5', mt_core::Font::SansSerif), mt_core::Font::SansSerif));
+    assert_eq!(
+        glyphs[0],
+        (
+            math_variant('x', mt_core::Font::Fraktur),
+            mt_core::Font::Fraktur
+        )
+    );
+    assert_eq!(
+        glyphs[1],
+        (
+            math_variant('5', mt_core::Font::SansSerif),
+            mt_core::Font::SansSerif
+        )
+    );
 }
 
 #[test]
 fn text_runs_follow_the_text_slot_not_the_variable_rules() {
-    let math = Math::new(Node::row([
-        Node::text("sin"),
-        Node::variable('x'),
-    ]));
+    let math = Math::new(Node::row([Node::text("sin"), Node::variable('x')]));
     let mut upright_variables = LayoutStyle::display(10.0);
     upright_variables.fonts.variable = mt_core::Font::Upright;
     upright_variables.fonts.text = mt_core::Font::Bold;
@@ -135,8 +151,17 @@ fn text_runs_follow_the_text_slot_not_the_variable_rules() {
             glyphs.push((*ch, *font));
         }
     });
-    assert_eq!(glyphs[0], (math_variant('s', mt_core::Font::Bold), mt_core::Font::Bold));
-    assert_eq!(glyphs[3], (math_variant('x', mt_core::Font::Upright), mt_core::Font::Upright));
+    assert_eq!(
+        glyphs[0],
+        (math_variant('s', mt_core::Font::Bold), mt_core::Font::Bold)
+    );
+    assert_eq!(
+        glyphs[3],
+        (
+            math_variant('x', mt_core::Font::Upright),
+            mt_core::Font::Upright
+        )
+    );
 }
 
 #[test]
@@ -150,5 +175,11 @@ fn styled_overrides_win_over_the_slots() {
     let mut bold = LayoutStyle::display(10.0);
     bold.fonts.variable = mt_core::Font::Bold;
     let (ch, font) = first_glyph(&layout(&math, &ApproxMetrics, &bold));
-    assert_eq!((ch, font), (math_variant('x', mt_core::Font::Fraktur), mt_core::Font::Fraktur));
+    assert_eq!(
+        (ch, font),
+        (
+            math_variant('x', mt_core::Font::Fraktur),
+            mt_core::Font::Fraktur
+        )
+    );
 }

@@ -1,11 +1,11 @@
 //! Geometry tests: concrete numbers and relations for every construct layout implements.
 
 use mt_core::{
-    Accent, AccentKind, BigOp, Class, Delim, Font, Frac, Fence, Limits, Math, MathStyle, Matrix,
+    Accent, AccentKind, BigOp, Class, Delim, Fence, Font, Frac, Limits, Math, MathStyle, Matrix,
     MatrixKind, Node, Scripts, Side, Space, Sqrt, Styled,
 };
 use mt_layout::{
-    constants as c, layout, math_base, ApproxMetrics, Box as LBox, FontMetrics, LayoutStyle,
+    ApproxMetrics, Box as LBox, FontMetrics, LayoutStyle, constants as c, layout, math_base,
 };
 
 /// A laid-out glyph, flattened out of the box tree for assertions.
@@ -54,8 +54,23 @@ fn walk<'a>(node: &'a LBox, visit: &mut impl FnMut(&'a LBox)) {
 fn glyphs(node: &LBox) -> Vec<Glyph> {
     let mut out = Vec::new();
     walk(node, &mut |part| {
-        if let LBox::Glyph { ch, font, x, y, size, yscale } = part {
-            out.push(Glyph { ch: *ch, font: *font, x: *x, y: *y, size: *size, yscale: *yscale });
+        if let LBox::Glyph {
+            ch,
+            font,
+            x,
+            y,
+            size,
+            yscale,
+        } = part
+        {
+            out.push(Glyph {
+                ch: *ch,
+                font: *font,
+                x: *x,
+                y: *y,
+                size: *size,
+                yscale: *yscale,
+            });
         }
     });
     out
@@ -71,7 +86,15 @@ fn glyph(node: &LBox, ch: char) -> Glyph {
 fn rules(node: &LBox) -> Vec<Rule> {
     let mut out = Vec::new();
     walk(node, &mut |part| {
-        if let LBox::Rule { x, y, width, height, depth, dashed } = part {
+        if let LBox::Rule {
+            x,
+            y,
+            width,
+            height,
+            depth,
+            dashed,
+        } = part
+        {
             out.push(Rule {
                 x: *x,
                 y: *y,
@@ -97,12 +120,19 @@ fn kerns(node: &LBox) -> Vec<f64> {
 
 #[track_caller]
 fn close(actual: f64, expected: f64) {
-    assert!((actual - expected).abs() < 1e-9, "expected {expected}, got {actual}");
+    assert!(
+        (actual - expected).abs() < 1e-9,
+        "expected {expected}, got {actual}"
+    );
 }
 
 #[track_caller]
 fn close_all(actual: &[f64], expected: &[f64]) {
-    assert_eq!(actual.len(), expected.len(), "length mismatch: {actual:?} vs {expected:?}");
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "length mismatch: {actual:?} vs {expected:?}"
+    );
     for (actual, expected) in actual.iter().zip(expected) {
         close(*actual, *expected);
     }
@@ -135,7 +165,10 @@ fn fraction_rule_thickness_gaps_and_axis() {
 
     let numerator = glyph(&boxes, 'a');
     let denominator = glyph(&boxes, 'b');
-    close(numerator.y + 0.0, rule.y - rule.height - c::FRAC_RULE_GAP * 10.0);
+    close(
+        numerator.y + 0.0,
+        rule.y - rule.height - c::FRAC_RULE_GAP * 10.0,
+    );
     close(
         denominator.y - 0.45 * 10.0,
         rule.y + rule.depth + c::FRAC_RULE_GAP * 10.0,
@@ -144,8 +177,14 @@ fn fraction_rule_thickness_gaps_and_axis() {
     close(numerator.x, 0.0);
     close(denominator.x, 0.0);
     close(boxes.width(), 5.0);
-    close(boxes.height(), float(0.25) + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 10.0);
-    close(boxes.depth(), -float(0.25) + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 10.0);
+    close(
+        boxes.height(),
+        float(0.25) + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 10.0,
+    );
+    close(
+        boxes.depth(),
+        -float(0.25) + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 10.0,
+    );
 }
 
 #[test]
@@ -154,7 +193,10 @@ fn fraction_arguments_keep_the_surrounding_size() {
     close(glyph(&boxes, 'a').size, 10.0);
     close(glyph(&boxes, 'b').size, 10.0);
     // A fraction inside a fraction stays at the surrounding size too; only scripts shrink.
-    let nested = lay(frac_of(frac_of(Node::variable('a'), Node::variable('b')), Node::variable('c')));
+    let nested = lay(frac_of(
+        frac_of(Node::variable('a'), Node::variable('b')),
+        Node::variable('c'),
+    ));
     close(glyph(&nested, 'a').size, 10.0);
 }
 
@@ -163,7 +205,10 @@ fn unbarred_and_linear_fractions_keep_their_arguments() {
     let mut no_bar = Frac::new(Node::variable('a'), Node::variable('b'));
     no_bar.kind = mt_core::FracKind::NoBar;
     let boxes = lay(Node::Frac(Box::new(no_bar)));
-    assert!(rules(&boxes).is_empty(), "a binomial coefficient draws no rule");
+    assert!(
+        rules(&boxes).is_empty(),
+        "a binomial coefficient draws no rule"
+    );
     let numerator = glyph(&boxes, 'a');
     let denominator = glyph(&boxes, 'b');
     // No rule, so the two arguments keep the no-bar gap on both sides of the axis.
@@ -210,10 +255,10 @@ fn slash_fraction_places_the_slash_between_its_arguments() {
     close(b.y, c::FRAC_SLASH_SHIFT * 10.0);
 
     // Nested after a sibling: everything is offset by the fraction's origin, the slash included.
-    let boxes = lay(Node::row([Node::variable('m'), slash_frac_of(
-        Node::variable('a'),
-        Node::variable('b'),
-    )]));
+    let boxes = lay(Node::row([
+        Node::variable('m'),
+        slash_frac_of(Node::variable('a'), Node::variable('b')),
+    ]));
     let (m, a, slash, b) = (
         glyph(&boxes, 'm'),
         glyph(&boxes, 'a'),
@@ -247,12 +292,20 @@ fn fraction_grows_when_the_numerator_carries_limits() {
 
 #[test]
 fn empty_slots_get_a_dashed_placeholder() {
-    let boxes =
-        lay(frac_of(Node::empty(), Node::row([Node::variable('a'), Node::variable('b')])));
+    let boxes = lay(frac_of(
+        Node::empty(),
+        Node::row([Node::variable('a'), Node::variable('b')]),
+    ));
     let rules = rules(&boxes);
     assert_eq!(rules.len(), 2, "the placeholder and the fraction rule");
-    let placeholder = rules.iter().find(|rule| rule.dashed).expect("a placeholder");
-    let bar = rules.iter().find(|rule| !rule.dashed).expect("a fraction rule");
+    let placeholder = rules
+        .iter()
+        .find(|rule| rule.dashed)
+        .expect("a placeholder");
+    let bar = rules
+        .iter()
+        .find(|rule| !rule.dashed)
+        .expect("a fraction rule");
     // The slot keeps the surrounding size, and so does its placeholder.
     close(placeholder.width, c::EMPTY_SLOT_WIDTH * 10.0);
     assert!(placeholder.width > 0.0);
@@ -295,7 +348,10 @@ fn scripts_are_shifted_by_the_base_extents_plus_an_offset() {
         Some(Node::variable('2')),
     ))));
     // (height - depth) / 2 + SCRIPT_OFFSET
-    close(glyph(&raised, '2').y, -((float(0.45) - 0.0) / 2.0 + c::SCRIPT_OFFSET * 10.0));
+    close(
+        glyph(&raised, '2').y,
+        -((float(0.45) - 0.0) / 2.0 + c::SCRIPT_OFFSET * 10.0),
+    );
     close(glyph(&raised, '2').y, -3.75);
 
     let lowered = lay(Node::Scripts(Box::new(Scripts::attach(
@@ -312,8 +368,11 @@ fn scripts_are_shifted_by_the_base_extents_plus_an_offset() {
 #[test]
 fn second_nesting_level_uses_the_script_script_scale() {
     // `x` with a subscript, that subscript itself carrying a subscript: `{y_a}` inside `x_{...}`.
-    let inner =
-        Node::Scripts(Box::new(Scripts::attach(Node::variable('n'), Some(Node::variable('a')), None)));
+    let inner = Node::Scripts(Box::new(Scripts::attach(
+        Node::variable('n'),
+        Some(Node::variable('a')),
+        None,
+    )));
     let boxes = lay(Node::Scripts(Box::new(Scripts::attach(
         Node::variable('x'),
         Some(inner),
@@ -349,13 +408,25 @@ fn binary_operator_kerns() {
         Node::symbol('+', Class::Bin),
         Node::variable('n'),
     ]));
-    close_all(&kerns(&sum), &[c::MEDIUM_KERN * 10.0, c::MEDIUM_KERN * 10.0]);
+    close_all(
+        &kerns(&sum),
+        &[c::MEDIUM_KERN * 10.0, c::MEDIUM_KERN * 10.0],
+    );
     // Besides the operator's own width, the pair of kerns is all that separates the two rows.
-    close(sum.width() - plain.width() - float(0.78), 2.0 * c::MEDIUM_KERN * 10.0);
+    close(
+        sum.width() - plain.width() - float(0.78),
+        2.0 * c::MEDIUM_KERN * 10.0,
+    );
 
     // A leading binary operator has nothing to combine, so it is an ordinary atom.
-    let leading = lay(Node::row([Node::symbol('+', Class::Bin), Node::variable('x')]));
-    assert!(kerns(&leading).is_empty(), "no spacing after a leading binary operator");
+    let leading = lay(Node::row([
+        Node::symbol('+', Class::Bin),
+        Node::variable('x'),
+    ]));
+    assert!(
+        kerns(&leading).is_empty(),
+        "no spacing after a leading binary operator"
+    );
     close(leading.width(), float(0.78) + 5.0);
 
     // Relations get the thick space, large operators the thin one.
@@ -364,9 +435,14 @@ fn binary_operator_kerns() {
         Node::symbol('=', Class::Rel),
         Node::variable('n'),
     ]));
-    close_all(&kerns(&relation), &[c::THICK_KERN * 10.0, c::THICK_KERN * 10.0]);
-    let operator =
-        lay(Node::row([Node::variable('x'), Node::symbol('\u{2211}', Class::Op)]));
+    close_all(
+        &kerns(&relation),
+        &[c::THICK_KERN * 10.0, c::THICK_KERN * 10.0],
+    );
+    let operator = lay(Node::row([
+        Node::variable('x'),
+        Node::symbol('\u{2211}', Class::Op),
+    ]));
     close_all(&kerns(&operator), &[c::THIN_KERN * 10.0]);
 
     // Punctuation and inner atoms separate with a thin space as well.
@@ -375,7 +451,10 @@ fn binary_operator_kerns() {
         Node::symbol(',', Class::Punct),
         Node::variable('n'),
     ]));
-    close_all(&kerns(&punctuation), &[c::THIN_KERN * 10.0, c::THIN_KERN * 10.0]);
+    close_all(
+        &kerns(&punctuation),
+        &[c::THIN_KERN * 10.0, c::THIN_KERN * 10.0],
+    );
     let inner = lay(Node::row([
         frac_of(Node::variable('a'), Node::variable('b')),
         Node::variable('n'),
@@ -385,7 +464,10 @@ fn binary_operator_kerns() {
 
 #[test]
 fn a_trailing_binary_operator_is_an_ordinary_atom() {
-    let boxes = lay(Node::row([Node::variable('x'), Node::symbol('+', Class::Bin)]));
+    let boxes = lay(Node::row([
+        Node::variable('x'),
+        Node::symbol('+', Class::Bin),
+    ]));
     assert!(kerns(&boxes).is_empty());
     close(boxes.width(), 5.0 + float(0.78));
 }
@@ -404,7 +486,10 @@ fn explicit_spaces_add_to_the_automatic_kerns() {
         Node::Space(Space::Medium),
         Node::variable('n'),
     ]));
-    close(explicit.width() - automatic.width(), 2.0 * c::MEDIUM_KERN * 10.0);
+    close(
+        explicit.width() - automatic.width(),
+        2.0 * c::MEDIUM_KERN * 10.0,
+    );
 
     let quad = lay(Node::Space(Space::Quad));
     close(quad.width(), 10.0);
@@ -437,7 +522,10 @@ fn fences_stretch_and_kern_towards_the_body() {
     close(open.x, 0.0);
     close(body.x, float(0.389) - c::FENCE_KERN * 10.0);
     close(closing.x, body.x + 5.0 - c::FENCE_KERN * 10.0);
-    close(fenced.width(), 2.0 * float(0.389) + 5.0 - 2.0 * c::FENCE_KERN * 10.0);
+    close(
+        fenced.width(),
+        2.0 * float(0.389) + 5.0 - 2.0 * c::FENCE_KERN * 10.0,
+    );
     // The delimiter is centred on the body, so it overhangs it on both sides.
     close(open.y, 0.25);
     close(fenced.height(), 7.25);
@@ -466,7 +554,11 @@ fn delimiters_absent_from_the_model_take_no_space() {
 
 #[test]
 fn delimiters_grow_with_the_body_and_stretch_vertically_at_the_limit() {
-    let tall = Node::row([Node::variable('x'), Node::variable('n'), Node::variable('a')]);
+    let tall = Node::row([
+        Node::variable('x'),
+        Node::variable('n'),
+        Node::variable('a'),
+    ]);
     let fenced = lay(Node::Fence(Box::new(Fence {
         open: Delim::Paren,
         close: Delim::Paren,
@@ -487,7 +579,10 @@ fn delimiters_grow_with_the_body_and_stretch_vertically_at_the_limit() {
     })));
     let delimiter = glyph(&huge, '(');
     close(delimiter.size, c::TALL_GLYPH_SCALES[5] * 10.0);
-    assert!(delimiter.yscale > 1.0, "the largest glyph is stretched vertically");
+    assert!(
+        delimiter.yscale > 1.0,
+        "the largest glyph is stretched vertically"
+    );
 }
 
 // -------------------------------------------------------------------------------------------
@@ -529,9 +624,15 @@ fn matrix_columns_are_separated_and_rows_use_the_math_leading() {
     close(boxes.width(), 5.0 + c::MATRIX_COL_SEPARATION * 10.0 + 5.0);
     close(glyph(&boxes, 'n').x - glyph(&boxes, 'x').x, 10.0);
 
-    let stacked = lay(table(vec![Node::variable('x'), Node::variable('n')], Side::Center));
+    let stacked = lay(table(
+        vec![Node::variable('x'), Node::variable('n')],
+        Side::Center,
+    ));
     let leading = ApproxMetrics.math_leading() * 10.0;
-    close(glyph(&stacked, 'n').y - glyph(&stacked, 'x').y, float(0.45) + leading);
+    close(
+        glyph(&stacked, 'n').y - glyph(&stacked, 'x').y,
+        float(0.45) + leading,
+    );
 }
 
 #[test]
@@ -564,14 +665,33 @@ fn matrix_rules_are_drawn_when_asked_for() {
     matrix.rules = true;
     matrix.delims = Some((Delim::None, Delim::None));
     let boxes = lay(Node::Matrix(Box::new(matrix)));
-    let rules: Vec<Rule> = rules(&boxes).into_iter().filter(|rule| !rule.dashed).collect();
-    assert_eq!(rules.len(), 2, "one rule between the rows and one between the columns");
-    let horizontal = rules.iter().find(|rule| rule.width > rule.height).expect("a row rule");
-    let vertical = rules.iter().find(|rule| rule.height > rule.width).expect("a column rule");
-    close(horizontal.height + horizontal.depth, c::MATRIX_RULE_THICKNESS * 10.0);
+    let rules: Vec<Rule> = rules(&boxes)
+        .into_iter()
+        .filter(|rule| !rule.dashed)
+        .collect();
+    assert_eq!(
+        rules.len(),
+        2,
+        "one rule between the rows and one between the columns"
+    );
+    let horizontal = rules
+        .iter()
+        .find(|rule| rule.width > rule.height)
+        .expect("a row rule");
+    let vertical = rules
+        .iter()
+        .find(|rule| rule.height > rule.width)
+        .expect("a column rule");
+    close(
+        horizontal.height + horizontal.depth,
+        c::MATRIX_RULE_THICKNESS * 10.0,
+    );
     close(vertical.width, c::MATRIX_RULE_THICKNESS * 10.0);
     close(vertical.y, 0.0);
-    assert!(vertical.height > vertical.width, "the column rule spans the whole table");
+    assert!(
+        vertical.height > vertical.width,
+        "the column rule spans the whole table"
+    );
 }
 
 // -------------------------------------------------------------------------------------------
@@ -585,12 +705,21 @@ fn radicals_stretch_to_their_radicand() {
     close(sign.size, 10.0);
     close(sign.x, 0.0);
     close(glyph(&boxes, 'x').x, float(0.8) + c::RADICAL_KERN * 10.0);
-    let bar = rules(&boxes).into_iter().find(|rule| !rule.dashed).expect("an overbar");
+    let bar = rules(&boxes)
+        .into_iter()
+        .find(|rule| !rule.dashed)
+        .expect("an overbar");
     close(bar.width, 5.0 + c::RADICAL_KERN * 10.0);
     close(bar.height + bar.depth, c::RADICAL_RULE_THICKNESS * 10.0);
     // The bar clears the radicand by the radical gap, and the sign reaches the bar's top.
-    close(bar.y - bar.height, -(float(0.45) + c::RADICAL_RULE_GAP * 10.0 + 0.4));
-    close(boxes.height(), float(0.45) + c::RADICAL_RULE_GAP * 10.0 + 0.4);
+    close(
+        bar.y - bar.height,
+        -(float(0.45) + c::RADICAL_RULE_GAP * 10.0 + 0.4),
+    );
+    close(
+        boxes.height(),
+        float(0.45) + c::RADICAL_RULE_GAP * 10.0 + 0.4,
+    );
 }
 
 #[test]
@@ -617,7 +746,10 @@ fn radical_indices_are_set_small_and_raised() {
     close(index.size, 0.7 * 10.0);
     close(index.x, 0.0);
     close(sign.x, index.x + 3.5);
-    assert!(index.y < sign.y, "the index is raised above the radical sign");
+    assert!(
+        index.y < sign.y,
+        "the index is raised above the radical sign"
+    );
     close(boxes.width(), glyph(&boxes, 'x').x + 5.0);
 }
 
@@ -637,7 +769,10 @@ fn accents_sit_above_the_base_with_a_gap() {
     // A single (non-wide) accent keeps its natural size and is centred on the base.
     close(hat.size, 10.0);
     close(hat.y, -(base.y + float(0.45) + c::ACCENT_GAP * 10.0));
-    close(boxes.height(), float(0.45) + c::ACCENT_GAP * 10.0 + 0.25 * 10.0);
+    close(
+        boxes.height(),
+        float(0.45) + c::ACCENT_GAP * 10.0 + 0.25 * 10.0,
+    );
     close(boxes.depth(), 0.0);
     // The narrow accent sits inside the base's width.
     close(hat.x, (5.0 - 0.4 * 10.0) / 2.0);
@@ -654,8 +789,14 @@ fn rule_accents_are_drawn_as_rules() {
     let rule = rules(&over).into_iter().next().expect("a bar");
     close(rule.width, 5.0);
     close(rule.height + rule.depth, c::ACCENT_RULE_THICKNESS * 10.0);
-    close(rule.y, -(float(0.45) + c::ACCENT_GAP * 10.0 + c::ACCENT_RULE_THICKNESS * 10.0 / 2.0));
-    close(over.height(), float(0.45) + c::ACCENT_GAP * 10.0 + c::ACCENT_RULE_THICKNESS * 10.0);
+    close(
+        rule.y,
+        -(float(0.45) + c::ACCENT_GAP * 10.0 + c::ACCENT_RULE_THICKNESS * 10.0 / 2.0),
+    );
+    close(
+        over.height(),
+        float(0.45) + c::ACCENT_GAP * 10.0 + c::ACCENT_RULE_THICKNESS * 10.0,
+    );
     close(over.depth(), 0.0);
 
     let under = lay(Node::Accent(Box::new(Accent {
@@ -664,9 +805,15 @@ fn rule_accents_are_drawn_as_rules() {
         under: true,
     })));
     let rule = rules(&under).into_iter().next().expect("an underline");
-    close(rule.y, c::ACCENT_GAP * 10.0 + c::ACCENT_RULE_THICKNESS * 10.0 / 2.0);
+    close(
+        rule.y,
+        c::ACCENT_GAP * 10.0 + c::ACCENT_RULE_THICKNESS * 10.0 / 2.0,
+    );
     close(under.height(), float(0.45));
-    close(under.depth(), c::ACCENT_GAP * 10.0 + c::ACCENT_RULE_THICKNESS * 10.0);
+    close(
+        under.depth(),
+        c::ACCENT_GAP * 10.0 + c::ACCENT_RULE_THICKNESS * 10.0,
+    );
 }
 
 #[test]
@@ -678,8 +825,14 @@ fn large_operators_place_limits_above_or_beside() {
         limits: false,
     })));
     close(beside.height(), float(0.75) * c::BIG_OP_SCALE_INLINE);
-    close(beside.depth(), float(0.25) * c::BIG_OP_SCALE_INLINE + c::SUBSCRIPT_OFFSET * 10.0);
-    close(beside.width(), 10.0 * c::BIG_OP_SCALE_INLINE + c::SCRIPT_KERN * 10.0 + 3.5);
+    close(
+        beside.depth(),
+        float(0.25) * c::BIG_OP_SCALE_INLINE + c::SUBSCRIPT_OFFSET * 10.0,
+    );
+    close(
+        beside.width(),
+        10.0 * c::BIG_OP_SCALE_INLINE + c::SCRIPT_KERN * 10.0 + 3.5,
+    );
     close(glyph(&beside, 'k').size, 0.7 * 10.0);
     close(
         glyph(&beside, 'k').y,
@@ -750,8 +903,14 @@ fn stacked_limits_share_one_centre_on_the_axis() {
     close(centre(over), centre(base));
     close(centre(under), centre(base));
     // And the math axis passes through the middle of the operator.
-    close(base.y - 0.5 * (base.size * 0.75 - base.size * 0.25), -float(0.25));
-    assert!((centre(base) - 7.0).abs() < 1e-9, "the construct is 14 points wide");
+    close(
+        base.y - 0.5 * (base.size * 0.75 - base.size * 0.25),
+        -float(0.25),
+    );
+    assert!(
+        (centre(base) - 7.0).abs() < 1e-9,
+        "the construct is 14 points wide"
+    );
 }
 
 #[test]
@@ -765,7 +924,10 @@ fn integrals_grow_less_than_summations() {
         })))
     };
     close(glyph(&integral(false), '\u{222B}').size, 10.0);
-    close(glyph(&integral(true), '\u{222B}').size, c::BIG_OP_SCALE_INTEGRAL * 10.0);
+    close(
+        glyph(&integral(true), '\u{222B}').size,
+        c::BIG_OP_SCALE_INTEGRAL * 10.0,
+    );
     // Slimmer than a summation with the same limits, and still larger with limits than without.
     assert!(c::BIG_OP_SCALE_INTEGRAL < c::BIG_OP_SCALE_LIMITS);
     assert!(glyph(&integral(true), '\u{222B}').size > glyph(&integral(false), '\u{222B}').size);
@@ -788,7 +950,14 @@ fn limits_nodes_do_not_enlarge_their_base() {
         align: Side::Center,
     })));
     for part in glyphs(&cases) {
-        close(part.size, if math_base(part.ch) == Some('x') { 7.0 } else { 10.0 });
+        close(
+            part.size,
+            if math_base(part.ch) == Some('x') {
+                7.0
+            } else {
+                10.0
+            },
+        );
     }
 
     let operator = lay(Node::Limits(Box::new(Limits {
@@ -822,7 +991,10 @@ fn limits_align_inside_the_widest_part() {
     })));
     close(glyph(&boxes, 'x').x, (10.5 - 5.0) / 2.0);
     close(glyph(&boxes, 'a').x, 0.0);
-    close(boxes.height(), float(0.45) + c::LIMIT_GAP * 10.0 + 0.45 * 7.0);
+    close(
+        boxes.height(),
+        float(0.45) + c::LIMIT_GAP * 10.0 + 0.45 * 7.0,
+    );
 }
 
 #[test]

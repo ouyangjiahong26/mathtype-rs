@@ -19,32 +19,38 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use mt_core::Math;
 use windows::Win32::Foundation::{
-    CO_E_OBJNOTCONNECTED, DISP_E_BADPARAMCOUNT, DISP_E_MEMBERNOTFOUND, DISP_E_UNKNOWNNAME, DV_E_DVASPECT,
-    DV_E_FORMATETC, DV_E_TYMED, E_FAIL, E_INVALIDARG, E_NOTIMPL, E_OUTOFMEMORY, E_POINTER, GlobalFree, HGLOBAL, HWND,
-    OLE_E_ADVISENOTSUPPORTED, OLE_E_NOCONNECTION, OLE_E_NOTRUNNING, OLE_E_OLEVERB, RECTL, S_FALSE, SIZE,
+    CO_E_OBJNOTCONNECTED, DISP_E_BADPARAMCOUNT, DISP_E_MEMBERNOTFOUND, DISP_E_UNKNOWNNAME,
+    DV_E_DVASPECT, DV_E_FORMATETC, DV_E_TYMED, E_FAIL, E_INVALIDARG, E_NOTIMPL, E_OUTOFMEMORY,
+    E_POINTER, GlobalFree, HGLOBAL, HWND, OLE_E_ADVISENOTSUPPORTED, OLE_E_NOCONNECTION,
+    OLE_E_NOTRUNNING, OLE_E_OLEVERB, RECTL, S_FALSE, SIZE,
 };
 use windows::Win32::Graphics::Gdi::{
-    BITMAPINFO, DIB_RGB_COLORS, GetDeviceCaps, HDC, LOGPIXELSX, LOGPIXELSY, LOGPALETTE, SRCCOPY, SetEnhMetaFileBits,
-    StretchDIBits,
+    BITMAPINFO, DIB_RGB_COLORS, GetDeviceCaps, HDC, LOGPALETTE, LOGPIXELSX, LOGPIXELSY, SRCCOPY,
+    SetEnhMetaFileBits, StretchDIBits,
 };
-use windows::Win32::System::Com::StructuredStorage::{IPersistStorage, IPersistStorage_Impl, IStorage};
+use windows::Win32::System::Com::StructuredStorage::{
+    IPersistStorage, IPersistStorage_Impl, IStorage,
+};
 use windows::Win32::System::Com::{
-    DISPATCH_FLAGS, DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT, DISPATCH_PROPERTYPUTREF, DISPPARAMS,
-    DVASPECT, DVASPECT_CONTENT, DVTARGETDEVICE, EXCEPINFO, FORMATETC, IAdviseSink, IDataObject, IDataObject_Impl,
-    IDispatch, IDispatch_Impl, IEnumFORMATETC, IEnumSTATDATA, IMoniker, IPersist_Impl, ITypeInfo, STGMEDIUM,
-    TYMED_ENHMF,
-    STGMEDIUM_0, TYMED_HGLOBAL,
+    DISPATCH_FLAGS, DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT,
+    DISPATCH_PROPERTYPUTREF, DISPPARAMS, DVASPECT, DVASPECT_CONTENT, DVTARGETDEVICE, EXCEPINFO,
+    FORMATETC, IAdviseSink, IDataObject, IDataObject_Impl, IDispatch, IDispatch_Impl,
+    IEnumFORMATETC, IEnumSTATDATA, IMoniker, IPersist_Impl, ITypeInfo, STGMEDIUM, STGMEDIUM_0,
+    TYMED_ENHMF, TYMED_HGLOBAL,
 };
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::{
-    ACTIVEOBJECT_WEAK, IOleClientSite, IOleObject, IOleObject_Impl, IEnumOLEVERB, IViewObject2, IViewObject2_Impl,
-    IViewObject_Impl, OLECLOSE, OLEGETMONIKER, OLEMISC, OLEMISC_RECOMPOSEONRESIZE,
-    OLEMISC_RENDERINGISDEVICEINDEPENDENT, OLECLOSE_SAVEIFDIRTY, OLEWHICHMK, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY, OLEIVERB_SHOW,
-    CF_ENHMETAFILE,
-    RegisterActiveObject, RevokeActiveObject, USERCLASSTYPE, USERCLASSTYPE_APPNAME, USERCLASSTYPE_SHORT,
+    ACTIVEOBJECT_WEAK, CF_ENHMETAFILE, IEnumOLEVERB, IOleClientSite, IOleObject, IOleObject_Impl,
+    IViewObject_Impl, IViewObject2, IViewObject2_Impl, OLECLOSE, OLECLOSE_SAVEIFDIRTY,
+    OLEGETMONIKER, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY, OLEIVERB_SHOW, OLEMISC,
+    OLEMISC_RECOMPOSEONRESIZE, OLEMISC_RENDERINGISDEVICEINDEPENDENT, OLEWHICHMK,
+    RegisterActiveObject, RevokeActiveObject, USERCLASSTYPE, USERCLASSTYPE_APPNAME,
+    USERCLASSTYPE_SHORT,
 };
 use windows::Win32::System::Variant::VARIANT;
-use windows::core::{BOOL, Error, GUID, HRESULT, PCWSTR, PWSTR, Ref, Result as WinResult, implement};
+use windows::core::{
+    BOOL, Error, GUID, HRESULT, PCWSTR, PWSTR, Ref, Result as WinResult, implement,
+};
 
 use crate::clsid::{CLSID_EQUATION, FRIENDLY_NAME, PROGID, STREAM_LATEX, STREAM_NATIVE};
 use crate::factory::ServerState;
@@ -72,7 +78,14 @@ const DISPID_GET_SIZE: i32 = 4;
 const DISPID_GET_STATUS: i32 = 5;
 
 /// The equation object a host embeds.
-#[implement(IOleObject, IDataObject, IPersistStorage, IViewObject2, IDispatch, Agile = false)]
+#[implement(
+    IOleObject,
+    IDataObject,
+    IPersistStorage,
+    IViewObject2,
+    IDispatch,
+    Agile = false
+)]
 pub struct EquationObject {
     state: Arc<ServerState>,
     inner: Arc<RefCell<Inner>>,
@@ -81,7 +94,10 @@ pub struct EquationObject {
 impl Drop for EquationObject {
     fn drop(&mut self) {
         self.state.object_released();
-        trace::log(&format!("released an equation object ({} still with hosts)", self.state.live()));
+        trace::log(&format!(
+            "released an equation object ({} still with hosts)",
+            self.state.live()
+        ));
     }
 }
 
@@ -98,12 +114,18 @@ pub fn register_active(unknown: &windows::core::IUnknown) {
         return;
     }
     let mut cookie = 0u32;
-    match unsafe { RegisterActiveObject(unknown, &CLSID_EQUATION, ACTIVEOBJECT_WEAK, &mut cookie) } {
+    match unsafe { RegisterActiveObject(unknown, &CLSID_EQUATION, ACTIVEOBJECT_WEAK, &mut cookie) }
+    {
         Ok(()) => {
             ACTIVE_COOKIE.store(cookie, Ordering::Relaxed);
-            trace::log(&format!("registered as the active object (cookie {cookie})"));
+            trace::log(&format!(
+                "registered as the active object (cookie {cookie})"
+            ));
         }
-        Err(error) => trace::log(&format!("cannot register as the active object: {}", storage::error_text(&error))),
+        Err(error) => trace::log(&format!(
+            "cannot register as the active object: {}",
+            storage::error_text(&error)
+        )),
     }
 }
 
@@ -111,7 +133,9 @@ pub fn register_active(unknown: &windows::core::IUnknown) {
 pub fn revoke_active() {
     let cookie = ACTIVE_COOKIE.swap(0, Ordering::Relaxed);
     if cookie != 0 {
-        unsafe { let _ = RevokeActiveObject(cookie, None); }
+        unsafe {
+            let _ = RevokeActiveObject(cookie, None);
+        }
     }
 }
 
@@ -233,7 +257,9 @@ impl Inner {
                     return;
                 }
                 Err(error) => {
-                    trace::log(&format!("the equation stream does not parse ({error}); keeping its bytes"));
+                    trace::log(&format!(
+                        "the equation stream does not parse ({error}); keeping its bytes"
+                    ));
                     self.raw_native = Some(bytes);
                     return;
                 }
@@ -303,8 +329,15 @@ impl EquationObject {
         let latex = inner.latex.clone();
         match Session::start(&latex) {
             Ok(session) => {
-                trace::log(&format!("the editor is running (pid {})", session.editor_pid));
-                inner.note(&format!("editor pid {} on {}", session.editor_pid, session.path.display()));
+                trace::log(&format!(
+                    "the editor is running (pid {})",
+                    session.editor_pid
+                ));
+                inner.note(&format!(
+                    "editor pid {} on {}",
+                    session.editor_pid,
+                    session.path.display()
+                ));
                 inner.session = Some(session);
                 Ok(())
             }
@@ -316,7 +349,6 @@ impl EquationObject {
             }
         }
     }
-
 }
 
 /// Read back a finished editor session and tell the host about it.
@@ -341,7 +373,10 @@ fn tick(inner: &RefCell<Inner>) {
         if let Some(session) = state.session.take() {
             message = match outcome {
                 Ok(text) if text == state.latex => {
-                    format!("session {} closed without changing the equation", session.id)
+                    format!(
+                        "session {} closed without changing the equation",
+                        session.id
+                    )
                 }
                 Ok(text) => {
                     changed = true;
@@ -350,7 +385,11 @@ fn tick(inner: &RefCell<Inner>) {
                     format!(
                         "session {} wrote {length} bytes{}",
                         session.id,
-                        if parsed { "" } else { " (not parseable, kept as text)" }
+                        if parsed {
+                            ""
+                        } else {
+                            " (not parseable, kept as text)"
+                        }
                     )
                 }
                 Err(error) => error,
@@ -404,28 +443,42 @@ fn write_streams(inner: &RefCell<Inner>) -> Result<String, String> {
         // Write the equation back with the preferences the loaded stream carried, so an
         // embedded object round-trips the document's typesizes, spacings and styles; a stream
         // this server could not read keeps its raw bytes, and anything else gets the defaults.
-        let native = state.raw_native.clone().unwrap_or_else(|| match &state.preferences {
-            Some(preferences) => mt_mtef::write_with_preferences(&state.math, preferences),
-            None => mt_mtef::write(&state.math),
-        });
+        let native = state
+            .raw_native
+            .clone()
+            .unwrap_or_else(|| match &state.preferences {
+                Some(preferences) => mt_mtef::write_with_preferences(&state.math, preferences),
+                None => mt_mtef::write(&state.math),
+            });
         (storage, native, state.latex.clone())
     };
     storage::write_stream(&storage, STREAM_NATIVE, &native)?;
     storage::write_stream(&storage, STREAM_LATEX, latex.as_bytes())?;
     storage::commit(&storage)?;
-    Ok(format!("wrote {STREAM_NATIVE} ({} bytes) and {STREAM_LATEX} ({} bytes)", native.len(), latex.len()))
+    Ok(format!(
+        "wrote {STREAM_NATIVE} ({} bytes) and {STREAM_LATEX} ({} bytes)",
+        native.len(),
+        latex.len()
+    ))
 }
 
 /// Tell the host the object changed and needs saving.
 fn notify_saved(inner: &RefCell<Inner>) {
     let (site, sinks, view) = {
         let state = inner.borrow();
-        (state.client_site.clone(), state.sinks(), state.view_advise.clone())
+        (
+            state.client_site.clone(),
+            state.sinks(),
+            state.view_advise.clone(),
+        )
     };
     if let Some(site) = site {
         trace::log("asking the host to save the object");
         if let Err(error) = unsafe { site.SaveObject() } {
-            trace::log(&format!("the host refused to save the object: {}", storage::error_text(&error)));
+            trace::log(&format!(
+                "the host refused to save the object: {}",
+                storage::error_text(&error)
+            ));
         }
     }
     for (connection, sink) in sinks {
@@ -472,7 +525,10 @@ impl EquationObject {
         inner.dirty = true;
         inner.note(&format!("SetLatex: {} bytes of text", text.len()));
         drop(inner);
-        trace::log(&format!("SetLatex: {} bytes of text, parsed={parsed}", text.len()));
+        trace::log(&format!(
+            "SetLatex: {} bytes of text, parsed={parsed}",
+            text.len()
+        ));
         if parsed {
             String::new()
         } else {
@@ -502,20 +558,31 @@ impl EquationObject {
         let inner = self.inner.borrow();
         let (width, height) = picture::natural_size(&inner.math, inner.size_points);
         let session = match &inner.session {
-            Some(session) => format!("editor pid {} on {}", session.editor_pid, session.path.display()),
+            Some(session) => format!(
+                "editor pid {} on {}",
+                session.editor_pid,
+                session.path.display()
+            ),
             None => "no editor open".to_owned(),
         };
         let extent = match inner.extent {
             Some((cx, cy)) => format!("{cx}x{cy} HIMETRIC"),
             None => "as laid out".to_owned(),
         };
-        let streams = if inner.storage.is_some() { "with storage" } else { "without storage" };
+        let streams = if inner.storage.is_some() {
+            "with storage"
+        } else {
+            "without storage"
+        };
         [
             format!("latex={}", inner.latex),
             format!("size={width:.2}x{height:.2} points"),
             format!("extent={extent}"),
             streams.to_owned(),
-            format!("dirty={} closed={} unparsed={}", inner.dirty, inner.closed, inner.unparsed),
+            format!(
+                "dirty={} closed={} unparsed={}",
+                inner.dirty, inner.closed, inner.unparsed
+            ),
             format!("session={session}"),
             format!("last={}", inner.status),
         ]
@@ -591,9 +658,17 @@ impl IOleObject_Impl for EquationObject_Impl {
             Err(error) => {
                 // The storage is kept and the object stays open: the host can retry the save it
                 // asked for, and the error tells it why closing did not take.
-                trace::log(&format!("Close(save={}): refusing to drop a dirty object: {error}", dwsaveoption.0));
-                self.inner.borrow_mut().note(&format!("closing without saving failed: {error}"));
-                Err(Error::new(E_FAIL, format!("the object is dirty and its streams could not be written: {error}")))
+                trace::log(&format!(
+                    "Close(save={}): refusing to drop a dirty object: {error}",
+                    dwsaveoption.0
+                ));
+                self.inner
+                    .borrow_mut()
+                    .note(&format!("closing without saving failed: {error}"));
+                Err(Error::new(
+                    E_FAIL,
+                    format!("the object is dirty and its streams could not be written: {error}"),
+                ))
             }
         }
     }
@@ -603,7 +678,11 @@ impl IOleObject_Impl for EquationObject_Impl {
         Err(Error::from_hresult(E_NOTIMPL))
     }
 
-    fn GetMoniker(&self, _dwassign: &OLEGETMONIKER, _dwwhichmoniker: &OLEWHICHMK) -> WinResult<IMoniker> {
+    fn GetMoniker(
+        &self,
+        _dwassign: &OLEGETMONIKER,
+        _dwwhichmoniker: &OLEWHICHMK,
+    ) -> WinResult<IMoniker> {
         Err(Error::from_hresult(E_NOTIMPL))
     }
 
@@ -616,7 +695,10 @@ impl IOleObject_Impl for EquationObject_Impl {
         Err(Error::from_hresult(E_NOTIMPL))
     }
 
-    fn GetClipboardData(&self, _dwreserved: u32) -> WinResult<windows::Win32::System::Com::IDataObject> {
+    fn GetClipboardData(
+        &self,
+        _dwreserved: u32,
+    ) -> WinResult<windows::Win32::System::Com::IDataObject> {
         Err(Error::from_hresult(E_NOTIMPL))
     }
 
@@ -635,7 +717,14 @@ impl IOleObject_Impl for EquationObject_Impl {
         // verbs the registry lists by index — install.ps1 registers `Verb\1` as `&Edit` — and
         // every verb this object advertises opens the editor, so any positive index does too.
         let open = opens_editor(iverb);
-        trace::log(&format!("DoVerb({iverb}) -> {}", if open { "open the editor" } else { "unsupported" }));
+        trace::log(&format!(
+            "DoVerb({iverb}) -> {}",
+            if open {
+                "open the editor"
+            } else {
+                "unsupported"
+            }
+        ));
         if open {
             return self.open_editor();
         }
@@ -681,8 +770,15 @@ impl IOleObject_Impl for EquationObject_Impl {
         }
         let size = unsafe { *psizel };
         let mut inner = self.inner.borrow_mut();
-        inner.extent = if size.cx > 0 && size.cy > 0 { Some((size.cx, size.cy)) } else { None };
-        inner.note(&format!("the host sized the object to {}x{} HIMETRIC", size.cx, size.cy));
+        inner.extent = if size.cx > 0 && size.cy > 0 {
+            Some((size.cx, size.cy))
+        } else {
+            None
+        };
+        inner.note(&format!(
+            "the host sized the object to {}x{} HIMETRIC",
+            size.cx, size.cy
+        ));
         drop(inner);
         trace::log(&format!("SetExtent({}x{} HIMETRIC)", size.cx, size.cy));
         Ok(())
@@ -712,7 +808,9 @@ impl IOleObject_Impl for EquationObject_Impl {
     fn Unadvise(&self, dwconnection: u32) -> WinResult<()> {
         let mut inner = self.inner.borrow_mut();
         let before = inner.advises.len();
-        inner.advises.retain(|(connection, _)| *connection != dwconnection);
+        inner
+            .advises
+            .retain(|(connection, _)| *connection != dwconnection);
         if inner.advises.len() == before {
             return Err(Error::from_hresult(OLE_E_NOCONNECTION));
         }
@@ -745,7 +843,10 @@ impl IDataObject_Impl for EquationObject_Impl {
         let format = unsafe { *pformatetcin };
         if !formats::supported(&format) {
             let reason = formats::rejection(&format);
-            trace::log(&format!("GetData(cf={}) -> refused {:#010X}", format.cfFormat, reason.0 as u32));
+            trace::log(&format!(
+                "GetData(cf={}) -> refused {:#010X}",
+                format.cfFormat, reason.0 as u32
+            ));
             return Err(Error::from_hresult(reason));
         }
         let picture = self.picture()?;
@@ -754,7 +855,10 @@ impl IDataObject_Impl for EquationObject_Impl {
             // whatever size it is drawing, so zooming stays sharp.
             let handle = unsafe { SetEnhMetaFileBits(&picture.emf) };
             if handle.is_invalid() {
-                return Err(Error::new(E_FAIL, "the equation metafile could not be created"));
+                return Err(Error::new(
+                    E_FAIL,
+                    "the equation metafile could not be created",
+                ));
             }
             trace::log(&format!(
                 "GetData -> CF_ENHMETAFILE ({:.1}x{:.1} points), {} bytes",
@@ -764,7 +868,9 @@ impl IDataObject_Impl for EquationObject_Impl {
             ));
             return Ok(STGMEDIUM {
                 tymed: TYMED_ENHMF.0 as u32,
-                u: STGMEDIUM_0 { hEnhMetaFile: handle },
+                u: STGMEDIUM_0 {
+                    hEnhMetaFile: handle,
+                },
                 pUnkForRelease: ManuallyDrop::new(None),
             });
         }
@@ -794,7 +900,11 @@ impl IDataObject_Impl for EquationObject_Impl {
         }
     }
 
-    fn GetDataHere(&self, _pformatetc: *const FORMATETC, _pmedium: *mut STGMEDIUM) -> WinResult<()> {
+    fn GetDataHere(
+        &self,
+        _pformatetc: *const FORMATETC,
+        _pmedium: *mut STGMEDIUM,
+    ) -> WinResult<()> {
         Err(Error::from_hresult(DV_E_TYMED))
     }
 
@@ -803,10 +913,18 @@ impl IDataObject_Impl for EquationObject_Impl {
             return DV_E_FORMATETC;
         }
         let format = unsafe { *pformatetc };
-        if formats::supported(&format) { HRESULT(0) } else { formats::rejection(&format) }
+        if formats::supported(&format) {
+            HRESULT(0)
+        } else {
+            formats::rejection(&format)
+        }
     }
 
-    fn GetCanonicalFormatEtc(&self, pformatectin: *const FORMATETC, pformatetcout: *mut FORMATETC) -> HRESULT {
+    fn GetCanonicalFormatEtc(
+        &self,
+        pformatectin: *const FORMATETC,
+        pformatetcout: *mut FORMATETC,
+    ) -> HRESULT {
         if pformatectin.is_null() || pformatetcout.is_null() {
             return E_NOTIMPL;
         }
@@ -817,10 +935,19 @@ impl IDataObject_Impl for EquationObject_Impl {
         DATA_S_SAMEFORMATETC
     }
 
-    fn SetData(&self, pformatetc: *const FORMATETC, _pmedium: *const STGMEDIUM, _frelease: BOOL) -> WinResult<()> {
+    fn SetData(
+        &self,
+        pformatetc: *const FORMATETC,
+        _pmedium: *const STGMEDIUM,
+        _frelease: BOOL,
+    ) -> WinResult<()> {
         // Nothing a host can push into this object changes the equation, so the data is ignored
         // rather than refused: refusing makes some hosts give up on the object altogether.
-        let format = if pformatetc.is_null() { 0 } else { unsafe { (*pformatetc).cfFormat } };
+        let format = if pformatetc.is_null() {
+            0
+        } else {
+            unsafe { (*pformatetc).cfFormat }
+        };
         trace::log(&format!("SetData(cf={format}) ignored"));
         Ok(())
     }
@@ -877,7 +1004,9 @@ impl IViewObject_Impl for EquationObject_Impl {
             )
         };
         // The bounds arrive in HIMETRIC units and the device wants pixels.
-        let pixels = |himetric: i32, dpi: i32| (f64::from(himetric) / 2540.0 * f64::from(dpi)).round() as i32;
+        let pixels = |himetric: i32, dpi: i32| {
+            (f64::from(himetric) / 2540.0 * f64::from(dpi)).round() as i32
+        };
         let (width, height) = (
             pixels(bounds.right - bounds.left, dpi_x),
             pixels(bounds.bottom - bounds.top, dpi_y),
@@ -924,7 +1053,13 @@ impl IViewObject_Impl for EquationObject_Impl {
         Err(Error::from_hresult(E_NOTIMPL))
     }
 
-    fn Freeze(&self, _dwdrawaspect: DVASPECT, _lindex: i32, _pvaspect: *mut c_void, _pdwfreeze: *mut u32) -> WinResult<()> {
+    fn Freeze(
+        &self,
+        _dwdrawaspect: DVASPECT,
+        _lindex: i32,
+        _pvaspect: *mut c_void,
+        _pdwfreeze: *mut u32,
+    ) -> WinResult<()> {
         Err(Error::from_hresult(OLE_E_NOTRUNNING))
     }
 
@@ -932,7 +1067,12 @@ impl IViewObject_Impl for EquationObject_Impl {
         Err(Error::from_hresult(OLE_E_NOTRUNNING))
     }
 
-    fn SetAdvise(&self, aspects: DVASPECT, _advf: u32, padvsink: Ref<IAdviseSink>) -> WinResult<()> {
+    fn SetAdvise(
+        &self,
+        aspects: DVASPECT,
+        _advf: u32,
+        padvsink: Ref<IAdviseSink>,
+    ) -> WinResult<()> {
         let mut inner = self.inner.borrow_mut();
         inner.view_advise = padvsink.cloned().map(|sink| (aspects.0, sink));
         trace::log(&format!("SetAdvise(aspects={:#X})", aspects.0));
@@ -950,7 +1090,12 @@ impl IViewObject_Impl for EquationObject_Impl {
 }
 
 impl IViewObject2_Impl for EquationObject_Impl {
-    fn GetExtent(&self, dwdrawaspect: DVASPECT, _lindex: i32, _ptd: *const DVTARGETDEVICE) -> WinResult<SIZE> {
+    fn GetExtent(
+        &self,
+        dwdrawaspect: DVASPECT,
+        _lindex: i32,
+        _ptd: *const DVTARGETDEVICE,
+    ) -> WinResult<SIZE> {
         if dwdrawaspect != DVASPECT_CONTENT {
             return Err(Error::from_hresult(DV_E_DVASPECT));
         }
@@ -967,7 +1112,11 @@ impl IPersist_Impl for EquationObject_Impl {
 
 impl IPersistStorage_Impl for EquationObject_Impl {
     fn IsDirty(&self) -> HRESULT {
-        if self.inner.borrow().dirty { HRESULT(0) } else { S_FALSE }
+        if self.inner.borrow().dirty {
+            HRESULT(0)
+        } else {
+            S_FALSE
+        }
     }
 
     fn InitNew(&self, pstg: Ref<IStorage>) -> WinResult<()> {
@@ -999,8 +1148,10 @@ impl IPersistStorage_Impl for EquationObject_Impl {
         }
         let (latex, native) = match &storage {
             Some(storage) => (
-                storage::read_stream(storage, STREAM_LATEX).map_err(|error| Error::new(E_FAIL, error))?,
-                storage::read_stream(storage, STREAM_NATIVE).map_err(|error| Error::new(E_FAIL, error))?,
+                storage::read_stream(storage, STREAM_LATEX)
+                    .map_err(|error| Error::new(E_FAIL, error))?,
+                storage::read_stream(storage, STREAM_NATIVE)
+                    .map_err(|error| Error::new(E_FAIL, error))?,
             ),
             None => (None, None),
         };
@@ -1157,7 +1308,8 @@ fn dispid_of(name: &str) -> i32 {
 fn task_memory_string(text: &str) -> PWSTR {
     let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
-        let buffer = windows::Win32::System::Com::CoTaskMemAlloc(wide.len() * std::mem::size_of::<u16>());
+        let buffer =
+            windows::Win32::System::Com::CoTaskMemAlloc(wide.len() * std::mem::size_of::<u16>());
         if buffer.is_null() {
             return PWSTR::null();
         }
@@ -1179,10 +1331,13 @@ fn default_equation() -> (Math, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Inner, OLECLOSE_SAVEIFDIRTY, default_equation, dispid_of, opens_editor, save_on_close,
-        DEFAULT_LATEX, DISPID_GET_LATEX, DISPID_UNKNOWN};
+    use super::{
+        DEFAULT_LATEX, DISPID_GET_LATEX, DISPID_UNKNOWN, Inner, OLECLOSE_SAVEIFDIRTY,
+        default_equation, dispid_of, opens_editor, save_on_close,
+    };
     use windows::Win32::System::Ole::{
-        OLECLOSE_NOSAVE, OLECLOSE_PROMPTSAVE, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY, OLEIVERB_SHOW,
+        OLECLOSE_NOSAVE, OLECLOSE_PROMPTSAVE, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY,
+        OLEIVERB_SHOW,
     };
 
     #[test]
@@ -1229,7 +1384,10 @@ mod tests {
         let (math, _) = default_equation();
         let stream = mt_mtef::write(&math);
         let expected_bytes = stream.clone();
-        let expected = mt_mtef::read(&stream).expect("the stream parses").header.preferences;
+        let expected = mt_mtef::read(&stream)
+            .expect("the stream parses")
+            .header
+            .preferences;
 
         let mut inner = Inner::new();
         assert_eq!(inner.preferences, None);

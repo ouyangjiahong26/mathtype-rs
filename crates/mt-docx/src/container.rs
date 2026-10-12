@@ -7,9 +7,9 @@
 
 use std::io::{Cursor, Read, Write};
 
+use zip::CompressionMethod;
 use zip::read::ZipArchive;
 use zip::write::SimpleFileOptions;
-use zip::CompressionMethod;
 
 use crate::error::DocxError;
 
@@ -50,9 +50,16 @@ impl Package {
             if entries.iter().any(|entry: &Entry| entry.name == name) {
                 continue;
             }
-            entries.push(Entry { name, index, data: EntryData::Original });
+            entries.push(Entry {
+                name,
+                index,
+                data: EntryData::Original,
+            });
         }
-        Ok(Self { source: bytes.to_vec(), entries })
+        Ok(Self {
+            source: bytes.to_vec(),
+            entries,
+        })
     }
 
     /// The decompressed bytes of a part, or `None` when the container holds no such part.
@@ -74,7 +81,8 @@ impl Package {
 
     /// The decompressed bytes of a part, with a missing part reported as an error.
     pub fn required(&self, name: &str) -> Result<Vec<u8>, DocxError> {
-        self.part(name).unwrap_or(Err(DocxError::Missing(name.to_owned())))
+        self.part(name)
+            .unwrap_or(Err(DocxError::Missing(name.to_owned())))
     }
 
     /// Adds a part, or replaces the content of one that exists.
@@ -82,7 +90,11 @@ impl Package {
         if let Some(entry) = self.entries.iter_mut().find(|entry| entry.name == name) {
             entry.data = EntryData::Fresh(data);
         } else {
-            self.entries.push(Entry { name: name.to_owned(), index: usize::MAX, data: EntryData::Fresh(data) });
+            self.entries.push(Entry {
+                name: name.to_owned(),
+                index: usize::MAX,
+                data: EntryData::Fresh(data),
+            });
         }
     }
 
@@ -99,8 +111,7 @@ impl Package {
     /// Writes the container: untouched entries raw-copied, fresh ones deflated.
     pub fn into_bytes(self) -> Result<Vec<u8>, DocxError> {
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        let options =
-            SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         for entry in &self.entries {
             match &entry.data {
                 EntryData::Original => {
@@ -110,12 +121,17 @@ impl Package {
                     writer.raw_copy_file(file).map_err(zip_error)?;
                 }
                 EntryData::Fresh(data) => {
-                    writer.start_file(entry.name.as_str(), options).map_err(zip_error)?;
+                    writer
+                        .start_file(entry.name.as_str(), options)
+                        .map_err(zip_error)?;
                     writer.write_all(data).map_err(zip_error)?;
                 }
             }
         }
-        writer.finish().map_err(zip_error).map(|cursor| cursor.into_inner())
+        writer
+            .finish()
+            .map_err(zip_error)
+            .map(|cursor| cursor.into_inner())
     }
 }
 
@@ -162,7 +178,10 @@ mod tests {
         package.set_part("a.txt", b"beta".to_vec());
         let written = package.into_bytes().unwrap();
         assert_eq!(parts(&written)[0], ("a.txt".to_owned(), b"beta".to_vec()));
-        assert_eq!(parts(&written)[1], ("dir/b.bin".to_owned(), vec![0, 1, 2, 250]));
+        assert_eq!(
+            parts(&written)[1],
+            ("dir/b.bin".to_owned(), vec![0, 1, 2, 250])
+        );
     }
 
     #[test]

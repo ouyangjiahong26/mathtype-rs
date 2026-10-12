@@ -19,16 +19,27 @@ fn equation(text: char) -> Math {
 
 /// Build a compound file holding an equation, the way a document embeds one.
 fn document(math: &Math) -> Vec<u8> {
-    let mut file = CompoundFile::create(Cursor::new(Vec::new())).expect("a compound file is created");
-    file.create_storage("ObjectPool").expect("the object storage is created");
-    file.create_storage("ObjectPool/1").expect("the object's own storage is created");
+    let mut file =
+        CompoundFile::create(Cursor::new(Vec::new())).expect("a compound file is created");
+    file.create_storage("ObjectPool")
+        .expect("the object storage is created");
+    file.create_storage("ObjectPool/1")
+        .expect("the object's own storage is created");
     {
-        let mut stream = file.create_stream(EQUATION_STREAM).expect("the equation stream is created");
-        stream.write_all(&write(math)).expect("the equation is written");
+        let mut stream = file
+            .create_stream(EQUATION_STREAM)
+            .expect("the equation stream is created");
+        stream
+            .write_all(&write(math))
+            .expect("the equation is written");
     }
     {
-        let mut stream = file.create_stream(OTHER_STREAM).expect("the other stream is created");
-        stream.write_all(OTHER_CONTENTS).expect("the other stream is written");
+        let mut stream = file
+            .create_stream(OTHER_STREAM)
+            .expect("the other stream is created");
+        stream
+            .write_all(OTHER_CONTENTS)
+            .expect("the other stream is written");
     }
     file.flush().expect("the compound file is flushed");
     file.into_inner().into_inner()
@@ -47,10 +58,18 @@ fn reads_the_equation_of_a_compound_file() {
     let math = equation('a');
     let ole = document(&math);
 
-    let stream = read_from_ole(&ole).expect("the compound file reads").expect("it holds an equation");
-    let body = mt_mtef::Stream::split(&stream).expect("the stream splits").body;
+    let stream = read_from_ole(&ole)
+        .expect("the compound file reads")
+        .expect("it holds an equation");
+    let body = mt_mtef::Stream::split(&stream)
+        .expect("the stream splits")
+        .body;
     assert_eq!(parse(&stream).expect("the equation reads"), math);
-    assert_eq!(body.first(), Some(&5), "the equation stream starts at the version byte");
+    assert_eq!(
+        body.first(),
+        Some(&5),
+        "the equation stream starts at the version byte"
+    );
 }
 
 #[test]
@@ -60,9 +79,15 @@ fn replaces_the_equation_of_a_compound_file() {
 
     let updated = write_into_ole(&ole, &write(&replacement)).expect("the equation is replaced");
 
-    let stream = read_from_ole(&updated).expect("the updated file reads").expect("it holds an equation");
+    let stream = read_from_ole(&updated)
+        .expect("the updated file reads")
+        .expect("it holds an equation");
     assert_eq!(parse(&stream).expect("the new equation reads"), replacement);
-    assert_eq!(contents(&updated, OTHER_STREAM), OTHER_CONTENTS, "the other stream is untouched");
+    assert_eq!(
+        contents(&updated, OTHER_STREAM),
+        OTHER_CONTENTS,
+        "the other stream is untouched"
+    );
     assert_eq!(
         contents(&updated, "ObjectPool/1/Equation Native"),
         write(&replacement),
@@ -70,15 +95,25 @@ fn replaces_the_equation_of_a_compound_file() {
     );
 
     // Replacing an equation in a file that holds none is an error.
-    let mut empty = CompoundFile::create(Cursor::new(Vec::new())).expect("a compound file is created");
-    empty.create_storage("ObjectPool").expect("the storage is created");
+    let mut empty =
+        CompoundFile::create(Cursor::new(Vec::new())).expect("a compound file is created");
+    empty
+        .create_storage("ObjectPool")
+        .expect("the storage is created");
     {
-        let mut stream = empty.create_stream("ObjectPool/Data").expect("a stream is created");
-        stream.write_all(b"not an equation").expect("the stream is written");
+        let mut stream = empty
+            .create_stream("ObjectPool/Data")
+            .expect("a stream is created");
+        stream
+            .write_all(b"not an equation")
+            .expect("the stream is written");
     }
     empty.flush().expect("the compound file is flushed");
     let plain = empty.into_inner().into_inner();
 
-    assert_eq!(read_from_ole(&plain).expect("a file without an equation reads"), None);
+    assert_eq!(
+        read_from_ole(&plain).expect("a file without an equation reads"),
+        None
+    );
     assert!(write_into_ole(&plain, &write(&equation('c'))).is_err());
 }

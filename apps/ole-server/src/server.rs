@@ -11,7 +11,8 @@ use std::sync::Arc;
 use windows::Win32::System::Com::{CoResumeClassObjects, CoRevokeClassObject};
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, KillTimer, MSG, PostQuitMessage, SetTimer, TranslateMessage, WM_TIMER,
+    DispatchMessageW, GetMessageW, KillTimer, MSG, PostQuitMessage, SetTimer, TranslateMessage,
+    WM_TIMER,
 };
 use windows::core::BOOL;
 
@@ -28,7 +29,8 @@ const STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Serve the equation class until no host needs it any more.
 pub fn run() -> Result<(), String> {
-    unsafe { OleInitialize(None) }.map_err(|error| format!("OleInitialize failed: {}", error_text(&error)))?;
+    unsafe { OleInitialize(None) }
+        .map_err(|error| format!("OleInitialize failed: {}", error_text(&error)))?;
     trace::log("serving the equation class");
 
     let state = Arc::new(ServerState::new());
@@ -74,7 +76,10 @@ pub fn run() -> Result<(), String> {
     object::revoke_active();
     let _ = unsafe { CoRevokeClassObject(cookie) };
     unsafe { OleUninitialize() };
-    trace::log(&format!("stopped serving ({} objects, factory {factory:?} released)", state.live()));
+    trace::log(&format!(
+        "stopped serving ({} objects, factory {factory:?} released)",
+        state.live()
+    ));
     Ok(())
 }
 

@@ -96,8 +96,12 @@ impl Item {
     pub fn edit_range(&self) -> Range<usize> {
         match self {
             Item::Text { range, .. }
-            | Item::Object { run_range: range, .. }
-            | Item::Image { run_range: range, .. }
+            | Item::Object {
+                run_range: range, ..
+            }
+            | Item::Image {
+                run_range: range, ..
+            }
             | Item::Other { range } => range.clone(),
             Item::OMath { range, .. } => range.clone(),
         }
@@ -153,7 +157,9 @@ impl Paragraph {
 
     /// Whether the paragraph holds at least one formula or embedded object.
     pub fn has_equation(&self) -> bool {
-        self.items.iter().any(|item| matches!(item, Item::OMath { .. } | Item::Object { .. }))
+        self.items
+            .iter()
+            .any(|item| matches!(item, Item::OMath { .. } | Item::Object { .. }))
     }
 }
 

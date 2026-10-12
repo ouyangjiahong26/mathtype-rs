@@ -88,9 +88,13 @@ pub(crate) const STANDARD_FONTS: [(&str, usize); 4] = [
 /// names below are the ones this crate uses for the faces that have no widely available system
 /// font of the same shape.
 pub(crate) fn explicit_font(font: Font) -> (&'static str, u8) {
-    let bits = if font.is_bold() { STYLE_BOLD } else { 0 } | if font.is_italic() { STYLE_ITALIC } else { 0 };
+    let bits = if font.is_bold() { STYLE_BOLD } else { 0 }
+        | if font.is_italic() { STYLE_ITALIC } else { 0 };
     let name = match font {
-        Font::SansSerif | Font::SansSerifBold | Font::SansSerifItalic | Font::SansSerifBoldItalic => "Arial",
+        Font::SansSerif
+        | Font::SansSerifBold
+        | Font::SansSerifItalic
+        | Font::SansSerifBoldItalic => "Arial",
         Font::Monospace => "Courier New",
         Font::Script | Font::BoldScript => "MT Script",
         Font::Fraktur | Font::BoldFraktur => "MT Fraktur",
@@ -112,7 +116,11 @@ pub(crate) fn font_from(name: &str, style: u8) -> Font {
     } else if lower.contains("script") {
         if bold { Font::BoldScript } else { Font::Script }
     } else if lower.contains("fraktur") {
-        if bold { Font::BoldFraktur } else { Font::Fraktur }
+        if bold {
+            Font::BoldFraktur
+        } else {
+            Font::Fraktur
+        }
     } else if lower.contains("doublestruck") {
         Font::DoubleStruck
     } else if lower.contains("courier") || lower.contains("mono") {
@@ -241,14 +249,46 @@ struct Family {
 }
 
 const FAMILIES: [Family; 8] = [
-    Family { selector: 0, open: '\u{27E8}', close: '\u{27E9}' },
-    Family { selector: 1, open: '(', close: ')' },
-    Family { selector: 2, open: '{', close: '}' },
-    Family { selector: 3, open: '[', close: ']' },
-    Family { selector: 4, open: '|', close: '|' },
-    Family { selector: 5, open: '\u{2016}', close: '\u{2016}' },
-    Family { selector: 6, open: '\u{230A}', close: '\u{230B}' },
-    Family { selector: 7, open: '\u{2308}', close: '\u{2309}' },
+    Family {
+        selector: 0,
+        open: '\u{27E8}',
+        close: '\u{27E9}',
+    },
+    Family {
+        selector: 1,
+        open: '(',
+        close: ')',
+    },
+    Family {
+        selector: 2,
+        open: '{',
+        close: '}',
+    },
+    Family {
+        selector: 3,
+        open: '[',
+        close: ']',
+    },
+    Family {
+        selector: 4,
+        open: '|',
+        close: '|',
+    },
+    Family {
+        selector: 5,
+        open: '\u{2016}',
+        close: '\u{2016}',
+    },
+    Family {
+        selector: 6,
+        open: '\u{230A}',
+        close: '\u{230B}',
+    },
+    Family {
+        selector: 7,
+        open: '\u{2308}',
+        close: '\u{2309}',
+    },
 ];
 
 /// The family a delimiter belongs to, if any.
@@ -265,7 +305,9 @@ pub(crate) fn family_of(delim: Delim) -> Option<(u8, char, char)> {
         Delim::Norm | Delim::DoubleBar => &FAMILIES[5],
         Delim::Floor => &FAMILIES[6],
         Delim::Ceil => &FAMILIES[7],
-        Delim::Custom(ch) => FAMILIES.iter().find(|family| family.open == ch || family.close == ch)?,
+        Delim::Custom(ch) => FAMILIES
+            .iter()
+            .find(|family| family.open == ch || family.close == ch)?,
         Delim::None => return None,
     };
     Some((found.selector, found.open, found.close))
@@ -282,11 +324,7 @@ pub(crate) fn natural_side(delim: Delim, family: (u8, char, char), opening: bool
 
 /// The character a named delimiter is drawn with on one side, or `None` when it draws nothing.
 fn delimiter_char_of(delim: Delim, opening: bool) -> Option<char> {
-    if opening {
-        delim.open()
-    } else {
-        delim.close()
-    }
+    if opening { delim.open() } else { delim.close() }
 }
 
 /// The delimiter a fence template draws, given its selector and the sides that are present.
@@ -328,8 +366,20 @@ fn delim_from_glyph(family: &Family, glyph: char, opening: bool) -> Delim {
 /// characters the interval template can spell.
 pub(crate) fn interval_code(delim: Delim, left: bool) -> Option<u32> {
     let ch = match delim {
-        Delim::Paren => if left { '(' } else { ')' },
-        Delim::Bracket => if left { '[' } else { ']' },
+        Delim::Paren => {
+            if left {
+                '('
+            } else {
+                ')'
+            }
+        }
+        Delim::Bracket => {
+            if left {
+                '['
+            } else {
+                ']'
+            }
+        }
         Delim::Custom(ch) => ch,
         _ => return None,
     };
@@ -388,11 +438,39 @@ pub(crate) fn side_value(side: Side) -> u8 {
 /// The accent a template draws when its glyph is not decisive.
 pub(crate) fn accent_of_template(selector: u8, variation: u32) -> (AccentKind, bool) {
     match selector {
-        12 => (if variation & 0x0001 != 0 { AccentKind::Line } else { AccentKind::Bar }, true),
-        13 => (if variation & 0x0001 != 0 { AccentKind::Line } else { AccentKind::Bar }, false),
+        12 => (
+            if variation & 0x0001 != 0 {
+                AccentKind::Line
+            } else {
+                AccentKind::Bar
+            },
+            true,
+        ),
+        13 => (
+            if variation & 0x0001 != 0 {
+                AccentKind::Line
+            } else {
+                AccentKind::Bar
+            },
+            false,
+        ),
         14 => (AccentKind::ArrowRight, false),
-        24 => (if variation & 0x0001 != 0 { AccentKind::OverBrace } else { AccentKind::UnderBrace }, variation & 0x0001 == 0),
-        25 => (if variation & 0x0001 != 0 { AccentKind::OverBracket } else { AccentKind::UnderBracket }, variation & 0x0001 == 0),
+        24 => (
+            if variation & 0x0001 != 0 {
+                AccentKind::OverBrace
+            } else {
+                AccentKind::UnderBrace
+            },
+            variation & 0x0001 == 0,
+        ),
+        25 => (
+            if variation & 0x0001 != 0 {
+                AccentKind::OverBracket
+            } else {
+                AccentKind::UnderBracket
+            },
+            variation & 0x0001 == 0,
+        ),
         31 => (AccentKind::Vector, variation & 0x0004 != 0),
         32 => (AccentKind::Tilde, false),
         33 => (AccentKind::Hat, false),
@@ -437,9 +515,11 @@ pub(crate) fn accent_of_glyph(glyph: char) -> Option<(AccentKind, bool)> {
 pub(crate) fn template_of_accent(kind: AccentKind, under: bool) -> (u8, u32, Option<char>) {
     let glyph = kind.glyph();
     match kind {
-        AccentKind::Bar | AccentKind::Line => {
-            (if under { 12 } else { 13 }, u32::from(kind == AccentKind::Line), None)
-        }
+        AccentKind::Bar | AccentKind::Line => (
+            if under { 12 } else { 13 },
+            u32::from(kind == AccentKind::Line),
+            None,
+        ),
         AccentKind::OverBrace => (24, 0x0001, glyph),
         AccentKind::UnderBrace => (24, 0x0000, glyph),
         AccentKind::OverBracket => (25, 0x0001, glyph),
@@ -447,9 +527,15 @@ pub(crate) fn template_of_accent(kind: AccentKind, under: bool) -> (u8, u32, Opt
         AccentKind::OverParen | AccentKind::UnderParen => (34, 0, glyph),
         AccentKind::Vector => (31, 0x0002 | if under { 0x0004 } else { 0 }, glyph),
         AccentKind::Strike => (36, 0x0001, None),
-        AccentKind::ArrowRight | AccentKind::ArrowLeft if !under => {
-            (14, if kind == AccentKind::ArrowLeft { 0x10 } else { 0x20 }, glyph)
-        }
+        AccentKind::ArrowRight | AccentKind::ArrowLeft if !under => (
+            14,
+            if kind == AccentKind::ArrowLeft {
+                0x10
+            } else {
+                0x20
+            },
+            glyph,
+        ),
         // Hats, arcs, points and the accents with no template of their own share the hat
         // template, which draws over its contents, or the underbar when they go under them.
         _ => (if under { 12 } else { 33 }, 0, glyph),

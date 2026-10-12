@@ -31,7 +31,12 @@ pub fn payload(math: &mt_core::Math) -> Result<Payload, String> {
         &mt_layout::LayoutStyle::display(18.0),
         3.0,
     )?;
-    Ok(Payload { latex, html, mtef, png })
+    Ok(Payload {
+        latex,
+        html,
+        mtef,
+        png,
+    })
 }
 
 /// 把 MathML 与 OMML 装进一份 HTML：浏览器渲染 MathML、忽略未知标签，Word 认
@@ -45,9 +50,7 @@ fn html_fragment(mathml: &str, omml: &str) -> String {
         &format!("xmlns=\"{MATHML_NS}\""),
     );
     let mathml = mathml.replace("<m:", "<").replace("</m:", "</");
-    format!(
-        "<html><body><!--StartFragment-->{mathml}{omml}<!--EndFragment--></body></html>"
-    )
+    format!("<html><body><!--StartFragment-->{mathml}{omml}<!--EndFragment--></body></html>")
 }
 
 /// 取剪贴板属主脚本（随二进制部署）并写到临时目录，返回其路径。
@@ -101,11 +104,7 @@ pub fn copy(math: &mt_core::Math) -> Result<(), String> {
 /// `image/png` 等位图格式无法还原成树，返回带说明的错误。
 pub fn paste() -> Result<mt_core::Math, String> {
     let targets = clipboard_targets()?;
-    let prefer = [
-        "application/x-mathtype-mtef",
-        "text/html",
-        "text/plain",
-    ];
+    let prefer = ["application/x-mathtype-mtef", "text/html", "text/plain"];
     for target in prefer {
         if targets.iter().any(|offered| offered == target) {
             let data = clipboard_read(target)?;

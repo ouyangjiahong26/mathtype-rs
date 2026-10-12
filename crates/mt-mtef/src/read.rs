@@ -5,7 +5,7 @@
 
 use mt_core::{
     Accent, BigOp, Class, Delim, Fence, Font, Frac, FracKind, Limits, Math, MathStyle, Matrix,
-    MatrixKind, Node, Row, Scripts, Side, Sqrt, Space,
+    MatrixKind, Node, Row, Scripts, Side, Space, Sqrt,
 };
 
 use crate::tables::*;
@@ -25,9 +25,16 @@ const MAX_CHAIN: usize = 512;
 pub(crate) fn document(body: &[u8]) -> Result<Parsed, MtefError> {
     let mut parser = Parser::new(body)?;
     let nodes = parser.list()?;
-    let mut math = Math { body: Node::Row(nodes), style: parser.style };
+    let mut math = Math {
+        body: Node::Row(nodes),
+        style: parser.style,
+    };
     math.body.normalize();
-    Ok(Parsed { math, header: parser.header, report: parser.report })
+    Ok(Parsed {
+        math,
+        header: parser.header,
+        report: parser.report,
+    })
 }
 
 // ------------------------------------------------------------------------------- reader
@@ -99,8 +106,14 @@ impl<'a> Reader<'a> {
     /// a stream are font and encoding names, which are ascii in every stream this crate writes.
     fn cstring(&mut self) -> Result<String, MtefError> {
         let tail = self.data.get(self.pos..).ok_or(MtefError::Truncated)?;
-        let length = tail.iter().position(|&byte| byte == 0).ok_or(MtefError::Truncated)?;
-        let text = tail[..length].iter().map(|&byte| char::from(byte)).collect();
+        let length = tail
+            .iter()
+            .position(|&byte| byte == 0)
+            .ok_or(MtefError::Truncated)?;
+        let text = tail[..length]
+            .iter()
+            .map(|&byte| char::from(byte))
+            .collect();
         self.pos += length + 1;
         Ok(text)
     }
@@ -136,7 +149,10 @@ impl<'a> Nibbles<'a> {
                 _ => value.push('?'),
             }
         }
-        Ok(Dimension { unit: Unit::from_code(unit), value })
+        Ok(Dimension {
+            unit: Unit::from_code(unit),
+            value,
+        })
     }
 }
 
@@ -148,9 +164,16 @@ enum Item {
     /// A line, kept whole when the caller reads a pile or a table. `null` marks a line that is
     /// not drawn at all, which an optional slot reads as absent — a line that is drawn but
     /// empty is a slot that is present and empty.
-    Line { row: Row, null: bool },
+    Line {
+        row: Row,
+        null: bool,
+    },
     /// A script template, whose base is the record next to it.
-    Script { sub: Option<Node>, sup: Option<Node>, precedes: bool },
+    Script {
+        sub: Option<Node>,
+        sup: Option<Node>,
+        precedes: bool,
+    },
 }
 
 struct Parser<'a> {
@@ -236,7 +259,11 @@ impl<'a> Parser<'a> {
                         push(&mut out, node, &mut pending);
                     }
                 }
-                Item::Script { sub, sup, precedes: false } => {
+                Item::Script {
+                    sub,
+                    sup,
+                    precedes: false,
+                } => {
                     chain += 1;
                     if chain > MAX_CHAIN {
                         return Err(MtefError::Nesting);
@@ -244,7 +271,11 @@ impl<'a> Parser<'a> {
                     let base = out.pop().unwrap_or_else(Node::empty);
                     out.push(attach(base, sub, sup));
                 }
-                Item::Script { sub, sup, precedes: true } => pending = Some((sub, sup)),
+                Item::Script {
+                    sub,
+                    sup,
+                    precedes: true,
+                } => pending = Some((sub, sup)),
             }
         }
     }
@@ -371,13 +402,23 @@ impl<'a> Parser<'a> {
         }
         if options & OPT_LINE_NULL != 0 {
             return Ok(if lines {
-                Item::Line { row: Row::new(), null: true }
+                Item::Line {
+                    row: Row::new(),
+                    null: true,
+                }
             } else {
                 Item::Nodes(Vec::new())
             });
         }
         let contents = self.list()?;
-        Ok(if lines { Item::Line { row: contents, null: false } } else { Item::Nodes(contents) })
+        Ok(if lines {
+            Item::Line {
+                row: contents,
+                null: false,
+            }
+        } else {
+            Item::Nodes(contents)
+        })
     }
 
     fn character(&mut self) -> Result<Item, MtefError> {
@@ -386,9 +427,21 @@ impl<'a> Parser<'a> {
             self.reader.nudge()?;
         }
         let typeface = self.reader.signed()?;
-        let code = if options & OPT_CHAR_NO_MTCODE == 0 { Some(self.reader.u16()?) } else { None };
-        let eight = if options & OPT_CHAR_8BIT != 0 { Some(self.reader.u8()?) } else { None };
-        let sixteen = if options & OPT_CHAR_16BIT != 0 { Some(self.reader.u16()?) } else { None };
+        let code = if options & OPT_CHAR_NO_MTCODE == 0 {
+            Some(self.reader.u16()?)
+        } else {
+            None
+        };
+        let eight = if options & OPT_CHAR_8BIT != 0 {
+            Some(self.reader.u8()?)
+        } else {
+            None
+        };
+        let sixteen = if options & OPT_CHAR_16BIT != 0 {
+            Some(self.reader.u16()?)
+        } else {
+            None
+        };
         let ch = code
             .and_then(|value| char::from_u32(u32::from(value)))
             .or_else(|| sixteen.and_then(|value| char::from_u32(u32::from(value))))
@@ -432,7 +485,11 @@ impl<'a> Parser<'a> {
                         if chain > MAX_CHAIN {
                             break Err(MtefError::Nesting);
                         }
-                        dressed = Node::Accent(Box::new(Accent { kind: accent, base: dressed, under }));
+                        dressed = Node::Accent(Box::new(Accent {
+                            kind: accent,
+                            base: dressed,
+                            under,
+                        }));
                     }
                     None => self.report.skipped += 1,
                 }
@@ -463,7 +520,11 @@ impl<'a> Parser<'a> {
     }
 
     fn size(&mut self, tag: u8) -> Result<MathStyle, MtefError> {
-        let first = if tag == TAG_SIZE { self.reader.u8()? } else { tag - TAG_TYPESIZE_FIRST };
+        let first = if tag == TAG_SIZE {
+            self.reader.u8()?
+        } else {
+            tag - TAG_TYPESIZE_FIRST
+        };
         let simple = match first {
             101 => {
                 // An explicit point size, which the equation tree does not carry.
@@ -506,16 +567,27 @@ impl<'a> Parser<'a> {
         for _ in 0..count {
             let font = self.reader.unsigned()?;
             let style = if font == 0 { 0 } else { self.reader.u8()? };
-            styles.push(StyleDef { font: (font != 0).then_some(font), style });
+            styles.push(StyleDef {
+                font: (font != 0).then_some(font),
+                style,
+            });
         }
-        self.header.preferences = Preferences { sizes, spaces, styles };
+        self.header.preferences = Preferences {
+            sizes,
+            spaces,
+            styles,
+        };
         Ok(())
     }
 
     /// Read a dimension array: a byte count, then the values as nibbles.
     fn dimension_array(&mut self) -> Result<Vec<Dimension>, MtefError> {
         let count = self.reader.u8()?;
-        let mut nibbles = Nibbles { data: self.reader.data, pos: self.reader.pos, high: false };
+        let mut nibbles = Nibbles {
+            data: self.reader.data,
+            pos: self.reader.pos,
+            high: false,
+        };
         let mut dimensions = Vec::new();
         for _ in 0..count {
             let unit = nibbles.next()?;
@@ -556,11 +628,22 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
-                Item::Script { sub, sup, precedes: false } => {
-                    let base = lines.pop().map(|(row, _)| slot(row)).unwrap_or_else(Node::empty);
+                Item::Script {
+                    sub,
+                    sup,
+                    precedes: false,
+                } => {
+                    let base = lines
+                        .pop()
+                        .map(|(row, _)| slot(row))
+                        .unwrap_or_else(Node::empty);
                     lines.push((vec![attach(base, sub, sup)], false));
                 }
-                Item::Script { sub, sup, precedes: true } => match lines.first_mut() {
+                Item::Script {
+                    sub,
+                    sup,
+                    precedes: true,
+                } => match lines.first_mut() {
                     Some((row, _)) => {
                         let base = slot(std::mem::take(row));
                         *row = vec![attach(base, sub, sup)];
@@ -572,7 +655,13 @@ impl<'a> Parser<'a> {
         Ok(self.build_template(selector, variation, lines, glyphs))
     }
 
-    fn build_template(&mut self, selector: u8, variation: u32, lines: Vec<(Row, bool)>, glyphs: Vec<Node>) -> Item {
+    fn build_template(
+        &mut self,
+        selector: u8,
+        variation: u32,
+        lines: Vec<(Row, bool)>,
+        glyphs: Vec<Node>,
+    ) -> Item {
         let glyph = |position: usize| {
             glyphs.get(position).and_then(|node| match node {
                 Node::Char(ch) => Some(ch.ch),
@@ -581,16 +670,28 @@ impl<'a> Parser<'a> {
         };
         // An optional slot is absent when its line is not drawn; a line that is drawn but empty
         // is a slot that is present and empty.
-        let optional_line = |position: usize| lines.get(position).and_then(|(row, null)| {
-            if *null {
-                None
-            } else {
-                Some(slot(row.clone()))
-            }
-        });
-        let main = lines.first().cloned().map(|(row, _)| row).unwrap_or_default();
-        let second = lines.get(1).cloned().map(|(row, _)| row).unwrap_or_default();
-        let third = lines.get(2).cloned().map(|(row, _)| row).unwrap_or_default();
+        let optional_line = |position: usize| {
+            lines.get(position).and_then(
+                |(row, null)| {
+                    if *null { None } else { Some(slot(row.clone())) }
+                },
+            )
+        };
+        let main = lines
+            .first()
+            .cloned()
+            .map(|(row, _)| row)
+            .unwrap_or_default();
+        let second = lines
+            .get(1)
+            .cloned()
+            .map(|(row, _)| row)
+            .unwrap_or_default();
+        let third = lines
+            .get(2)
+            .cloned()
+            .map(|(row, _)| row)
+            .unwrap_or_default();
         match selector {
             // Fences and intervals.
             0..=8 => {
@@ -612,8 +713,14 @@ impl<'a> Parser<'a> {
                 Item::Nodes(vec![fence(open, close, slot(main))])
             }
             9 => {
-                let open = glyph(0).map_or_else(|| interval_delim(variation, true), |ch| refine_delim(interval_delim(variation, true), ch, true));
-                let close = glyph(1).map_or_else(|| interval_delim(variation, false), |ch| refine_delim(interval_delim(variation, false), ch, false));
+                let open = glyph(0).map_or_else(
+                    || interval_delim(variation, true),
+                    |ch| refine_delim(interval_delim(variation, true), ch, true),
+                );
+                let close = glyph(1).map_or_else(
+                    || interval_delim(variation, false),
+                    |ch| refine_delim(interval_delim(variation, false), ch, false),
+                );
                 Item::Nodes(vec![fence(open, close, slot(main))])
             }
             // Radical.
@@ -630,7 +737,11 @@ impl<'a> Parser<'a> {
                     0x0006 => FracKind::NoBar,
                     _ => FracKind::Bar,
                 };
-                Item::Nodes(vec![Node::Frac(Box::new(Frac { num: slot(main), den: slot(second), kind }))])
+                Item::Nodes(vec![Node::Frac(Box::new(Frac {
+                    num: slot(main),
+                    den: slot(second),
+                    kind,
+                }))])
             }
             // Accents, horizontal braces and brackets.
             12 | 13 | 14 | 24 | 25 | 31 | 32 | 33 | 34 | 36 => {
@@ -655,8 +766,16 @@ impl<'a> Parser<'a> {
                 if selector == 24 || selector == 25 {
                     // A labelled brace keeps its label as over/under material.
                     if let Some(label) = optional(second) {
-                        let base = Node::Accent(Box::new(Accent { kind, base: slot(main), under }));
-                        let (over, under) = if under { (None, Some(label)) } else { (Some(label), None) };
+                        let base = Node::Accent(Box::new(Accent {
+                            kind,
+                            base: slot(main),
+                            under,
+                        }));
+                        let (over, under) = if under {
+                            (None, Some(label))
+                        } else {
+                            (Some(label), None)
+                        };
                         return Item::Nodes(vec![Node::Limits(Box::new(Limits {
                             base,
                             over,
@@ -665,14 +784,22 @@ impl<'a> Parser<'a> {
                         }))]);
                     }
                 }
-                Item::Nodes(vec![Node::Accent(Box::new(Accent { kind, base: slot(main), under }))])
+                Item::Nodes(vec![Node::Accent(Box::new(Accent {
+                    kind,
+                    base: slot(main),
+                    under,
+                }))])
             }
             // Large operators: the operand follows the operator in the tree, while the limits
             // and the operator glyph live in the template.
             15..=22 => {
                 let base = glyphs.last().cloned().unwrap_or_else(|| {
                     let ch = default_operator(selector);
-                    Node::Char(mt_core::Char { ch, class: Class::Op, font: Font::Upright })
+                    Node::Char(mt_core::Char {
+                        ch,
+                        class: Class::Op,
+                        font: Font::Upright,
+                    })
                 });
                 let big = BigOp {
                     base,
@@ -712,9 +839,21 @@ impl<'a> Parser<'a> {
                 if let Some(right) = optional(second) {
                     body.push(right);
                 }
-                let open = if variation & 0x0001 != 0 { Delim::Angle } else { Delim::None };
-                let close = if variation & 0x0002 != 0 { Delim::Angle } else { Delim::None };
-                Item::Nodes(vec![Node::Fence(Box::new(Fence { open, close, body: Node::Row(body) }))])
+                let open = if variation & 0x0001 != 0 {
+                    Delim::Angle
+                } else {
+                    Delim::None
+                };
+                let close = if variation & 0x0002 != 0 {
+                    Delim::Angle
+                } else {
+                    Delim::None
+                };
+                Item::Nodes(vec![Node::Fence(Box::new(Fence {
+                    open,
+                    close,
+                    body: Node::Row(body),
+                }))])
             }
             // Boxes.
             37 => Item::Nodes(vec![fence(Delim::None, Delim::None, slot(main))]),
@@ -791,10 +930,14 @@ impl<'a> Parser<'a> {
         let column_count = usize::from(self.reader.u8()?);
         let row_parts = self.reader.bytes((row_count + 1).div_ceil(4))?.to_vec();
         let column_parts = self.reader.bytes((column_count + 1).div_ceil(4))?.to_vec();
-        let rules = row_parts.iter().any(|&byte| byte != 0)
-            || column_parts.iter().any(|&byte| byte != 0);
+        let rules =
+            row_parts.iter().any(|&byte| byte != 0) || column_parts.iter().any(|&byte| byte != 0);
         let rows = self.cells(row_count, column_count)?;
-        let kind = if rules { MatrixKind::Array } else { MatrixKind::Matrix };
+        let kind = if rules {
+            MatrixKind::Array
+        } else {
+            MatrixKind::Matrix
+        };
         Ok(Item::Nodes(vec![Node::Matrix(Box::new(Matrix {
             rows,
             delims: None,
@@ -856,7 +999,9 @@ impl<'a> Parser<'a> {
                 .checked_sub(1)
                 .and_then(|index| self.header.preferences.styles.get(index));
             if let Some(style) = style {
-                if let Some(definition) = style.font.and_then(|font| self.header.fonts.get(font - 1)) {
+                if let Some(definition) =
+                    style.font.and_then(|font| self.header.fonts.get(font - 1))
+                {
                     return font_from(&definition.name, style.style);
                 }
             }
@@ -866,7 +1011,12 @@ impl<'a> Parser<'a> {
             let definition = index
                 .checked_sub(1)
                 .and_then(|index| self.font_styles.get(index))
-                .and_then(|&(font, style)| self.header.fonts.get(font.saturating_sub(1)).map(|def| (def, style)));
+                .and_then(|&(font, style)| {
+                    self.header
+                        .fonts
+                        .get(font.saturating_sub(1))
+                        .map(|def| (def, style))
+                });
             match definition {
                 Some((definition, style)) => font_from(&definition.name, style),
                 None => Font::Upright,
@@ -919,7 +1069,11 @@ fn refine_delim(delimiter: Delim, glyph: char, opening: bool) -> Delim {
     match family_of(delimiter) {
         Some((_, natural_open, natural_close)) => {
             let natural = if opening { natural_open } else { natural_close };
-            if glyph == natural { delimiter } else { Delim::Custom(glyph) }
+            if glyph == natural {
+                delimiter
+            } else {
+                Delim::Custom(glyph)
+            }
         }
         None => Delim::Custom(glyph),
     }

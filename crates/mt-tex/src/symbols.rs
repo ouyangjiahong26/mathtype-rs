@@ -149,17 +149,26 @@ pub(crate) const SYMBOLS: &[(&str, char, Class)] = &[
 
 /// Look up a control-sequence name.
 pub(crate) fn lookup(name: &str) -> Option<(char, Class)> {
-    SYMBOLS.iter().find(|(n, _, _)| *n == name).map(|(_, ch, class)| (*ch, *class))
+    SYMBOLS
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, ch, class)| (*ch, *class))
 }
 
 /// The canonical macro name for a character, if the character has one.
 pub(crate) fn macro_for(ch: char) -> Option<&'static str> {
-    SYMBOLS.iter().find(|(_, c, _)| *c == ch).map(|(name, _, _)| *name)
+    SYMBOLS
+        .iter()
+        .find(|(_, c, _)| *c == ch)
+        .map(|(name, _, _)| *name)
 }
 
 /// The class a character carries when it appears in the table.
 pub(crate) fn lookup_by_char(ch: char) -> Option<(char, Class)> {
-    SYMBOLS.iter().find(|(_, c, _)| *c == ch).map(|(_, ch, class)| (*ch, *class))
+    SYMBOLS
+        .iter()
+        .find(|(_, c, _)| *c == ch)
+        .map(|(_, ch, class)| (*ch, *class))
 }
 
 /// Large operators, with a flag saying whether they take limits above and below by default.
@@ -208,22 +217,34 @@ pub(crate) const NAMED_OPS: &[(&str, bool)] = &[
 
 /// Character and default limit placement for a large operator macro.
 pub(crate) fn big_op(name: &str) -> Option<(char, bool)> {
-    BIG_OPS.iter().find(|(n, _, _)| *n == name).map(|(_, ch, limits)| (*ch, *limits))
+    BIG_OPS
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, ch, limits)| (*ch, *limits))
 }
 
 /// Macro name for a large-operator character.
 pub(crate) fn big_op_macro(ch: char) -> Option<&'static str> {
-    BIG_OPS.iter().find(|(_, c, _)| *c == ch).map(|(name, _, _)| *name)
+    BIG_OPS
+        .iter()
+        .find(|(_, c, _)| *c == ch)
+        .map(|(name, _, _)| *name)
 }
 
 /// Default limit placement for a large-operator character.
 pub(crate) fn big_op_limits(ch: char) -> Option<bool> {
-    BIG_OPS.iter().find(|(_, c, _)| *c == ch).map(|(_, _, limits)| *limits)
+    BIG_OPS
+        .iter()
+        .find(|(_, c, _)| *c == ch)
+        .map(|(_, _, limits)| *limits)
 }
 
 /// Whether a named operator is known, and its default limit placement.
 pub(crate) fn named_op(name: &str) -> Option<bool> {
-    NAMED_OPS.iter().find(|(n, _)| *n == name).map(|(_, limits)| *limits)
+    NAMED_OPS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, limits)| *limits)
 }
 
 /// True when the character is drawn in italics by default: ascii letters and lowercase Greek.
@@ -236,5 +257,8 @@ pub(crate) fn char_font(ch: char) -> Font {
 }
 
 fn is_lower_greek(ch: char) -> bool {
-    matches!(ch as u32, 0x3B1..=0x3C9 | 0x3D1 | 0x3D5 | 0x3D6 | 0x3D7 | 0x3F0 | 0x3F1 | 0x3F5)
+    matches!(
+        ch as u32,
+        0x3B1..=0x3C9 | 0x3D1 | 0x3D5 | 0x3D6 | 0x3D7 | 0x3F0 | 0x3F1 | 0x3F5
+    )
 }

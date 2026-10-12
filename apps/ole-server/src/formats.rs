@@ -88,7 +88,10 @@ pub struct FormatEnumerator {
 impl FormatEnumerator {
     /// An enumerator over `formats`, positioned at the first one.
     pub fn new(formats: Vec<FORMATETC>) -> Self {
-        Self { formats, index: Cell::new(0) }
+        Self {
+            formats,
+            index: Cell::new(0),
+        }
     }
 
     /// The formats the object offers to a host that is asking for data.
@@ -117,11 +120,16 @@ impl IEnumFORMATETC_Impl for FormatEnumerator_Impl {
         if !pceltfetched.is_null() {
             unsafe { pceltfetched.write(taken as u32) };
         }
-        if taken == celt as usize { HRESULT(0) } else { S_FALSE }
+        if taken == celt as usize {
+            HRESULT(0)
+        } else {
+            S_FALSE
+        }
     }
 
     fn Skip(&self, celt: u32) -> windows::core::Result<()> {
-        self.index.set((self.index.get() + celt as usize).min(self.formats.len()));
+        self.index
+            .set((self.index.get() + celt as usize).min(self.formats.len()));
         Ok(())
     }
 

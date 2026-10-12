@@ -2,11 +2,11 @@
 
 use mt_core::{
     Accent, AccentKind, BigOp, Char, Class, Delim, Fence, Font, Frac, FracKind, Limits, Math,
-    Matrix, MatrixKind, Node, Scripts, Side, Sqrt, Space,
+    Matrix, MatrixKind, Node, Scripts, Side, Space, Sqrt,
 };
 use mt_mtef::{
-    parse, parse_bare, read, write, write_bare, write_with_preferences, Dimension, Preferences,
-    StyleDef, Unit,
+    Dimension, Preferences, StyleDef, Unit, parse, parse_bare, read, write, write_bare,
+    write_with_preferences,
 };
 
 /// Equations covering every construct the format spells: fractions, radicals, scripts, fences,
@@ -84,8 +84,21 @@ fn accent(kind: AccentKind, base: Node, under: bool) -> Node {
     Node::Accent(Box::new(Accent { kind, base, under }))
 }
 
-fn table(rows: Vec<Vec<Node>>, delims: Option<(Delim, Delim)>, kind: MatrixKind, align: Side, rules: bool) -> Node {
-    Node::Matrix(Box::new(Matrix { rows, delims, kind, align, columns: Vec::new(), rules }))
+fn table(
+    rows: Vec<Vec<Node>>,
+    delims: Option<(Delim, Delim)>,
+    kind: MatrixKind,
+    align: Side,
+    rules: bool,
+) -> Node {
+    Node::Matrix(Box::new(Matrix {
+        rows,
+        delims,
+        kind,
+        align,
+        columns: Vec::new(),
+        rules,
+    }))
 }
 
 /// Assert that a tree survives writing and reading back.
@@ -120,7 +133,10 @@ fn latex_corpus_round_trips() {
         let math = mt_tex::parse(source).unwrap_or_else(|error| panic!("`{source}`: {error}"));
         check(math.body, source);
     }
-    assert!(CORPUS.len() >= 25, "the corpus covers the constructs the format spells");
+    assert!(
+        CORPUS.len() >= 25,
+        "the corpus covers the constructs the format spells"
+    );
 }
 
 #[test]
@@ -144,7 +160,10 @@ fn trees_built_from_the_model_round_trip() {
         Font::Symbol,
         Font::Extra,
     ];
-    check(Node::row(faces.map(|font| ch('x', Class::Ord, font))), "faces");
+    check(
+        Node::row(faces.map(|font| ch('x', Class::Ord, font))),
+        "faces",
+    );
     check(
         Node::row([
             ch('a', Class::Ord, Font::Italic),
@@ -158,23 +177,47 @@ fn trees_built_from_the_model_round_trip() {
     );
 
     // Spacing.
-    check(Node::row([Node::Space(Space::Thin), Node::variable('x')]), "spacing");
+    check(
+        Node::row([Node::Space(Space::Thin), Node::variable('x')]),
+        "spacing",
+    );
 
     // Fences: a matched pair, a mixed pair, delimiters drawn on one side only, none at all,
     // custom characters, and a box.
     let body = Node::variable('x');
-    check(fence(Delim::Paren, Delim::Paren, body.clone()), "parentheses");
-    check(fence(Delim::Paren, Delim::Bracket, body.clone()), "mixed delimiters");
-    check(fence(Delim::Brace, Delim::None, body.clone()), "one-sided fence");
-    check(fence(Delim::None, Delim::DoubleBar, body.clone()), "closing fence only");
     check(
-        fence(Delim::Custom('\u{2191}'), Delim::Custom('\u{2193}'), body.clone()),
+        fence(Delim::Paren, Delim::Paren, body.clone()),
+        "parentheses",
+    );
+    check(
+        fence(Delim::Paren, Delim::Bracket, body.clone()),
+        "mixed delimiters",
+    );
+    check(
+        fence(Delim::Brace, Delim::None, body.clone()),
+        "one-sided fence",
+    );
+    check(
+        fence(Delim::None, Delim::DoubleBar, body.clone()),
+        "closing fence only",
+    );
+    check(
+        fence(
+            Delim::Custom('\u{2191}'),
+            Delim::Custom('\u{2193}'),
+            body.clone(),
+        ),
         "custom delimiters",
     );
     check(fence(Delim::None, Delim::None, body), "box");
 
     // Fractions of every kind.
-    for kind in [FracKind::Bar, FracKind::Slash, FracKind::Linear, FracKind::NoBar] {
+    for kind in [
+        FracKind::Bar,
+        FracKind::Slash,
+        FracKind::Linear,
+        FracKind::NoBar,
+    ] {
         check(
             frac(
                 Node::variable('a'),
@@ -187,11 +230,17 @@ fn trees_built_from_the_model_round_trip() {
 
     // Radicals, scripts and limits.
     check(
-        Node::Sqrt(Box::new(Sqrt::nth(Node::variable('n'), Node::variable('x')))),
+        Node::Sqrt(Box::new(Sqrt::nth(
+            Node::variable('n'),
+            Node::variable('x'),
+        ))),
         "nth root",
     );
     check(
-        Node::Sqrt(Box::new(Sqrt::square(Node::row([Node::variable('a'), Node::variable('b')])))),
+        Node::Sqrt(Box::new(Sqrt::square(Node::row([
+            Node::variable('a'),
+            Node::variable('b'),
+        ])))),
         "square root",
     );
     check(
@@ -206,7 +255,10 @@ fn trees_built_from_the_model_round_trip() {
         Node::Limits(Box::new(Limits {
             base: Node::variable('x'),
             under: Some(Node::variable('a')),
-            over: Some(Node::row([Node::variable('b'), Node::symbol('=', Class::Rel)])),
+            over: Some(Node::row([
+                Node::variable('b'),
+                Node::symbol('=', Class::Rel),
+            ])),
             align: Side::Center,
         })),
         "limits",
@@ -247,12 +299,26 @@ fn trees_built_from_the_model_round_trip() {
         (AccentKind::ArrowLeft, true),
     ];
     for (kind, under) in accents {
-        check(accent(kind, Node::row([Node::variable('x'), Node::variable('y')]), under), "accent over a group");
-        check(accent(kind, Node::variable('x'), under), "accent over a character");
+        check(
+            accent(
+                kind,
+                Node::row([Node::variable('x'), Node::variable('y')]),
+                under,
+            ),
+            "accent over a group",
+        );
+        check(
+            accent(kind, Node::variable('x'), under),
+            "accent over a character",
+        );
     }
     // Two accents on one character, which the format writes as one embellishment list.
     check(
-        accent(AccentKind::Hat, accent(AccentKind::Tilde, Node::variable('x'), false), false),
+        accent(
+            AccentKind::Hat,
+            accent(AccentKind::Tilde, Node::variable('x'), false),
+            false,
+        ),
         "stacked accents",
     );
 
@@ -273,15 +339,33 @@ fn trees_built_from_the_model_round_trip() {
     }
 
     // Tables: with delimiters, drawing cell rules, stacked, and a long division.
-    let cells = || vec![vec![Node::variable('a'), Node::variable('b')], vec![Node::variable('c'), Node::variable('d')]];
-    check(
-        table(cells(), Some((Delim::Paren, Delim::Paren)), MatrixKind::Matrix, Side::Center, false),
-        "table with delimiters",
-    );
-    check(table(cells(), None, MatrixKind::Array, Side::Center, true), "table with rules");
+    let cells = || {
+        vec![
+            vec![Node::variable('a'), Node::variable('b')],
+            vec![Node::variable('c'), Node::variable('d')],
+        ]
+    };
     check(
         table(
-            vec![vec![Node::variable('a')], vec![Node::variable('b')], vec![Node::variable('c')]],
+            cells(),
+            Some((Delim::Paren, Delim::Paren)),
+            MatrixKind::Matrix,
+            Side::Center,
+            false,
+        ),
+        "table with delimiters",
+    );
+    check(
+        table(cells(), None, MatrixKind::Array, Side::Center, true),
+        "table with rules",
+    );
+    check(
+        table(
+            vec![
+                vec![Node::variable('a')],
+                vec![Node::variable('b')],
+                vec![Node::variable('c')],
+            ],
             None,
             MatrixKind::Pile,
             Side::Center,
@@ -302,7 +386,16 @@ fn trees_built_from_the_model_round_trip() {
         ),
         "long division",
     );
-    check(table(vec![Vec::new(), Vec::new()], None, MatrixKind::Matrix, Side::Center, false), "empty table");
+    check(
+        table(
+            vec![Vec::new(), Vec::new()],
+            None,
+            MatrixKind::Matrix,
+            Side::Center,
+            false,
+        ),
+        "empty table",
+    );
 }
 
 #[test]
@@ -317,29 +410,60 @@ fn an_under_vector_accent_keeps_its_position() {
     expected.normalize();
     let mut read = read.body;
     read.normalize();
-    assert_eq!(read, expected, "a vector accent written under its contents reads back under");
+    assert_eq!(
+        read, expected,
+        "a vector accent written under its contents reads back under"
+    );
 }
 
 #[test]
 fn written_preferences_round_trip() {
     let mut styles = vec![
-        StyleDef { font: Some(1), style: 0 },
-        StyleDef { font: Some(2), style: 3 },
+        StyleDef {
+            font: Some(1),
+            style: 0,
+        },
+        StyleDef {
+            font: Some(2),
+            style: 3,
+        },
     ];
-    styles.resize(12, StyleDef { font: None, style: 0 });
+    styles.resize(
+        12,
+        StyleDef {
+            font: None,
+            style: 0,
+        },
+    );
     let preferences = Preferences {
         sizes: vec![
-            Dimension { unit: Unit::Points, value: "11".to_owned() },
-            Dimension { unit: Unit::Centimeters, value: "0.4".to_owned() },
+            Dimension {
+                unit: Unit::Points,
+                value: "11".to_owned(),
+            },
+            Dimension {
+                unit: Unit::Centimeters,
+                value: "0.4".to_owned(),
+            },
         ],
-        spaces: vec![Dimension { unit: Unit::Percent, value: "120".to_owned() }],
+        spaces: vec![Dimension {
+            unit: Unit::Percent,
+            value: "120".to_owned(),
+        }],
         styles,
     };
     let math = Math::new(Node::variable('x'));
 
     let parsed = read(&write_with_preferences(&math, &preferences)).unwrap();
-    assert_eq!(parsed.header.preferences, preferences, "stream preferences round trip");
+    assert_eq!(
+        parsed.header.preferences, preferences,
+        "stream preferences round trip"
+    );
 
-    let bare = mt_mtef::read_bare(&mt_mtef::write_bare_with_preferences(&math, &preferences)).unwrap();
-    assert_eq!(bare.header.preferences, preferences, "bare stream preferences round trip");
+    let bare =
+        mt_mtef::read_bare(&mt_mtef::write_bare_with_preferences(&math, &preferences)).unwrap();
+    assert_eq!(
+        bare.header.preferences, preferences,
+        "bare stream preferences round trip"
+    );
 }

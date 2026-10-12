@@ -16,8 +16,15 @@ fn every_equation_in_the_library_reads() {
     };
 
     let equations = embedded_equations(&bytes);
-    println!("found {} equations in {LIBRARY} ({} bytes)", equations.len(), bytes.len());
-    assert!(equations.len() >= 100, "the library holds a whole tool bar of equations");
+    println!(
+        "found {} equations in {LIBRARY} ({} bytes)",
+        equations.len(),
+        bytes.len()
+    );
+    assert!(
+        equations.len() >= 100,
+        "the library holds a whole tool bar of equations"
+    );
 
     let mut records = 0;
     let mut skipped = 0;
@@ -78,7 +85,10 @@ fn looks_like_a_stream(data: &[u8]) -> bool {
     if key == 0 || key > 32 {
         return false;
     }
-    if !data[5..5 + key].iter().all(|&byte| (0x20..0x7F).contains(&byte)) {
+    if !data[5..5 + key]
+        .iter()
+        .all(|&byte| (0x20..0x7F).contains(&byte))
+    {
         return false;
     }
     // The application key is followed by the equation options and a definition record.

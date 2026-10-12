@@ -2,12 +2,12 @@
 
 use crate::dom::{self, Elem};
 use crate::{
-    accent_kind, class_of, class_of_marker, delim_pair, fence_class, fold_columns, font_of_marker, font_of_variant,
-    is_large_op, kind_of_marker, side_of_name, space_of_width, ParseError,
+    ParseError, accent_kind, class_of, class_of_marker, delim_pair, fence_class, fold_columns,
+    font_of_marker, font_of_variant, is_large_op, kind_of_marker, side_of_name, space_of_width,
 };
 use mt_core::{
-    Accent, AccentKind, BigOp, Char, Class, Fence, Font, Frac, FracKind, Limits, Math, MathStyle, Matrix, MatrixKind,
-    Node, Row, Scripts, Side, Sqrt, Styled, TextRun,
+    Accent, AccentKind, BigOp, Char, Class, Fence, Font, Frac, FracKind, Limits, Math, MathStyle,
+    Matrix, MatrixKind, Node, Row, Scripts, Side, Sqrt, Styled, TextRun,
 };
 
 /// Reads a MathML presentation document.
@@ -34,10 +34,26 @@ pub fn parse(xml: &str) -> Result<Math, ParseError> {
 fn lift_style(body: Node, style: MathStyle) -> Math {
     match body {
         Node::Styled(styled) => {
-            let Styled { body, style: inner, font, class } = *styled;
+            let Styled {
+                body,
+                style: inner,
+                font,
+                class,
+            } = *styled;
             match (inner, font, class) {
-                (Some(preset), None, None) => Math { body, style: preset },
-                (inner, font, class) => Math { body: Node::Styled(Box::new(Styled { body, style: inner, font, class })), style },
+                (Some(preset), None, None) => Math {
+                    body,
+                    style: preset,
+                },
+                (inner, font, class) => Math {
+                    body: Node::Styled(Box::new(Styled {
+                        body,
+                        style: inner,
+                        font,
+                        class,
+                    })),
+                    style,
+                },
             }
         }
         other => Math { body: other, style },
@@ -80,7 +96,12 @@ fn slot(e: &Elem) -> Result<Node, ParseError> {
     Ok(match children.len() {
         0 => Node::Row(Row::new()),
         1 => node_of(children[0])?,
-        _ => Node::Row(children.into_iter().map(node_of).collect::<Result<Vec<_>, _>>()?),
+        _ => Node::Row(
+            children
+                .into_iter()
+                .map(node_of)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
     })
 }
 
@@ -122,7 +143,11 @@ fn literal(e: &Elem, font: Font) -> Node {
 
 /// An error for an attribute value the model cannot hold.
 fn invalid(e: &Elem, attribute: &str, value: &str) -> ParseError {
-    ParseError::InvalidAttribute { element: e.name.clone(), attribute: attribute.to_owned(), value: value.to_owned() }
+    ParseError::InvalidAttribute {
+        element: e.name.clone(),
+        attribute: attribute.to_owned(),
+        value: value.to_owned(),
+    }
 }
 
 /// One element as a node.
@@ -143,11 +168,19 @@ fn node_of(e: &Elem) -> Result<Node, ParseError> {
         "mfenced" => fenced(e),
         "mtable" => Ok(Node::Matrix(Box::new(table(e)?))),
         "mstyle" => style(e),
-        "mphantom" | "mpadded" => {
-            Ok(Node::Styled(Box::new(Styled { body: slot(e)?, style: None, font: None, class: None })))
-        }
+        "mphantom" | "mpadded" => Ok(Node::Styled(Box::new(Styled {
+            body: slot(e)?,
+            style: None,
+            font: None,
+            class: None,
+        }))),
         // An enclosure is an inner atom for spacing purposes; the drawn shape has no field.
-        "menclose" => Ok(Node::Styled(Box::new(Styled { body: slot(e)?, style: None, font: None, class: Some(Class::Inner) }))),
+        "menclose" => Ok(Node::Styled(Box::new(Styled {
+            body: slot(e)?,
+            style: None,
+            font: None,
+            class: Some(Class::Inner),
+        }))),
         "malignmark" => Ok(Node::Align),
         "merror" => Ok(Node::Error(e.text())),
         other => Err(ParseError::UnknownElement(other.to_owned())),
@@ -160,8 +193,16 @@ fn identifier(e: &Elem) -> Result<Node, ParseError> {
     let mut chars = text.chars();
     match (chars.next(), chars.next()) {
         (Some(ch), None) => {
-            let default = if ch.is_alphabetic() { Font::Italic } else { Font::Upright };
-            Ok(Node::Char(Char { ch, class: class_attribute(e).unwrap_or(Class::Ord), font: font_of(e, default)? }))
+            let default = if ch.is_alphabetic() {
+                Font::Italic
+            } else {
+                Font::Upright
+            };
+            Ok(Node::Char(Char {
+                ch,
+                class: class_attribute(e).unwrap_or(Class::Ord),
+                font: font_of(e, default)?,
+            }))
         }
         _ => Ok(text_node(text, font_of(e, Font::Upright)?)),
     }
@@ -174,8 +215,23 @@ fn number(e: &Elem) -> Result<Node, ParseError> {
     let chars: Vec<char> = text.chars().collect();
     Ok(match chars.as_slice() {
         [] => text_node(text, font),
-        [ch] => Node::Char(Char { ch: *ch, class: Class::Ord, font }),
-        _ => Node::Row(chars.into_iter().map(|ch| Node::Char(Char { ch, class: Class::Ord, font })).collect()),
+        [ch] => Node::Char(Char {
+            ch: *ch,
+            class: Class::Ord,
+            font,
+        }),
+        _ => Node::Row(
+            chars
+                .into_iter()
+                .map(|ch| {
+                    Node::Char(Char {
+                        ch,
+                        class: Class::Ord,
+                        font,
+                    })
+                })
+                .collect(),
+        ),
     })
 }
 
@@ -198,7 +254,11 @@ fn operator(e: &Elem) -> Result<Node, ParseError> {
             if let Some(marked) = class_attribute(e) {
                 class = marked;
             }
-            Ok(Node::Char(Char { ch: *ch, class, font }))
+            Ok(Node::Char(Char {
+                ch: *ch,
+                class,
+                font,
+            }))
         }
         _ => Ok(text_node(text, font)),
     }
@@ -207,7 +267,9 @@ fn operator(e: &Elem) -> Result<Node, ParseError> {
 /// `mspace`: an explicit width on the em grid.
 fn space(e: &Elem) -> Result<Node, ParseError> {
     let width = e.attr("width").unwrap_or("0");
-    space_of_width(width).map(Node::Space).ok_or_else(|| invalid(e, "width", width))
+    space_of_width(width)
+        .map(Node::Space)
+        .ok_or_else(|| invalid(e, "width", width))
 }
 
 /// `mfrac`: rule style from `bevelled` and `linethickness`.
@@ -221,19 +283,28 @@ fn fraction(e: &Elem) -> Result<Node, ParseError> {
         (false, true) => FracKind::NoBar,
         (false, false) => FracKind::Bar,
     };
-    Ok(Node::Frac(Box::new(Frac { num: node_of(children[0])?, den: node_of(children[1])?, kind })))
+    Ok(Node::Frac(Box::new(Frac {
+        num: node_of(children[0])?,
+        den: node_of(children[1])?,
+        kind,
+    })))
 }
 
 /// Whether a length attribute spells zero.
 fn zero_length(value: &str) -> bool {
-    let number = value.trim().trim_end_matches(|ch: char| ch.is_ascii_alphabetic() || ch == '%');
+    let number = value
+        .trim()
+        .trim_end_matches(|ch: char| ch.is_ascii_alphabetic() || ch == '%');
     number.trim().parse::<f64>() == Ok(0.0)
 }
 
 /// `mroot`: an indexed radical, whose two children are the base followed by the index.
 fn radical(e: &Elem) -> Result<Node, ParseError> {
     let children = fixed(e, 2)?;
-    Ok(Node::Sqrt(Box::new(Sqrt { index: optional(node_of(children[1])?), radicand: node_of(children[0])? })))
+    Ok(Node::Sqrt(Box::new(Sqrt {
+        index: optional(node_of(children[1])?),
+        radicand: node_of(children[0])?,
+    })))
 }
 
 /// `msub`/`msup`: one attached script.
@@ -241,14 +312,23 @@ fn script(e: &Elem, superscript: bool) -> Result<Node, ParseError> {
     let children = fixed(e, 2)?;
     let base = node_of(children[0])?;
     let script = optional(node_of(children[1])?);
-    let (sub, sup) = if superscript { (None, script) } else { (script, None) };
+    let (sub, sup) = if superscript {
+        (None, script)
+    } else {
+        (script, None)
+    };
     Ok(attached(base, sub, sup, false))
 }
 
 /// `msubsup`: both scripts.
 fn subscript_superscript(e: &Elem) -> Result<Node, ParseError> {
     let children = fixed(e, 3)?;
-    Ok(attached(node_of(children[0])?, optional(node_of(children[1])?), optional(node_of(children[2])?), false))
+    Ok(attached(
+        node_of(children[0])?,
+        optional(node_of(children[1])?),
+        optional(node_of(children[2])?),
+        false,
+    ))
 }
 
 /// A scripted or limited base: a large operator with limits becomes [`Node::Big`].
@@ -256,7 +336,12 @@ fn attached(base: Node, sub: Option<Node>, sup: Option<Node>, limits: bool) -> N
     // A text base (`\lim` and friends) is only scripted as a large operator: the writer spells
     // `Node::Big` over a text base as these very elements, so it reads back as `Node::Big`.
     if large_operator(&base) || matches!(base, Node::Text(_)) {
-        Node::Big(Box::new(BigOp { base, sub, sup, limits }))
+        Node::Big(Box::new(BigOp {
+            base,
+            sub,
+            sup,
+            limits,
+        }))
     } else {
         Node::Scripts(Box::new(Scripts { base, sub, sup }))
     }
@@ -276,27 +361,53 @@ fn under_over(e: &Elem) -> Result<Node, ParseError> {
     } else if e.name == "mover" {
         (None, optional(node_of(children[1])?))
     } else {
-        (optional(node_of(children[1])?), optional(node_of(children[2])?))
+        (
+            optional(node_of(children[1])?),
+            optional(node_of(children[2])?),
+        )
     };
-    let accented = if e.name == "munder" { e.flag("accentunder") } else { e.name == "mover" && e.flag("accent") };
+    let accented = if e.name == "munder" {
+        e.flag("accentunder")
+    } else {
+        e.name == "mover" && e.flag("accent")
+    };
     if accented {
         if let Some(kind) = under.as_ref().or(over.as_ref()).and_then(accent_script) {
-            return Ok(Node::Accent(Box::new(Accent { kind, base, under: under.is_some() })));
+            return Ok(Node::Accent(Box::new(Accent {
+                kind,
+                base,
+                under: under.is_some(),
+            })));
         }
     }
     if large_operator(&base) {
-        return Ok(Node::Big(Box::new(BigOp { base, sub: under, sup: over, limits: true })));
+        return Ok(Node::Big(Box::new(BigOp {
+            base,
+            sub: under,
+            sup: over,
+            limits: true,
+        })));
     }
     // A text base in an under/over element is a large operator (`\lim` and friends): the
     // writer spells `Node::Big` over a text base the same way, so it reads back as `Node::Big`.
     if matches!(base, Node::Text(_)) {
-        return Ok(Node::Big(Box::new(BigOp { base, sub: under, sup: over, limits: true })));
+        return Ok(Node::Big(Box::new(BigOp {
+            base,
+            sub: under,
+            sup: over,
+            limits: true,
+        })));
     }
     let align = match e.attr("align") {
         None => Side::Center,
         Some(value) => side_of_name(value).ok_or_else(|| invalid(e, "align", value))?,
     };
-    Ok(Node::Limits(Box::new(Limits { base, under, over, align })))
+    Ok(Node::Limits(Box::new(Limits {
+        base,
+        under,
+        over,
+        align,
+    })))
 }
 
 /// The accent an over/under script draws, when the script is a single character that names one.
@@ -323,7 +434,12 @@ fn fenced(e: &Elem) -> Result<Node, ParseError> {
     let body = match children.len() {
         0 => Node::Row(Row::new()),
         1 => node_of(children[0])?,
-        _ => Node::Row(children.into_iter().map(node_of).collect::<Result<Vec<_>, _>>()?),
+        _ => Node::Row(
+            children
+                .into_iter()
+                .map(node_of)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
     };
     let (open, close) = delim_pair(open, close);
     Ok(Node::Fence(Box::new(Fence { open, close, body })))
@@ -357,15 +473,22 @@ fn table(e: &Elem) -> Result<Matrix, ParseError> {
     let mut from_cells: Vec<Option<Side>> = Vec::new();
     for row_element in e.elems() {
         if row_element.name != "mtr" && row_element.name != "mlabeledtr" {
-            return Err(ParseError::Structure(format!("<{}> cannot appear inside <mtable>", row_element.name)));
+            return Err(ParseError::Structure(format!(
+                "<{}> cannot appear inside <mtable>",
+                row_element.name
+            )));
         }
         let mut row = Row::new();
         for cell in row_element.elems() {
             if cell.name != "mtd" {
-                return Err(ParseError::Structure(format!("<{}> cannot appear inside <mtr>", cell.name)));
+                return Err(ParseError::Structure(format!(
+                    "<{}> cannot appear inside <mtr>",
+                    cell.name
+                )));
             }
             if let Some(value) = cell.attr("columnalign") {
-                let side = side_of_name(value).ok_or_else(|| invalid(cell, "columnalign", value))?;
+                let side =
+                    side_of_name(value).ok_or_else(|| invalid(cell, "columnalign", value))?;
                 if from_cells.len() <= row.len() {
                     from_cells.resize(row.len() + 1, None);
                 }
@@ -378,15 +501,29 @@ fn table(e: &Elem) -> Result<Matrix, ParseError> {
     let width = rows.iter().map(Row::len).max().unwrap_or(0);
     let mut columns = Vec::new();
     for column in 0..width {
-        match declared.get(column).or_else(|| from_cells.get(column).and_then(Option::as_ref)) {
+        match declared
+            .get(column)
+            .or_else(|| from_cells.get(column).and_then(Option::as_ref))
+        {
             Some(side) => columns.push(*side),
             None => break,
         }
     }
     let (align, columns) = fold_columns(columns);
-    let rules = e.attr("columnlines").is_some_and(|value| value.split_whitespace().any(|line| line == "solid"));
-    let kind = markers(e).find_map(kind_of_marker).unwrap_or(MatrixKind::Matrix);
-    Ok(Matrix { rows, delims: None, kind, align, columns, rules })
+    let rules = e
+        .attr("columnlines")
+        .is_some_and(|value| value.split_whitespace().any(|line| line == "solid"));
+    let kind = markers(e)
+        .find_map(kind_of_marker)
+        .unwrap_or(MatrixKind::Matrix);
+    Ok(Matrix {
+        rows,
+        delims: None,
+        kind,
+        align,
+        columns,
+        rules,
+    })
 }
 
 /// `mstyle`: a style, font or class wrapper.
@@ -395,9 +532,16 @@ fn style(e: &Elem) -> Result<Node, ParseError> {
     let style = cascade(e)?;
     let font = match e.attr("mathvariant") {
         None => markers(e).find_map(font_of_marker),
-        Some(value) => Some(font_of_variant(value).ok_or_else(|| invalid(e, "mathvariant", value))?),
+        Some(value) => {
+            Some(font_of_variant(value).ok_or_else(|| invalid(e, "mathvariant", value))?)
+        }
     };
-    Ok(Node::Styled(Box::new(Styled { body, style, font, class: class_attribute(e) })))
+    Ok(Node::Styled(Box::new(Styled {
+        body,
+        style,
+        font,
+        class: class_attribute(e),
+    })))
 }
 
 /// The size preset `scriptlevel` and `displaystyle` name.

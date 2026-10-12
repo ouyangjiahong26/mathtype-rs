@@ -7,11 +7,11 @@
 
 use std::ops::Range;
 
-use quick_xml::events::{BytesStart, BytesText, Event};
-use quick_xml::escape::{resolve_predefined_entity, unescape};
 use quick_xml::Reader;
+use quick_xml::escape::{resolve_predefined_entity, unescape};
+use quick_xml::events::{BytesStart, BytesText, Event};
 
-use crate::error::{xml_error, DocxError};
+use crate::error::{DocxError, xml_error};
 use crate::model::{Block, Item, Paragraph, RunStyle, Table, VertAlign};
 
 /// What a scan produces: the block list and the offset an editor splices at.
@@ -41,7 +41,10 @@ impl<'a> Scanner<'a> {
         reader.config_mut().check_end_names = true;
         reader.config_mut().trim_text_start = false;
         reader.config_mut().trim_text_end = false;
-        Self { reader, length: xml.len() }
+        Self {
+            reader,
+            length: xml.len(),
+        }
     }
 
     fn next(&mut self) -> Result<Option<Stepped<'a>>, DocxError> {
@@ -100,7 +103,9 @@ impl<'a> Scanner<'a> {
     /// Indexes the children of `w:body` until its end tag; returns the offset that tag starts at.
     fn scan_body(&mut self, blocks: &mut Vec<Block>) -> Result<usize, DocxError> {
         loop {
-            let Some((event, range)) = self.next()? else { return Ok(self.length) };
+            let Some((event, range)) = self.next()? else {
+                return Ok(self.length);
+            };
             match event {
                 Event::Start(start) => match start.local_name().as_ref() {
                     "p" => {
@@ -110,7 +115,11 @@ impl<'a> Scanner<'a> {
                     "tbl" => {
                         // The placeholder keeps the table's block in document order while its
                         // cell paragraphs, pushed as they are scanned, come after it.
-                        blocks.push(Block::Table(Table { range: 0..0, rows: 0, columns: 0 }));
+                        blocks.push(Block::Table(Table {
+                            range: 0..0,
+                            rows: 0,
+                            columns: 0,
+                        }));
                         let index = blocks.len() - 1;
                         let table = self.scan_table(range.start, 0, blocks)?;
                         blocks[index] = Block::Table(table);
@@ -140,7 +149,9 @@ impl<'a> Scanner<'a> {
         let mut grid_columns = 0usize;
         let mut row_columns = 0usize;
         let end = loop {
-            let Some((event, range)) = self.next()? else { break self.length };
+            let Some((event, range)) = self.next()? else {
+                break self.length;
+            };
             match event {
                 Event::Start(start) => match start.local_name().as_ref() {
                     "tr" => {
@@ -156,19 +167,27 @@ impl<'a> Scanner<'a> {
                         let _ = self.close()?;
                     }
                 },
-                Event::Empty(start) if start.local_name().as_ref() == "gridCol" => grid_columns += 1,
+                Event::Empty(start) if start.local_name().as_ref() == "gridCol" => {
+                    grid_columns += 1
+                }
                 Event::End(end) if end.local_name().as_ref() == "tbl" => break range.end,
                 _ => {}
             }
         };
-        Ok(Table { range: start..end, rows, columns: grid_columns.max(row_columns) })
+        Ok(Table {
+            range: start..end,
+            rows,
+            columns: grid_columns.max(row_columns),
+        })
     }
 
     /// Indexes a `w:tr`, returning how many cells it holds.
     fn scan_row(&mut self, depth: usize, blocks: &mut Vec<Block>) -> Result<usize, DocxError> {
         let mut cells = 0usize;
         loop {
-            let Some((event, range)) = self.next()? else { break };
+            let Some((event, range)) = self.next()? else {
+                break;
+            };
             match event {
                 Event::Start(start) if start.local_name().as_ref() == "tc" => {
                     cells += 1;
@@ -185,7 +204,9 @@ impl<'a> Scanner<'a> {
     /// Indexes the paragraphs and nested tables of a `w:tc`.
     fn scan_cell(&mut self, depth: usize, blocks: &mut Vec<Block>) -> Result<(), DocxError> {
         loop {
-            let Some((event, range)) = self.next()? else { break };
+            let Some((event, range)) = self.next()? else {
+                break;
+            };
             match event {
                 Event::Start(start) => match start.local_name().as_ref() {
                     "p" => {
@@ -193,7 +214,11 @@ impl<'a> Scanner<'a> {
                         blocks.push(Block::Paragraph(paragraph));
                     }
                     "tbl" => {
-                        blocks.push(Block::Table(Table { range: 0..0, rows: 0, columns: 0 }));
+                        blocks.push(Block::Table(Table {
+                            range: 0..0,
+                            rows: 0,
+                            columns: 0,
+                        }));
                         let index = blocks.len() - 1;
                         let table = self.scan_table(range.start, depth, blocks)?;
                         blocks[index] = Block::Table(table);
@@ -256,7 +281,10 @@ impl<'a> Scanner<'a> {
                         let display = start.local_name().as_ref() == "oMathPara";
                         let end = self.close()?;
                         close_pending(&mut pending, &mut items, range.start);
-                        items.push(Item::OMath { range: range.start..end, display });
+                        items.push(Item::OMath {
+                            range: range.start..end,
+                            display,
+                        });
                         pending = Some(end);
                     }
                     _ => {
@@ -268,7 +296,10 @@ impl<'a> Scanner<'a> {
                     "oMath" | "oMathPara" => {
                         let display = start.local_name().as_ref() == "oMathPara";
                         close_pending(&mut pending, &mut items, range.start);
-                        items.push(Item::OMath { range: range.clone(), display });
+                        items.push(Item::OMath {
+                            range: range.clone(),
+                            display,
+                        });
                         pending = Some(range.end);
                     }
                     _ => {
@@ -305,13 +336,17 @@ impl<'a> Scanner<'a> {
         numbered: &mut bool,
     ) -> Result<(), DocxError> {
         loop {
-            let Some((event, _)) = self.next()? else { break };
+            let Some((event, _)) = self.next()? else {
+                break;
+            };
             match event {
-                Event::Start(element) | Event::Empty(element) => match element.local_name().as_ref() {
-                    "pStyle" => *style = attribute(&element, "val"),
-                    "numPr" => *numbered = true,
-                    _ => {}
-                },
+                Event::Start(element) | Event::Empty(element) => {
+                    match element.local_name().as_ref() {
+                        "pStyle" => *style = attribute(&element, "val"),
+                        "numPr" => *numbered = true,
+                        _ => {}
+                    }
+                }
                 Event::End(end) if end.local_name().as_ref() == "pPr" => break,
                 _ => {}
             }
@@ -326,7 +361,9 @@ impl<'a> Scanner<'a> {
         let mut object = None;
         let mut picture = None;
         let end = loop {
-            let Some((event, range)) = self.next()? else { break self.length };
+            let Some((event, range)) = self.next()? else {
+                break self.length;
+            };
             match event {
                 Event::Start(element) => match element.local_name().as_ref() {
                     "rPr" => self.read_run_properties(&mut run_style)?,
@@ -351,24 +388,30 @@ impl<'a> Scanner<'a> {
     /// Reads `w:rPr` into a style summary.
     fn read_run_properties(&mut self, style: &mut RunStyle) -> Result<(), DocxError> {
         loop {
-            let Some((event, _)) = self.next()? else { break };
+            let Some((event, _)) = self.next()? else {
+                break;
+            };
             match event {
-                Event::Start(element) | Event::Empty(element) => match element.local_name().as_ref() {
-                    "b" => style.bold = Some(switch(&element, true)),
-                    "i" => style.italic = Some(switch(&element, true)),
-                    "vertAlign" => style.vert_align = match attribute(&element, "val").as_deref() {
-                        Some("superscript") => Some(VertAlign::Superscript),
-                        Some("subscript") => Some(VertAlign::Subscript),
-                        _ => None,
-                    },
-                    "sz" | "szCs" => {
-                        if style.size_half_points.is_none() {
-                            style.size_half_points =
-                                attribute(&element, "val").and_then(|value| value.parse().ok());
+                Event::Start(element) | Event::Empty(element) => {
+                    match element.local_name().as_ref() {
+                        "b" => style.bold = Some(switch(&element, true)),
+                        "i" => style.italic = Some(switch(&element, true)),
+                        "vertAlign" => {
+                            style.vert_align = match attribute(&element, "val").as_deref() {
+                                Some("superscript") => Some(VertAlign::Superscript),
+                                Some("subscript") => Some(VertAlign::Subscript),
+                                _ => None,
+                            }
                         }
+                        "sz" | "szCs" => {
+                            if style.size_half_points.is_none() {
+                                style.size_half_points =
+                                    attribute(&element, "val").and_then(|value| value.parse().ok());
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
+                }
                 Event::End(end) if end.local_name().as_ref() == "rPr" => break,
                 _ => {}
             }
@@ -380,7 +423,9 @@ impl<'a> Scanner<'a> {
     fn read_text(&mut self) -> Result<String, DocxError> {
         let mut text = String::new();
         loop {
-            let Some((event, _)) = self.next()? else { break };
+            let Some((event, _)) = self.next()? else {
+                break;
+            };
             match event {
                 Event::Text(raw) => text.push_str(&decoded(&raw)?),
                 Event::GeneralRef(raw) => text.push_str(&reference(&raw)?),
@@ -406,13 +451,17 @@ impl<'a> Scanner<'a> {
         };
         let mut depth = 0usize;
         let end = loop {
-            let Some((event, range)) = self.next()? else { break self.length };
+            let Some((event, range)) = self.next()? else {
+                break self.length;
+            };
             match event {
                 Event::Start(element) => {
                     depth += 1;
                     self.note_object(&element, &range, open_end, &mut findings);
                 }
-                Event::Empty(element) => self.note_object(&element, &range, open_end, &mut findings),
+                Event::Empty(element) => {
+                    self.note_object(&element, &range, open_end, &mut findings)
+                }
                 Event::End(_) => {
                     if depth == 0 {
                         break range.end;
@@ -451,11 +500,16 @@ impl<'a> Scanner<'a> {
     /// The picture's reference sits deep inside DrawingML wrappers, so nested elements are
     /// walked rather than skipped.
     fn scan_picture(&mut self, start: usize) -> Result<PictureFindings, DocxError> {
-        let mut findings =
-            PictureFindings { element_range: start..self.length, rel_id: None, name: None };
+        let mut findings = PictureFindings {
+            element_range: start..self.length,
+            rel_id: None,
+            name: None,
+        };
         let mut depth = 0usize;
         let end = loop {
-            let Some((event, range)) = self.next()? else { break self.length };
+            let Some((event, range)) = self.next()? else {
+                break self.length;
+            };
             match event {
                 Event::Start(element) => {
                     depth += 1;
@@ -563,7 +617,11 @@ fn attribute(element: &BytesStart<'_>, name: &str) -> Option<String> {
         .attributes()
         .flatten()
         .find(|attribute| attribute.key.local_name().as_ref() == name)
-        .and_then(|attribute| unescape(&attribute.value).ok().map(|value| value.into_owned()))
+        .and_then(|attribute| {
+            unescape(&attribute.value)
+                .ok()
+                .map(|value| value.into_owned())
+        })
 }
 
 /// An on/off property: on unless the value spells off.

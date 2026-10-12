@@ -2,12 +2,12 @@
 
 use crate::dom::{self, Elem};
 use crate::{
-    accent_is_under, accent_kind, class_of, delim_pair, fold_columns, font_of_properties, group_character_kind,
-    side_of_name, space_of_text, ParseError,
+    ParseError, accent_is_under, accent_kind, class_of, delim_pair, fold_columns,
+    font_of_properties, group_character_kind, side_of_name, space_of_text,
 };
 use mt_core::{
-    Accent, AccentKind, BigOp, Char, Class, Fence, Font, Frac, FracKind, Limits, Math, MathStyle, Matrix, MatrixKind,
-    Node, Row, Scripts, Side, Sqrt, Styled,
+    Accent, AccentKind, BigOp, Char, Class, Fence, Font, Frac, FracKind, Limits, Math, MathStyle,
+    Matrix, MatrixKind, Node, Row, Scripts, Side, Sqrt, Styled,
 };
 
 /// Reads an `<m:oMath>` or `<m:oMathPara>` fragment.
@@ -18,7 +18,10 @@ pub fn parse(xml: &str) -> Result<Math, ParseError> {
         "oMathPara" => paragraph(&root)?,
         other => return Err(ParseError::Root(other.to_owned())),
     };
-    Ok(Math { body, style: MathStyle::Full })
+    Ok(Math {
+        body,
+        style: MathStyle::Full,
+    })
 }
 
 /// The several `m:oMath` children of a paragraph as one body.
@@ -42,7 +45,9 @@ fn sequence(e: &Elem) -> Result<Node, ParseError> {
 
 /// The child elements of an argument, without the properties Office Math allows around them.
 fn content(e: &Elem) -> Vec<&Elem> {
-    e.elems().filter(|child| child.name != "argPr" && child.name != "ctrlPr").collect()
+    e.elems()
+        .filter(|child| child.name != "argPr" && child.name != "ctrlPr")
+        .collect()
 }
 
 /// An empty row when there is nothing, the item itself when there is one, a row otherwise.
@@ -87,7 +92,12 @@ fn property<'a>(e: &'a Elem, owner: &str, name: &str) -> Option<&'a str> {
 }
 
 /// A property value that has to be a single character.
-fn character_property(e: &Elem, owner: &str, name: &str, default: char) -> Result<char, ParseError> {
+fn character_property(
+    e: &Elem,
+    owner: &str,
+    name: &str,
+    default: char,
+) -> Result<char, ParseError> {
     match property(e, owner, name) {
         None => Ok(default),
         Some(value) => {
@@ -117,7 +127,11 @@ fn missing(e: &Elem, name: &str) -> ParseError {
 
 /// An error for an unusable property value.
 fn invalid_property(owner: &str, attribute: &str, value: &str) -> ParseError {
-    ParseError::InvalidAttribute { element: owner.to_owned(), attribute: attribute.to_owned(), value: value.to_owned() }
+    ParseError::InvalidAttribute {
+        element: owner.to_owned(),
+        attribute: attribute.to_owned(),
+        value: value.to_owned(),
+    }
 }
 
 /// One element as a node.
@@ -139,7 +153,12 @@ fn node_of(e: &Elem) -> Result<Node, ParseError> {
         "eqArr" => equation_array(e),
         "box" | "phant" => {
             allowed(e, &["boxPr", "phantPr", "e"])?;
-            Ok(Node::Styled(Box::new(Styled { body: required_argument(e, "e")?, style: None, font: None, class: None })))
+            Ok(Node::Styled(Box::new(Styled {
+                body: required_argument(e, "e")?,
+                style: None,
+                font: None,
+                class: None,
+            })))
         }
         // A box with a border is an inner atom for spacing purposes; the drawn border has no field.
         "borderBox" => {
@@ -160,8 +179,12 @@ fn run(e: &Elem) -> Result<Node, ParseError> {
     let properties = e.child("rPr");
     let normal = properties.is_some_and(|properties| properties.child_on("nor").is_some());
     let aligned = properties.is_some_and(|properties| properties.child_on("aln").is_some());
-    let script = properties.and_then(|properties| properties.child("scr")).and_then(|script| script.attr("val"));
-    let style = properties.and_then(|properties| properties.child("sty")).and_then(|style| style.attr("val"));
+    let script = properties
+        .and_then(|properties| properties.child("scr"))
+        .and_then(|script| script.attr("val"));
+    let style = properties
+        .and_then(|properties| properties.child("sty"))
+        .and_then(|style| style.attr("val"));
     let text: String = e.named("t").map(Elem::text).collect();
     // A single letter is a variable and is italic unless the properties say otherwise; anything
     // else is upright, which is how Office and MathML both read a bare run.
@@ -187,7 +210,11 @@ fn run(e: &Elem) -> Result<Node, ParseError> {
     }
     let mut chars = text.chars();
     match (chars.next(), chars.next()) {
-        (Some(ch), None) => Ok(Node::Char(Char { ch, class: class_of(ch), font })),
+        (Some(ch), None) => Ok(Node::Char(Char {
+            ch,
+            class: class_of(ch),
+            font,
+        })),
         _ => Ok(text_node(text, font)),
     }
 }
@@ -213,20 +240,36 @@ fn fraction(e: &Elem) -> Result<Node, ParseError> {
         Some("noBar") => FracKind::NoBar,
         Some(other) => return Err(invalid_property("fPr", "type", other)),
     };
-    Ok(Node::Frac(Box::new(Frac { num: required_argument(e, "num")?, den: required_argument(e, "den")?, kind })))
+    Ok(Node::Frac(Box::new(Frac {
+        num: required_argument(e, "num")?,
+        den: required_argument(e, "den")?,
+        kind,
+    })))
 }
 
 /// `m:rad`: a radical whose index `m:degHide` may suppress.
 fn radical(e: &Elem) -> Result<Node, ParseError> {
     allowed(e, &["radPr", "deg", "e"])?;
-    let hidden = e.child("radPr").is_some_and(|properties| properties.child_on("degHide").is_some());
-    let index = if hidden { None } else { optional_argument(e, "deg")? };
-    Ok(Node::Sqrt(Box::new(Sqrt { index, radicand: required_argument(e, "e")? })))
+    let hidden = e
+        .child("radPr")
+        .is_some_and(|properties| properties.child_on("degHide").is_some());
+    let index = if hidden {
+        None
+    } else {
+        optional_argument(e, "deg")?
+    };
+    Ok(Node::Sqrt(Box::new(Sqrt {
+        index,
+        radicand: required_argument(e, "e")?,
+    })))
 }
 
 /// `m:sSub`, `m:sSup`, `m:sSubSup` and `m:sPre`: attached scripts.
 fn scripts(e: &Elem) -> Result<Node, ParseError> {
-    allowed(e, &["sSubPr", "sSupPr", "sSubSupPr", "sPrePr", "e", "sub", "sup"])?;
+    allowed(
+        e,
+        &["sSubPr", "sSupPr", "sSubSupPr", "sPrePr", "e", "sub", "sup"],
+    )?;
     Ok(Node::Scripts(Box::new(Scripts {
         base: required_argument(e, "e")?,
         sub: optional_argument(e, "sub")?,
@@ -260,7 +303,11 @@ fn delimiter(e: &Elem) -> Result<Node, ParseError> {
         flatten(&mut items, sequence(argument)?);
     }
     let (open, close) = delim_pair(begin, end);
-    Ok(Node::Fence(Box::new(Fence { open, close, body: sequenced(items) })))
+    Ok(Node::Fence(Box::new(Fence {
+        open,
+        close,
+        body: sequenced(items),
+    })))
 }
 
 /// One delimiter character, where the empty string means "draw nothing".
@@ -289,7 +336,11 @@ fn nary(e: &Elem) -> Result<Node, ParseError> {
         Some(other) => return Err(invalid_property("naryPr", "limLoc", other)),
     };
     let operator = Node::Big(Box::new(BigOp {
-        base: Node::Char(Char { ch: character, class: class_of(character), font: Font::Upright }),
+        base: Node::Char(Char {
+            ch: character,
+            class: class_of(character),
+            font: Font::Upright,
+        }),
         sub: optional_argument(e, "sub")?,
         sup: optional_argument(e, "sup")?,
         limits,
@@ -307,15 +358,33 @@ fn accent(e: &Elem) -> Result<Node, ParseError> {
     let under = position(e, "accPr", character)?;
     let base = required_argument(e, "e")?;
     Ok(match accent_kind(character) {
-        Some(kind) => Node::Accent(Box::new(Accent { kind: orient(kind, under), base, under })),
+        Some(kind) => Node::Accent(Box::new(Accent {
+            kind: orient(kind, under),
+            base,
+            under,
+        })),
         // A character the model has no accent for is still over or under material; keeping it as
         // limits loses the accent spacing but not the mark.
         None => {
-            let mark = Node::Char(Char { ch: character, class: class_of(character), font: Font::Upright });
+            let mark = Node::Char(Char {
+                ch: character,
+                class: class_of(character),
+                font: Font::Upright,
+            });
             if under {
-                Node::Limits(Box::new(Limits { base, under: Some(mark), over: None, align: Side::Center }))
+                Node::Limits(Box::new(Limits {
+                    base,
+                    under: Some(mark),
+                    over: None,
+                    align: Side::Center,
+                }))
             } else {
-                Node::Limits(Box::new(Limits { base, under: None, over: Some(mark), align: Side::Center }))
+                Node::Limits(Box::new(Limits {
+                    base,
+                    under: None,
+                    over: Some(mark),
+                    align: Side::Center,
+                }))
             }
         }
     })
@@ -329,7 +398,11 @@ fn bar(e: &Elem) -> Result<Node, ParseError> {
         Some("bot") => true,
         Some(other) => return Err(invalid_property("barPr", "pos", other)),
     };
-    Ok(Node::Accent(Box::new(Accent { kind: AccentKind::Bar, base: required_argument(e, "e")?, under })))
+    Ok(Node::Accent(Box::new(Accent {
+        kind: AccentKind::Bar,
+        base: required_argument(e, "e")?,
+        under,
+    })))
 }
 
 /// `m:groupChr`: a brace, bracket or parenthesis stretched over or under the base.
@@ -343,7 +416,11 @@ fn group_character(e: &Elem) -> Result<Node, ParseError> {
     let kind = group_character_kind(character)
         .or_else(|| accent_kind(character))
         .unwrap_or(AccentKind::OverBrace);
-    Ok(Node::Accent(Box::new(Accent { kind: orient(kind, under), base: required_argument(e, "e")?, under })))
+    Ok(Node::Accent(Box::new(Accent {
+        kind: orient(kind, under),
+        base: required_argument(e, "e")?,
+        under,
+    })))
 }
 
 /// Whether the mark is drawn below the base: `m:pos`, or the character's own side.
@@ -360,10 +437,14 @@ fn position(e: &Elem, owner: &str, character: char) -> Result<bool, ParseError> 
 fn orient(kind: AccentKind, under: bool) -> AccentKind {
     match (kind, under) {
         (AccentKind::OverBrace, true) | (AccentKind::UnderBrace, true) => AccentKind::UnderBrace,
-        (AccentKind::OverBracket, true) | (AccentKind::UnderBracket, true) => AccentKind::UnderBracket,
+        (AccentKind::OverBracket, true) | (AccentKind::UnderBracket, true) => {
+            AccentKind::UnderBracket
+        }
         (AccentKind::OverParen, true) | (AccentKind::UnderParen, true) => AccentKind::UnderParen,
         (AccentKind::OverBrace, false) | (AccentKind::UnderBrace, false) => AccentKind::OverBrace,
-        (AccentKind::OverBracket, false) | (AccentKind::UnderBracket, false) => AccentKind::OverBracket,
+        (AccentKind::OverBracket, false) | (AccentKind::UnderBracket, false) => {
+            AccentKind::OverBracket
+        }
         (AccentKind::OverParen, false) | (AccentKind::UnderParen, false) => AccentKind::OverParen,
         (other, _) => other,
     }
@@ -387,7 +468,12 @@ fn limit_low(e: &Elem) -> Result<Node, ParseError> {
             }
         }
     }
-    Ok(Node::Limits(Box::new(Limits { base: sequence(body)?, under, over: None, align: Side::Center })))
+    Ok(Node::Limits(Box::new(Limits {
+        base: sequence(body)?,
+        under,
+        over: None,
+        align: Side::Center,
+    })))
 }
 
 /// `m:limUpp`: material above the base.
@@ -404,7 +490,10 @@ fn limit_upper(e: &Elem) -> Result<Node, ParseError> {
 /// `m:func`: a function name applied to an argument, which the model spells as a row.
 fn function(e: &Elem) -> Result<Node, ParseError> {
     allowed(e, &["funcPr", "fName", "e"])?;
-    Ok(Node::Row(vec![required_argument(e, "fName")?, required_argument(e, "e")?]))
+    Ok(Node::Row(vec![
+        required_argument(e, "fName")?,
+        required_argument(e, "e")?,
+    ]))
 }
 
 /// `m:m`: a table of rows and cells.
@@ -424,7 +513,14 @@ fn table(e: &Elem) -> Result<Matrix, ParseError> {
     }
     let width = rows.iter().map(|row| row.len()).max().unwrap_or(0);
     let (align, columns) = fold_columns(column_alignment(e, width)?);
-    Ok(Matrix { rows, delims: None, kind: MatrixKind::Matrix, align, columns, rules: false })
+    Ok(Matrix {
+        rows,
+        delims: None,
+        kind: MatrixKind::Matrix,
+        align,
+        columns,
+        rules: false,
+    })
 }
 
 /// The per-column justification `m:mcs` describes; `m:baseJc` and `m:plcHide` have no field.
@@ -437,7 +533,12 @@ fn column_alignment(e: &Elem, limit: usize) -> Result<Vec<Side>, ParseError> {
     let Some(matrix_properties) = e.child("mPr") else {
         return Ok(Vec::new());
     };
-    allowed(matrix_properties, &["baseJc", "plcHide", "rSpRule", "cGpRule", "rSp", "cSp", "cGp", "mcs", "ctrlPr"])?;
+    allowed(
+        matrix_properties,
+        &[
+            "baseJc", "plcHide", "rSpRule", "cGpRule", "rSp", "cSp", "cGp", "mcs", "ctrlPr",
+        ],
+    )?;
     let mut columns = Vec::new();
     for set in matrix_properties.named("mcs") {
         allowed(set, &["mc"])?;
@@ -446,13 +547,23 @@ fn column_alignment(e: &Elem, limit: usize) -> Result<Vec<Side>, ParseError> {
             if let Some(properties) = properties {
                 allowed(properties, &["count", "mcJc"])?;
             }
-            let count = match properties.and_then(|properties| properties.child("count")).and_then(|count| count.attr("val")) {
+            let count = match properties
+                .and_then(|properties| properties.child("count"))
+                .and_then(|count| count.attr("val"))
+            {
                 None => 1,
-                Some(value) => value.parse::<usize>().map_err(|_| invalid_property("count", "val", value))?,
+                Some(value) => value
+                    .parse::<usize>()
+                    .map_err(|_| invalid_property("count", "val", value))?,
             };
-            let side = match properties.and_then(|properties| properties.child("mcJc")).and_then(|jc| jc.attr("val")) {
+            let side = match properties
+                .and_then(|properties| properties.child("mcJc"))
+                .and_then(|jc| jc.attr("val"))
+            {
                 None => Side::Center,
-                Some(value) => side_of_name(value).ok_or_else(|| invalid_property("mcJc", "val", value))?,
+                Some(value) => {
+                    side_of_name(value).ok_or_else(|| invalid_property("mcJc", "val", value))?
+                }
             };
             for _ in 0..count.max(1) {
                 if columns.len() >= limit {

@@ -147,7 +147,10 @@ impl Stream {
     /// The header opens with the offset of the equation data; some writers count that field
     /// itself, others do not, so both readings are tried.
     pub fn split(bytes: &[u8]) -> Result<Self, MtefError> {
-        let field: [u8; 4] = bytes.get(..4).and_then(|raw| raw.try_into().ok()).ok_or(MtefError::Truncated)?;
+        let field: [u8; 4] = bytes
+            .get(..4)
+            .and_then(|raw| raw.try_into().ok())
+            .ok_or(MtefError::Truncated)?;
         let offset = usize::try_from(u32::from_le_bytes(field)).unwrap_or(usize::MAX);
         let start = [offset, offset + 4]
             .into_iter()
@@ -409,7 +412,9 @@ impl fmt::Display for MtefError {
             MtefError::Version(version) => {
                 write!(f, "unsupported equation format version {version}")
             }
-            MtefError::Header => f.write_str("the stream header does not give the offset of the equation data"),
+            MtefError::Header => {
+                f.write_str("the stream header does not give the offset of the equation data")
+            }
             MtefError::UnknownRecord(tag) => write!(f, "unknown record tag {tag:#04X}"),
             MtefError::Nesting => f.write_str("the object lists nest too deeply"),
             MtefError::Ole(reason) => write!(f, "compound file error: {reason}"),

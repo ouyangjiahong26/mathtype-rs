@@ -1,8 +1,8 @@
 //! Parse fixtures: each asserts the exact tree a MathML document produces.
 
 use mt_core::{
-    Accent, AccentKind, BigOp, Char, Class, Delim, Fence, Font, Frac, FracKind, Limits, Math, MathStyle, Matrix,
-    MatrixKind, Node, Row, Scripts, Side, Space, Sqrt, Styled, TextRun,
+    Accent, AccentKind, BigOp, Char, Class, Delim, Fence, Font, Frac, FracKind, Limits, Math,
+    MathStyle, Matrix, MatrixKind, Node, Row, Scripts, Side, Space, Sqrt, Styled, TextRun,
 };
 use mt_mathml::parse;
 
@@ -23,11 +23,19 @@ fn symbol(ch: char, class: Class) -> Node {
 }
 
 fn digit(ch: char) -> Node {
-    Node::Char(Char { ch, class: Class::Ord, font: Font::Upright })
+    Node::Char(Char {
+        ch,
+        class: Class::Ord,
+        font: Font::Upright,
+    })
 }
 
 fn face(ch: char, font: Font) -> Node {
-    Node::Char(Char { ch, class: Class::Ord, font })
+    Node::Char(Char {
+        ch,
+        class: Class::Ord,
+        font,
+    })
 }
 
 fn text(text: &str) -> Node {
@@ -36,7 +44,10 @@ fn text(text: &str) -> Node {
 
 #[test]
 fn a_single_token_becomes_the_body() {
-    assert_eq!(parse("<math><mi>x</mi></math>").unwrap(), math(variable('x')));
+    assert_eq!(
+        parse("<math><mi>x</mi></math>").unwrap(),
+        math(variable('x'))
+    );
 }
 
 #[test]
@@ -57,7 +68,10 @@ fn a_row_is_kept_as_a_row() {
 
 #[test]
 fn a_multi_letter_identifier_is_literal_text() {
-    assert_eq!(parse("<math><mi>sin</mi></math>").unwrap(), math(text("sin")));
+    assert_eq!(
+        parse("<math><mi>sin</mi></math>").unwrap(),
+        math(text("sin"))
+    );
 }
 
 #[test]
@@ -117,7 +131,11 @@ fn mtext_keeps_its_escaped_characters() {
 fn a_fraction_holds_numerator_and_denominator() {
     assert_eq!(
         parse("<math><mfrac><mn>1</mn><mn>2</mn></mfrac></math>").unwrap(),
-        math(Node::Frac(Box::new(Frac { num: digit('1'), den: digit('2'), kind: FracKind::Bar })))
+        math(Node::Frac(Box::new(Frac {
+            num: digit('1'),
+            den: digit('2'),
+            kind: FracKind::Bar
+        })))
     );
 }
 
@@ -126,13 +144,20 @@ fn fraction_attributes_select_the_rule() {
     let cases = [
         ("<mfrac bevelled=\"true\">", FracKind::Slash),
         ("<mfrac linethickness=\"0\">", FracKind::NoBar),
-        ("<mfrac bevelled=\"true\" linethickness=\"0\">", FracKind::Linear),
+        (
+            "<mfrac bevelled=\"true\" linethickness=\"0\">",
+            FracKind::Linear,
+        ),
     ];
     for (markup, kind) in cases {
         let document = format!("<math>{markup}<mi>a</mi><mi>b</mi></mfrac></math>");
         assert_eq!(
             parse(&document).unwrap(),
-            math(Node::Frac(Box::new(Frac { num: variable('a'), den: variable('b'), kind }))),
+            math(Node::Frac(Box::new(Frac {
+                num: variable('a'),
+                den: variable('b'),
+                kind
+            }))),
             "{document}"
         );
     }
@@ -163,11 +188,19 @@ fn sub_and_superscripts_attach_to_the_base() {
     );
     assert_eq!(
         parse("<math><msub><mi>x</mi><mi>i</mi></msub></math>").unwrap(),
-        math(Node::Scripts(Box::new(Scripts { base: variable('x'), sub: Some(variable('i')), sup: None })))
+        math(Node::Scripts(Box::new(Scripts {
+            base: variable('x'),
+            sub: Some(variable('i')),
+            sup: None
+        })))
     );
     assert_eq!(
         parse("<math><msup><mi>x</mi><mn>2</mn></msup></math>").unwrap(),
-        math(Node::Scripts(Box::new(Scripts { base: variable('x'), sub: None, sup: Some(digit('2')) })))
+        math(Node::Scripts(Box::new(Scripts {
+            base: variable('x'),
+            sub: None,
+            sup: Some(digit('2'))
+        })))
     );
 }
 
@@ -215,11 +248,19 @@ fn over_and_under_material_that_is_not_an_accent_is_limits() {
 fn an_accent_attribute_turns_over_material_into_an_accent() {
     assert_eq!(
         parse("<math><mover accent=\"true\"><mi>x</mi><mo>^</mo></mover></math>").unwrap(),
-        math(Node::Accent(Box::new(Accent { kind: AccentKind::Hat, base: variable('x'), under: false })))
+        math(Node::Accent(Box::new(Accent {
+            kind: AccentKind::Hat,
+            base: variable('x'),
+            under: false
+        })))
     );
     assert_eq!(
         parse("<math><munder accentunder=\"true\"><mi>x</mi><mo>⏟</mo></munder></math>").unwrap(),
-        math(Node::Accent(Box::new(Accent { kind: AccentKind::UnderBrace, base: variable('x'), under: true })))
+        math(Node::Accent(Box::new(Accent {
+            kind: AccentKind::UnderBrace,
+            base: variable('x'),
+            under: true
+        })))
     );
 }
 
@@ -227,15 +268,27 @@ fn an_accent_attribute_turns_over_material_into_an_accent() {
 fn a_fence_takes_its_delimiters_from_the_attributes() {
     assert_eq!(
         parse("<math><mfenced open=\"{\" close=\"}\"><mi>x</mi></mfenced></math>").unwrap(),
-        math(Node::Fence(Box::new(Fence { open: Delim::Brace, close: Delim::Brace, body: variable('x') })))
+        math(Node::Fence(Box::new(Fence {
+            open: Delim::Brace,
+            close: Delim::Brace,
+            body: variable('x')
+        })))
     );
     assert_eq!(
         parse("<math><mfenced open=\"\" close=\"\"><mi>x</mi></mfenced></math>").unwrap(),
-        math(Node::Fence(Box::new(Fence { open: Delim::None, close: Delim::None, body: variable('x') })))
+        math(Node::Fence(Box::new(Fence {
+            open: Delim::None,
+            close: Delim::None,
+            body: variable('x')
+        })))
     );
     assert_eq!(
         parse("<math><mfenced><mi>x</mi></mfenced></math>").unwrap(),
-        math(Node::Fence(Box::new(Fence { open: Delim::Paren, close: Delim::Paren, body: variable('x') })))
+        math(Node::Fence(Box::new(Fence {
+            open: Delim::Paren,
+            close: Delim::Paren,
+            body: variable('x')
+        })))
     );
 }
 
@@ -245,7 +298,10 @@ fn a_table_inside_a_fence_carries_those_delimiters() {
     let mut matrix = Matrix::empty(1, 1);
     matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
     matrix.delims = Some((Delim::Bracket, Delim::Bracket));
-    assert_eq!(parse(document).unwrap(), math(Node::Matrix(Box::new(matrix))));
+    assert_eq!(
+        parse(document).unwrap(),
+        math(Node::Matrix(Box::new(matrix)))
+    );
 }
 
 #[test]
@@ -256,25 +312,36 @@ fn table_alignment_and_rules_come_from_the_attributes() {
     matrix.cell_at_mut(1).map(|cell| *cell = digit('2'));
     matrix.columns = vec![Side::Left, Side::Center];
     matrix.rules = true;
-    assert_eq!(parse(document).unwrap(), math(Node::Matrix(Box::new(matrix))));
+    assert_eq!(
+        parse(document).unwrap(),
+        math(Node::Matrix(Box::new(matrix)))
+    );
 }
 
 #[test]
 fn a_column_alignment_repeated_on_every_cell_folds_into_the_default() {
-    let document = "<math><mtable><mtr><mtd columnalign=\"right\"><mn>1</mn></mtd></mtr></mtable></math>";
+    let document =
+        "<math><mtable><mtr><mtd columnalign=\"right\"><mn>1</mn></mtd></mtr></mtable></math>";
     let mut matrix = Matrix::empty(1, 1);
     matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
     matrix.align = Side::Right;
-    assert_eq!(parse(document).unwrap(), math(Node::Matrix(Box::new(matrix))));
+    assert_eq!(
+        parse(document).unwrap(),
+        math(Node::Matrix(Box::new(matrix)))
+    );
 }
 
 #[test]
 fn a_table_kind_marker_is_read_back() {
-    let document = "<math><mtable class=\"mt-cases\"><mtr><mtd><mn>1</mn></mtd></mtr></mtable></math>";
+    let document =
+        "<math><mtable class=\"mt-cases\"><mtr><mtd><mn>1</mn></mtd></mtr></mtable></math>";
     let mut matrix = Matrix::empty(1, 1);
     matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
     matrix.kind = MatrixKind::Cases;
-    assert_eq!(parse(document).unwrap(), math(Node::Matrix(Box::new(matrix))));
+    assert_eq!(
+        parse(document).unwrap(),
+        math(Node::Matrix(Box::new(matrix)))
+    );
 }
 
 #[test]
@@ -294,28 +361,61 @@ fn style_wrappers_carry_the_size_preset_and_the_face() {
 fn a_lone_style_wrapper_at_the_top_becomes_the_equation_style() {
     assert_eq!(
         parse("<math><mstyle scriptlevel=\"2\"><mi>x</mi></mstyle></math>").unwrap(),
-        Math { body: variable('x'), style: MathStyle::ScriptScript }
+        Math {
+            body: variable('x'),
+            style: MathStyle::ScriptScript
+        }
     );
     assert_eq!(
         parse("<math display=\"inline\"><mi>x</mi></math>").unwrap(),
-        Math { body: variable('x'), style: MathStyle::Text }
+        Math {
+            body: variable('x'),
+            style: MathStyle::Text
+        }
     );
 }
 
 #[test]
 fn phantom_padded_and_enclosed_bodies_wrap_their_content() {
     let cases = [
-        ("<mphantom>", "</mphantom>", Styled { body: variable('x'), style: None, font: None, class: None }),
-        ("<mpadded>", "</mpadded>", Styled { body: variable('x'), style: None, font: None, class: None }),
+        (
+            "<mphantom>",
+            "</mphantom>",
+            Styled {
+                body: variable('x'),
+                style: None,
+                font: None,
+                class: None,
+            },
+        ),
+        (
+            "<mpadded>",
+            "</mpadded>",
+            Styled {
+                body: variable('x'),
+                style: None,
+                font: None,
+                class: None,
+            },
+        ),
         (
             "<menclose notation=\"box\">",
             "</menclose>",
-            Styled { body: variable('x'), style: None, font: None, class: Some(Class::Inner) },
+            Styled {
+                body: variable('x'),
+                style: None,
+                font: None,
+                class: Some(Class::Inner),
+            },
         ),
     ];
     for (open, close, wrapper) in cases {
         let document = format!("<math>{open}<mi>x</mi>{close}</math>");
-        assert_eq!(parse(&document).unwrap(), math(Node::Styled(Box::new(wrapper))), "{document}");
+        assert_eq!(
+            parse(&document).unwrap(),
+            math(Node::Styled(Box::new(wrapper))),
+            "{document}"
+        );
     }
 }
 
@@ -365,12 +465,18 @@ fn a_prefixed_document_without_a_display_attribute_is_full_size() {
 #[test]
 fn whitespace_between_elements_is_not_content() {
     let document = "<math>\n  <mrow>\n    <mi>a</mi>\n    <mi>b</mi>\n  </mrow>\n</math>\n";
-    assert_eq!(parse(document).unwrap(), math(row([variable('a'), variable('b')])));
+    assert_eq!(
+        parse(document).unwrap(),
+        math(row([variable('a'), variable('b')]))
+    );
 }
 
 #[test]
 fn a_full_document_keeps_every_construct() {
-    let text_run = Node::Text(Box::new(TextRun { text: "where".to_owned(), font: Font::Upright }));
+    let text_run = Node::Text(Box::new(TextRun {
+        text: "where".to_owned(),
+        font: Font::Upright,
+    }));
     let document = "\
 <math display=\"block\">
   <mrow>
@@ -387,9 +493,17 @@ fn a_full_document_keeps_every_construct() {
         math(row([
             variable('x'),
             symbol('=', Class::Rel),
-            Node::Frac(Box::new(Frac { num: row([digit('1')]), den: digit('2'), kind: FracKind::Bar })),
+            Node::Frac(Box::new(Frac {
+                num: row([digit('1')]),
+                den: digit('2'),
+                kind: FracKind::Bar
+            })),
             Node::Sqrt(Box::new(Sqrt::square(variable('y')))),
-            Node::Scripts(Box::new(Scripts { base: variable('a'), sub: Some(variable('i')), sup: None })),
+            Node::Scripts(Box::new(Scripts {
+                base: variable('a'),
+                sub: Some(variable('i')),
+                sup: None
+            })),
             text_run,
         ]))
     );

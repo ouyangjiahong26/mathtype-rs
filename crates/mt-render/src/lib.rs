@@ -19,8 +19,8 @@
 
 #![forbid(unsafe_code)]
 
-mod eps;
 mod emf;
+mod eps;
 pub mod metrics;
 mod outline;
 mod raster;
@@ -47,7 +47,12 @@ pub struct RenderOptions {
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        Self { scale: 1.0, padding_em: 0.3, foreground: [0, 0, 0, 255], background: None }
+        Self {
+            scale: 1.0,
+            padding_em: 0.3,
+            foreground: [0, 0, 0, 255],
+            background: None,
+        }
     }
 }
 
@@ -82,7 +87,14 @@ pub(crate) enum Item {
     /// A glyph outline in layout point coordinates.
     Glyph { path: Path },
     /// A rule or its dashed placeholder.
-    Rule { x: f64, y: f64, width: f64, height: f64, depth: f64, dashed: bool },
+    Rule {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        depth: f64,
+        dashed: bool,
+    },
 }
 
 impl Item {
@@ -90,9 +102,14 @@ impl Item {
     fn polygons(&self) -> Vec<Vec<[f64; 2]>> {
         match self {
             Item::Glyph { path } => path.flatten(16),
-            Item::Rule { x, y, width, height, depth, dashed } => {
-                rule_polygons(*x, *y, *width, *height, *depth, *dashed)
-            }
+            Item::Rule {
+                x,
+                y,
+                width,
+                height,
+                depth,
+                dashed,
+            } => rule_polygons(*x, *y, *width, *height, *depth, *dashed),
         }
     }
 
@@ -107,7 +124,14 @@ impl Item {
                     bbox.3 = bbox.3.max(y1);
                 }
             }
-            Item::Rule { x, y, width, height, depth, .. } => {
+            Item::Rule {
+                x,
+                y,
+                width,
+                height,
+                depth,
+                ..
+            } => {
                 bbox.0 = bbox.0.min(*x);
                 bbox.1 = bbox.1.min(*y - height);
                 bbox.2 = bbox.2.max(*x + width);
@@ -121,12 +145,26 @@ impl Item {
 fn collect(tree: &LBox, face: &Face<'_>) -> Vec<Item> {
     let mut items = Vec::new();
     tree.visit(&mut |node| match node {
-        LBox::Glyph { ch, x, y, size, yscale, .. } => {
+        LBox::Glyph {
+            ch,
+            x,
+            y,
+            size,
+            yscale,
+            ..
+        } => {
             if let Some(path) = glyph_path(face, *ch, *x, *y, *size, *yscale) {
                 items.push(Item::Glyph { path });
             }
         }
-        LBox::Rule { x, y, width, height, depth, dashed } => {
+        LBox::Rule {
+            x,
+            y,
+            width,
+            height,
+            depth,
+            dashed,
+        } => {
             items.push(Item::Rule {
                 x: *x,
                 y: *y,
@@ -182,12 +220,7 @@ pub fn image_size(
 }
 
 /// Rasterize `tree` into an RGBA image.
-pub fn render(
-    tree: &LBox,
-    style: &LayoutStyle,
-    face: &Face<'_>,
-    options: &RenderOptions,
-) -> Image {
+pub fn render(tree: &LBox, style: &LayoutStyle, face: &Face<'_>, options: &RenderOptions) -> Image {
     let items = collect(tree, face);
     let bounds = ink_bounds(&items, tree, options.padding_em * style.size);
     let (bx0, by0, _, _) = bounds;
@@ -197,7 +230,11 @@ pub fn render(
         (((bounds.3 - bounds.1) * scale).ceil()).max(1.0) as u32,
     );
 
-    let mut image = Image { width, height, rgba: vec![0u8; width as usize * height as usize * 4] };
+    let mut image = Image {
+        width,
+        height,
+        rgba: vec![0u8; width as usize * height as usize * 4],
+    };
     if let Some(bg) = options.background {
         for pixel in image.rgba.chunks_exact_mut(4) {
             pixel.copy_from_slice(&bg);
@@ -233,7 +270,9 @@ pub fn render_png(
         let mut encoder = png::Encoder::new(&mut buffer, image.width, image.height);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().map_err(|e| RenderError::Png(e.to_string()))?;
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| RenderError::Png(e.to_string()))?;
         writer
             .write_image_data(&image.rgba)
             .map_err(|e| RenderError::Png(e.to_string()))?;
@@ -278,7 +317,9 @@ fn to_pixels(polys: &[Vec<[f64; 2]>], bx0: f64, by0: f64, scale: f64) -> Vec<Vec
     polys
         .iter()
         .map(|poly| {
-            poly.iter().map(|p| [(p[0] - bx0) * scale, (p[1] - by0) * scale]).collect()
+            poly.iter()
+                .map(|p| [(p[0] - bx0) * scale, (p[1] - by0) * scale])
+                .collect()
         })
         .collect()
 }
@@ -338,7 +379,12 @@ fn rule_polygons(
     let top = y - height;
     let bottom = y + depth;
     if !dashed {
-        return vec![vec![[x, top], [x + width, top], [x + width, bottom], [x, bottom]]];
+        return vec![vec![
+            [x, top],
+            [x + width, top],
+            [x + width, bottom],
+            [x, bottom],
+        ]];
     }
 
     let corners = [[x, top], [x + width, top], [x + width, bottom], [x, bottom]];
@@ -378,7 +424,11 @@ fn thick_segment(p: [f64; 2], q: [f64; 2], half: f64) -> Vec<[f64; 2]> {
     let dx = q[0] - p[0];
     let dy = q[1] - p[1];
     let length = (dx * dx + dy * dy).sqrt();
-    let (nx, ny) = if length > 0.0 { (-dy / length * half, dx / length * half) } else { (0.0, 0.0) };
+    let (nx, ny) = if length > 0.0 {
+        (-dy / length * half, dx / length * half)
+    } else {
+        (0.0, 0.0)
+    };
     vec![
         [p[0] + nx, p[1] + ny],
         [q[0] + nx, q[1] + ny],

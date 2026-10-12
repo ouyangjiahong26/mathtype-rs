@@ -1,10 +1,10 @@
 //! Relationship parts (`*.rels`): the id→target table that links a part to the parts it uses.
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
-use crate::error::{xml_error, DocxError};
 use crate::content_types::escape_into;
+use crate::error::{DocxError, xml_error};
 
 /// The namespace of a relationship part.
 const NAMESPACE: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
@@ -65,7 +65,9 @@ impl Relationships {
                     .flatten()
                     .find(|attribute| attribute.key.as_ref() == name)
                     .and_then(|attribute| {
-                        quick_xml::escape::unescape(&attribute.value).ok().map(|value| value.into_owned())
+                        quick_xml::escape::unescape(&attribute.value)
+                            .ok()
+                            .map(|value| value.into_owned())
                     })
             };
             rels.push(Relationship {
@@ -90,7 +92,9 @@ impl Relationships {
 
     /// The first relationship of this kind pointing at this target.
     pub fn find(&self, kind: &str, target: &str) -> Option<&Relationship> {
-        self.rels.iter().find(|rel| rel.kind == kind && rel.target == target)
+        self.rels
+            .iter()
+            .find(|rel| rel.kind == kind && rel.target == target)
     }
 
     /// Adds a relationship, reusing an existing one that already points there. Returns the id.
@@ -99,7 +103,12 @@ impl Relationships {
             return existing.id.clone();
         }
         let id = self.next_id();
-        self.rels.push(Relationship { id: id.clone(), kind: kind.to_owned(), target: target.to_owned(), external });
+        self.rels.push(Relationship {
+            id: id.clone(),
+            kind: kind.to_owned(),
+            target: target.to_owned(),
+            external,
+        });
         id
     }
 
@@ -122,7 +131,8 @@ impl Relationships {
 
     /// Serialises the part.
     pub fn to_xml(&self) -> String {
-        let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
+        let mut out =
+            String::from("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
         out.push_str("<Relationships xmlns=\"");
         out.push_str(NAMESPACE);
         out.push_str("\">");
@@ -150,7 +160,10 @@ impl Relationships {
 /// to `word/media/x.png`. External targets come back unchanged.
 pub fn resolve(base_dir: &str, target: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
-    let mut source = base_dir.split('/').filter(|part| !part.is_empty()).peekable();
+    let mut source = base_dir
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .peekable();
     let mut walking = target.split('/');
     let absolute = target.starts_with('/');
     if !absolute {

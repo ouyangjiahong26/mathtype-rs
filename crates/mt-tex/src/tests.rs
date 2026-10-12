@@ -25,7 +25,11 @@ fn ro(items: Vec<Node>) -> Node {
 }
 
 fn frac(numerator: Node, denominator: Node, kind: FracKind) -> Node {
-    Node::Frac(Box::new(Frac { num: numerator, den: denominator, kind }))
+    Node::Frac(Box::new(Frac {
+        num: numerator,
+        den: denominator,
+        kind,
+    }))
 }
 
 fn body(input: &str) -> Node {
@@ -66,7 +70,15 @@ fn single_variable() {
 fn binary_operator_classes() {
     check("a+b", ro(vec![v('a'), sym('+', Class::Bin), v('b')]));
     check("a=b", ro(vec![v('a'), sym('=', Class::Rel), v('b')]));
-    check("a(b)", ro(vec![v('a'), sym('(', Class::Open), v('b'), sym(')', Class::Close)]));
+    check(
+        "a(b)",
+        ro(vec![
+            v('a'),
+            sym('(', Class::Open),
+            v('b'),
+            sym(')', Class::Close),
+        ]),
+    );
 }
 
 #[test]
@@ -119,12 +131,22 @@ fn single_item_group_is_canonicalised_to_its_item() {
 
 #[test]
 fn fraction_owns_two_slots() {
-    check("\\frac{a}{b}", ro(vec![frac(v('a'), v('b'), FracKind::Bar)]));
+    check(
+        "\\frac{a}{b}",
+        ro(vec![frac(v('a'), v('b'), FracKind::Bar)]),
+    );
 }
 
 #[test]
 fn fraction_with_single_token_arguments() {
-    check("\\frac12", ro(vec![frac(sym('1', Class::Ord), sym('2', Class::Ord), FracKind::Bar)]));
+    check(
+        "\\frac12",
+        ro(vec![frac(
+            sym('1', Class::Ord),
+            sym('2', Class::Ord),
+            FracKind::Bar,
+        )]),
+    );
 }
 
 #[test]
@@ -142,19 +164,31 @@ fn dfrac_is_a_display_styled_fraction() {
 
 #[test]
 fn over_splits_the_group() {
-    check("{a \\over b}", ro(vec![frac(v('a'), v('b'), FracKind::Bar)]));
+    check(
+        "{a \\over b}",
+        ro(vec![frac(v('a'), v('b'), FracKind::Bar)]),
+    );
 }
 
 #[test]
 fn square_root_slot() {
-    check("\\sqrt{x}", ro(vec![Node::Sqrt(Box::new(Sqrt { index: None, radicand: v('x') }))]));
+    check(
+        "\\sqrt{x}",
+        ro(vec![Node::Sqrt(Box::new(Sqrt {
+            index: None,
+            radicand: v('x'),
+        }))]),
+    );
 }
 
 #[test]
 fn nth_root_index_slot() {
     check(
         "\\sqrt[3]{x}",
-        ro(vec![Node::Sqrt(Box::new(Sqrt { index: Some(sym('3', Class::Ord)), radicand: v('x') }))]),
+        ro(vec![Node::Sqrt(Box::new(Sqrt {
+            index: Some(sym('3', Class::Ord)),
+            radicand: v('x'),
+        }))]),
     );
 }
 
@@ -211,7 +245,10 @@ fn named_operator_gets_a_text_base() {
     check(
         "\\lim_{x\\to0}",
         ro(vec![Node::Big(Box::new(BigOp {
-            base: Node::Text(Box::new(TextRun { text: "lim".to_owned(), font: Font::Upright })),
+            base: Node::Text(Box::new(TextRun {
+                text: "lim".to_owned(),
+                font: Font::Upright,
+            })),
             sub: Some(ro(vec![v('x'), sym('→', Class::Rel), sym('0', Class::Ord)])),
             sup: None,
             limits: true,
@@ -245,21 +282,62 @@ fn missing_delimiter_side_is_none() {
 
 #[test]
 fn bare_parentheses_are_plain_characters() {
-    check("(x)", ro(vec![sym('(', Class::Open), v('x'), sym(')', Class::Close)]));
+    check(
+        "(x)",
+        ro(vec![sym('(', Class::Open), v('x'), sym(')', Class::Close)]),
+    );
 }
 
 #[test]
 fn big_sizing_macro_is_ignored() {
-    check("\\bigl(x\\bigr)", ro(vec![sym('(', Class::Open), v('x'), sym(')', Class::Close)]));
+    check(
+        "\\bigl(x\\bigr)",
+        ro(vec![sym('(', Class::Open), v('x'), sym(')', Class::Close)]),
+    );
 }
 
 #[test]
 fn accents_over_and_under() {
-    check("\\hat{x}", ro(vec![Node::Accent(Box::new(Accent { kind: AccentKind::Hat, base: v('x'), under: false }))]));
-    check("\\vec{v}", ro(vec![Node::Accent(Box::new(Accent { kind: AccentKind::Vector, base: v('v'), under: false }))]));
-    check("\\dot{x}", ro(vec![Node::Accent(Box::new(Accent { kind: AccentKind::Dot, base: v('x'), under: false }))]));
-    check("\\underline{x}", ro(vec![Node::Accent(Box::new(Accent { kind: AccentKind::Line, base: v('x'), under: true }))]));
-    check("\\overline{x}", ro(vec![Node::Accent(Box::new(Accent { kind: AccentKind::Line, base: v('x'), under: false }))]));
+    check(
+        "\\hat{x}",
+        ro(vec![Node::Accent(Box::new(Accent {
+            kind: AccentKind::Hat,
+            base: v('x'),
+            under: false,
+        }))]),
+    );
+    check(
+        "\\vec{v}",
+        ro(vec![Node::Accent(Box::new(Accent {
+            kind: AccentKind::Vector,
+            base: v('v'),
+            under: false,
+        }))]),
+    );
+    check(
+        "\\dot{x}",
+        ro(vec![Node::Accent(Box::new(Accent {
+            kind: AccentKind::Dot,
+            base: v('x'),
+            under: false,
+        }))]),
+    );
+    check(
+        "\\underline{x}",
+        ro(vec![Node::Accent(Box::new(Accent {
+            kind: AccentKind::Line,
+            base: v('x'),
+            under: true,
+        }))]),
+    );
+    check(
+        "\\overline{x}",
+        ro(vec![Node::Accent(Box::new(Accent {
+            kind: AccentKind::Line,
+            base: v('x'),
+            under: false,
+        }))]),
+    );
     check(
         "\\overrightarrow{AB}",
         ro(vec![Node::Accent(Box::new(Accent {
@@ -328,10 +406,19 @@ fn font_macros_style_the_body() {
 
 #[test]
 fn text_macro_produces_a_text_run() {
-    check("\\text{abc}", ro(vec![Node::Text(Box::new(TextRun { text: "abc".to_owned(), font: Font::Upright }))]));
+    check(
+        "\\text{abc}",
+        ro(vec![Node::Text(Box::new(TextRun {
+            text: "abc".to_owned(),
+            font: Font::Upright,
+        }))]),
+    );
     check(
         "\\text{if }",
-        ro(vec![Node::Text(Box::new(TextRun { text: "if ".to_owned(), font: Font::Upright }))]),
+        ro(vec![Node::Text(Box::new(TextRun {
+            text: "if ".to_owned(),
+            font: Font::Upright,
+        }))]),
     );
 }
 
@@ -340,7 +427,10 @@ fn operatorname_is_an_op_class_styled_node() {
     check(
         "\\operatorname{foo}",
         ro(vec![Node::Styled(Box::new(Styled {
-            body: Node::Text(Box::new(TextRun { text: "foo".to_owned(), font: Font::Upright })),
+            body: Node::Text(Box::new(TextRun {
+                text: "foo".to_owned(),
+                font: Font::Upright,
+            })),
             style: None,
             font: None,
             class: Some(Class::Op),
@@ -353,7 +443,10 @@ fn operatorname_star_takes_limits() {
     check(
         "\\operatorname*{lim}_{x}",
         ro(vec![Node::Big(Box::new(BigOp {
-            base: Node::Text(Box::new(TextRun { text: "lim".to_owned(), font: Font::Upright })),
+            base: Node::Text(Box::new(TextRun {
+                text: "lim".to_owned(),
+                font: Font::Upright,
+            })),
             sub: Some(v('x')),
             sup: None,
             limits: true,
@@ -400,12 +493,18 @@ fn spacing_macros_map_to_spaces() {
 
 #[test]
 fn escaped_braces_are_delimiter_characters() {
-    check("\\{x\\}", ro(vec![sym('{', Class::Open), v('x'), sym('}', Class::Close)]));
+    check(
+        "\\{x\\}",
+        ro(vec![sym('{', Class::Open), v('x'), sym('}', Class::Close)]),
+    );
 }
 
 #[test]
 fn greek_and_symbols_carry_their_classes() {
-    check("\\alpha", ro(vec![Node::char_with('α', Class::Ord, Font::Italic)]));
+    check(
+        "\\alpha",
+        ro(vec![Node::char_with('α', Class::Ord, Font::Italic)]),
+    );
     check("\\Gamma", ro(vec![sym('Γ', Class::Ord)]));
     check("\\leq", ro(vec![sym('≤', Class::Rel)]));
     check("\\times", ro(vec![sym('×', Class::Bin)]));
@@ -462,7 +561,12 @@ fn aligned_marks_alignment_points() {
     check(
         "\\begin{aligned} a &= b \\end{aligned}",
         ro(vec![Node::Matrix(Box::new(Matrix {
-            rows: vec![vec![ro(vec![v('a'), Node::Align, sym('=', Class::Rel), v('b')])]],
+            rows: vec![vec![ro(vec![
+                v('a'),
+                Node::Align,
+                sym('=', Class::Rel),
+                v('b'),
+            ])]],
             delims: None,
             kind: MatrixKind::Aligned,
             align: Side::Center,
@@ -525,7 +629,10 @@ fn bare_scripts_radicand_is_braced() {
         sub: Some(v('i')),
         sup: Some(sym('2', Class::Ord)),
     }));
-    let node = Node::Sqrt(Box::new(Sqrt { index: None, radicand }));
+    let node = Node::Sqrt(Box::new(Sqrt {
+        index: None,
+        radicand,
+    }));
     assert_eq!(assert_round_trips(node), "\\sqrt{x_i^2}");
 }
 
@@ -549,7 +656,10 @@ fn bare_char_matrix_cell_and_fence_body_round_trip() {
         columns: Vec::new(),
         rules: false,
     }));
-    assert_eq!(assert_round_trips(matrix), "\\begin{pmatrix}a & b\\end{pmatrix}");
+    assert_eq!(
+        assert_round_trips(matrix),
+        "\\begin{pmatrix}a & b\\end{pmatrix}"
+    );
 
     let fence = Node::Fence(Box::new(Fence {
         open: Delim::Paren,
@@ -561,7 +671,10 @@ fn bare_char_matrix_cell_and_fence_body_round_trip() {
 
 #[test]
 fn bare_char_sqrt_index_round_trips() {
-    let node = Node::Sqrt(Box::new(Sqrt { index: Some(sym('3', Class::Ord)), radicand: v('x') }));
+    let node = Node::Sqrt(Box::new(Sqrt {
+        index: Some(sym('3', Class::Ord)),
+        radicand: v('x'),
+    }));
     assert_eq!(assert_round_trips(node), "\\sqrt[3]{x}");
 }
 
@@ -569,7 +682,10 @@ fn bare_char_sqrt_index_round_trips() {
 fn omml_codec_pipeline_output() {
     // A tree in the canonical form mt-omml produces: single-item slots are the bare item.
     let math = parse("\\frac{a}{b}+\\sqrt{x_i^2}").unwrap();
-    assert!(matches!(math.body.slot(0), Some(Node::Frac(_))), "first term should be a fraction");
+    assert!(
+        matches!(math.body.slot(0), Some(Node::Frac(_))),
+        "first term should be a fraction"
+    );
     assert_eq!(to_latex(&math), "\\frac{a}{b}+\\sqrt{x_i^2}");
 }
 
@@ -618,7 +734,10 @@ fn backslash_inside_a_matrix_cell_survives() {
         rules: false,
     }));
     let latex = assert_round_trips(matrix);
-    assert!(!latex.contains("\\\\"), "a literal backslash must not become a row separator: {latex}");
+    assert!(
+        !latex.contains("\\\\"),
+        "a literal backslash must not become a row separator: {latex}"
+    );
 }
 
 #[test]
@@ -665,13 +784,24 @@ fn bold_script_font_round_trips() {
 
 #[test]
 fn arrow_delimiter_round_trips() {
-    let fence = Node::Fence(Box::new(Fence { open: Delim::Arrow, close: Delim::Arrow, body: v('x') }));
+    let fence = Node::Fence(Box::new(Fence {
+        open: Delim::Arrow,
+        close: Delim::Arrow,
+        body: v('x'),
+    }));
     assert_eq!(assert_round_trips(fence), "\\left→x\\right→");
 
     // Arrow and Angle are distinct even though the model draws them alike.
-    let mixed = Node::Fence(Box::new(Fence { open: Delim::Arrow, close: Delim::Angle, body: v('x') }));
+    let mixed = Node::Fence(Box::new(Fence {
+        open: Delim::Arrow,
+        close: Delim::Angle,
+        body: v('x'),
+    }));
     let latex = assert_round_trips(mixed);
-    assert!(latex.starts_with("\\left→x\\right\\rangle"), "unexpected `{latex}`");
+    assert!(
+        latex.starts_with("\\left→x\\right\\rangle"),
+        "unexpected `{latex}`"
+    );
 }
 
 // ---------------------------------------------------------------- round trips
@@ -822,7 +952,8 @@ const CORPUS: &[&str] = &[
 #[test]
 fn corpus_round_trips() {
     for input in CORPUS {
-        let math = parse(input).unwrap_or_else(|error| panic!("`{input}` failed to parse: {error}"));
+        let math =
+            parse(input).unwrap_or_else(|error| panic!("`{input}` failed to parse: {error}"));
         let latex = to_latex(&math);
         let reparsed = parse(&latex)
             .unwrap_or_else(|error| panic!("`{input}` -> `{latex}` failed to re-parse: {error}"));
@@ -830,13 +961,20 @@ fn corpus_round_trips() {
         let mut right = reparsed;
         left.body.normalize();
         right.body.normalize();
-        assert_eq!(left, right, "round trip mismatch for `{input}` (serialised as `{latex}`)");
+        assert_eq!(
+            left, right,
+            "round trip mismatch for `{input}` (serialised as `{latex}`)"
+        );
     }
 }
 
 #[test]
 fn corpus_is_large_enough() {
-    assert!(CORPUS.len() >= 40, "corpus only has {} entries", CORPUS.len());
+    assert!(
+        CORPUS.len() >= 40,
+        "corpus only has {} entries",
+        CORPUS.len()
+    );
 }
 
 #[test]
@@ -848,13 +986,23 @@ fn fragment_serialises_a_node() {
     let mut actual = parse(&fragment).unwrap().body;
     actual.normalize();
     assert_eq!(actual, expected);
-    assert!(fragment.contains("\\alpha") && fragment.contains("\\beta"), "fragment was `{fragment}`");
+    assert!(
+        fragment.contains("\\alpha") && fragment.contains("\\beta"),
+        "fragment was `{fragment}`"
+    );
 }
 
 #[test]
 fn digit_run_parses_to_ordinary_characters() {
     assert_eq!(body("12"), dig("12"));
-    assert_eq!(body("\\frac12"), ro(vec![frac(sym('1', Class::Ord), sym('2', Class::Ord), FracKind::Bar)]));
+    assert_eq!(
+        body("\\frac12"),
+        ro(vec![frac(
+            sym('1', Class::Ord),
+            sym('2', Class::Ord),
+            FracKind::Bar
+        )])
+    );
 }
 
 // --------------------------------------------------------------------- errors
@@ -862,32 +1010,47 @@ fn digit_run_parses_to_ordinary_characters() {
 #[test]
 fn unbalanced_group_is_an_error() {
     let error = parse("{a").unwrap_err();
-    assert!(error.message.contains("unclosed"), "unexpected message: {error}");
+    assert!(
+        error.message.contains("unclosed"),
+        "unexpected message: {error}"
+    );
 }
 
 #[test]
 fn dangling_superscript_is_an_error() {
     let error = parse("x^").unwrap_err();
-    assert!(error.message.contains("end of input"), "unexpected message: {error}");
+    assert!(
+        error.message.contains("end of input"),
+        "unexpected message: {error}"
+    );
 }
 
 #[test]
 fn unknown_macro_reports_its_offset() {
     let error = parse("a\\foo").unwrap_err();
-    assert!(error.message.contains("\\foo"), "unexpected message: {error}");
+    assert!(
+        error.message.contains("\\foo"),
+        "unexpected message: {error}"
+    );
     assert_eq!(error.offset, 1);
 }
 
 #[test]
 fn left_without_right_is_an_error() {
     let error = parse("\\left( x").unwrap_err();
-    assert!(error.message.contains("\\right"), "unexpected message: {error}");
+    assert!(
+        error.message.contains("\\right"),
+        "unexpected message: {error}"
+    );
 }
 
 #[test]
 fn unknown_environment_is_an_error() {
     let error = parse("\\begin{foo} x \\end{foo}").unwrap_err();
-    assert!(error.message.contains("unknown environment"), "unexpected message: {error}");
+    assert!(
+        error.message.contains("unknown environment"),
+        "unexpected message: {error}"
+    );
 }
 
 #[test]
@@ -900,7 +1063,10 @@ fn malformed_hspace_is_an_error() {
 #[test]
 fn mismatched_end_is_an_error() {
     let error = parse("\\begin{matrix} a \\end{pmatrix}").unwrap_err();
-    assert!(error.message.contains("does not match"), "unexpected message: {error}");
+    assert!(
+        error.message.contains("does not match"),
+        "unexpected message: {error}"
+    );
 }
 
 #[test]
@@ -919,7 +1085,10 @@ fn deeply_nested_input_is_rejected_not_crashed() {
         format!("\\frac{}{{b}}", "\\frac{a}".repeat(129)),
     ] {
         let error = match parse(&input) {
-            Ok(_) => panic!("deeply nested input parsed: {}", input.chars().take(24).collect::<String>()),
+            Ok(_) => panic!(
+                "deeply nested input parsed: {}",
+                input.chars().take(24).collect::<String>()
+            ),
             Err(error) => error,
         };
         assert!(
@@ -930,7 +1099,10 @@ fn deeply_nested_input_is_rejected_not_crashed() {
     }
     // Just inside the limit the parser still reports the real syntax error, not the depth gate.
     let error = parse(&"{".repeat(64)).unwrap_err();
-    assert!(error.message.contains("unclosed"), "unexpected message: {error}");
+    assert!(
+        error.message.contains("unclosed"),
+        "unexpected message: {error}"
+    );
 }
 
 // ------------------------------------------------------------------ font and class round trips
@@ -940,8 +1112,17 @@ fn forced_font_characters_keep_their_face() {
     // What the MathML reader produces for `<mi mathvariant="bold">a</mi>`: the face rides on
     // the character itself. Writing it wraps the character in the font macro, and re-parsing
     // keeps the face.
-    for font in [Font::Bold, Font::DoubleStruck, Font::Monospace, Font::SansSerifItalic] {
-        let node = Node::Char(Char { ch: 'a', class: Class::Ord, font });
+    for font in [
+        Font::Bold,
+        Font::DoubleStruck,
+        Font::Monospace,
+        Font::SansSerifItalic,
+    ] {
+        let node = Node::Char(Char {
+            ch: 'a',
+            class: Class::Ord,
+            font,
+        });
         let latex = to_latex_fragment(&node);
         assert!(
             latex.starts_with('\\'),
@@ -970,25 +1151,43 @@ fn fragment_has_font(node: Node, font: Font) -> bool {
 #[test]
 fn forced_class_characters_keep_their_class() {
     // What the MathML reader produces for `<mo class="mt-class-bin">x</mo>`.
-    let node = Node::Char(Char { ch: 'x', class: Class::Bin, font: Font::Italic });
+    let node = Node::Char(Char {
+        ch: 'x',
+        class: Class::Bin,
+        font: Font::Italic,
+    });
     let latex = to_latex_fragment(&node);
     // `push_macro` writes a separating space after a control word; the parser skips it.
     assert_eq!(latex, "\\mathbin {x}");
-    assert_eq!(body(&latex), ro(vec![Node::Char(Char { ch: 'x', class: Class::Bin, font: Font::Italic })]));
+    assert_eq!(
+        body(&latex),
+        ro(vec![Node::Char(Char {
+            ch: 'x',
+            class: Class::Bin,
+            font: Font::Italic
+        })])
+    );
     // A forced class on a symbol written as a macro wraps the macro.
-    let node = Node::Char(Char { ch: '→', class: Class::Ord, font: Font::Upright });
+    let node = Node::Char(Char {
+        ch: '→',
+        class: Class::Ord,
+        font: Font::Upright,
+    });
     let latex = to_latex_fragment(&node);
     assert!(latex.starts_with("\\mathord"), "{latex}");
     assert_eq!(body(&latex), ro(vec![sym('→', Class::Ord)]));
     // Natural classes write directly.
     assert_eq!(to_latex_fragment(&sym('+', Class::Bin)), "+");
     // Class macros parse onto single characters and larger bodies alike.
-    assert_eq!(body("\\mathrel{ab}"), ro(vec![Node::Styled(Box::new(Styled {
-        body: ro(vec![v('a'), v('b')]),
-        style: None,
-        font: None,
-        class: Some(Class::Rel),
-    }))]));
+    assert_eq!(
+        body("\\mathrel{ab}"),
+        ro(vec![Node::Styled(Box::new(Styled {
+            body: ro(vec![v('a'), v('b')]),
+            style: None,
+            font: None,
+            class: Some(Class::Rel),
+        }))])
+    );
 }
 
 #[test]
@@ -1044,8 +1243,11 @@ fn error_nodes_write_escaped_text() {
     let latex = to_latex_fragment(&node);
     assert_eq!(latex, "\\text{a \\& b \\{c\\}}");
     // The output parses; the error nature is dropped (documented exception).
-    assert_eq!(body(&latex), ro(vec![Node::Text(Box::new(TextRun {
-        text: "a & b {c}".to_owned(),
-        font: Font::Upright,
-    }))]));
+    assert_eq!(
+        body(&latex),
+        ro(vec![Node::Text(Box::new(TextRun {
+            text: "a & b {c}".to_owned(),
+            font: Font::Upright,
+        }))])
+    );
 }

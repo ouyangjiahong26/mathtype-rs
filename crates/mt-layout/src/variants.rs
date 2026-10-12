@@ -119,7 +119,11 @@ fn greek_variant(ch: char, font: Font) -> char {
     if !capital && !lower {
         return ch;
     }
-    let index = if capital { code - 0x0391 } else { code - 0x03B1 };
+    let index = if capital {
+        code - 0x0391
+    } else {
+        code - 0x03B1
+    };
     let base = match (font, capital) {
         (Font::Bold, true) => 0x1D6A8,
         (Font::Bold, false) => 0x1D6C2,
@@ -159,7 +163,11 @@ pub fn math_base(ch: char) -> Option<char> {
         let offset = code.checked_sub(base)?;
         if offset < 25 {
             // The capitals Α..Ψ then Σ..Ω; the alphabet skips the codepoint U+03A2 never used.
-            let greek = if offset <= 16 { 0x0391 + offset } else { 0x0392 + offset };
+            let greek = if offset <= 16 {
+                0x0391 + offset
+            } else {
+                0x0392 + offset
+            };
             return char::from_u32(greek);
         }
         if (26..51).contains(&offset) {
@@ -170,7 +178,9 @@ pub fn math_base(ch: char) -> Option<char> {
         '\u{210E}' => Some('h'),
         '\u{212C}' | '\u{2130}' | '\u{2131}' | '\u{210B}' | '\u{2110}' | '\u{2112}'
         | '\u{2133}' | '\u{211B}' => char::from_u32(0x42 + "BEFHILMR".find(ch).unwrap() as u32),
-        '\u{212F}' | '\u{210A}' | '\u{2134}' => char::from_u32(0x61 + "ego".find(ch).unwrap() as u32),
+        '\u{212F}' | '\u{210A}' | '\u{2134}' => {
+            char::from_u32(0x61 + "ego".find(ch).unwrap() as u32)
+        }
         '\u{212D}' | '\u{210C}' | '\u{2111}' | '\u{211C}' | '\u{2128}' => {
             char::from_u32(0x41 + "CHIRZ".find(ch).unwrap() as u32)
         }

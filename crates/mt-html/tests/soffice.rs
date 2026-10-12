@@ -16,7 +16,10 @@ fn soffice_rewrite(directory: &std::path::Path, bytes: &[u8]) -> Vec<u8> {
     std::fs::write(&source, bytes).expect("docx written");
     let converted = Command::new("soffice")
         .arg("--headless")
-        .arg(format!("-env:UserInstallation=file://{}", directory.join("profile").display()))
+        .arg(format!(
+            "-env:UserInstallation=file://{}",
+            directory.join("profile").display()
+        ))
         .arg("--convert-to")
         .arg("docx")
         .arg("--outdir")
@@ -40,7 +43,10 @@ fn a_libreoffice_document_exports_to_mathml() {
     let document = Document::open(&bytes).expect("the rewritten document opens");
     let html = export(&document, &Options::default()).html;
 
-    assert!(html.matches("<math").count() >= 3, "the formulas survive the rewrite: {html}");
+    assert!(
+        html.matches("<math").count() >= 3,
+        "the formulas survive the rewrite: {html}"
+    );
     assert!(html.contains("<table>"), "{html}");
     assert!(html.contains("cell 1"), "{html}");
     assert!(html.contains("plain paragraph"), "{html}");

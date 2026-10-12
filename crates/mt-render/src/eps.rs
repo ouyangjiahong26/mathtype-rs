@@ -7,8 +7,8 @@
 
 use mt_layout::constants::{PLACEHOLDER_DASH, PLACEHOLDER_STROKE};
 
-use crate::outline::Path;
 use crate::Item;
+use crate::outline::Path;
 
 /// Emit a complete EPS document for the collected items.
 ///
@@ -44,7 +44,14 @@ pub(crate) fn render(items: &[Item], bounds: (f64, f64, f64, f64), fg: [u8; 4]) 
     for item in items {
         match item {
             Item::Glyph { path } => emit_glyph(&mut out, path, origin),
-            Item::Rule { x, y, width: rw, height, depth, dashed } => {
+            Item::Rule {
+                x,
+                y,
+                width: rw,
+                height,
+                depth,
+                dashed,
+            } => {
                 emit_rule(&mut out, *x, *y, *rw, *height, *depth, *dashed, origin);
             }
         }
@@ -74,7 +81,11 @@ fn emit_glyph(out: &mut String, path: &Path, origin: Origin) {
             continue;
         }
         let start = ps(contour.start, origin);
-        out.push_str(&format!("{} {} moveto\n", number(start[0]), number(start[1])));
+        out.push_str(&format!(
+            "{} {} moveto\n",
+            number(start[0]),
+            number(start[1])
+        ));
         let mut cur = contour.start;
         for seg in &contour.segs {
             match *seg {
@@ -169,6 +180,10 @@ fn lerp(a: [f64; 2], b: [f64; 2], t: f64) -> [f64; 2] {
 
 /// Format a number with at most three decimals, never `-0`.
 fn number(value: f64) -> String {
-    let rounded = if value == 0.0 { 0.0 } else { (value * 1000.0).round() / 1000.0 };
+    let rounded = if value == 0.0 {
+        0.0
+    } else {
+        (value * 1000.0).round() / 1000.0
+    };
     format!("{rounded}")
 }

@@ -8,7 +8,6 @@
 //! writes.
 
 #![cfg(windows)]
-
 // The members of the interfaces below keep the spelling the host looks them up by, which is the
 // spelling of the Office object model rather than Rust's.
 #![allow(non_snake_case)]
@@ -25,15 +24,18 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use windows::Win32::Foundation::{
-    CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, DISP_E_MEMBERNOTFOUND, E_FAIL, E_NOTIMPL, E_POINTER, S_FALSE, S_OK,
+    CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, DISP_E_MEMBERNOTFOUND, E_FAIL, E_NOTIMPL,
+    E_POINTER, S_FALSE, S_OK,
 };
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, CoCreateInstance, DISPATCH_FLAGS, DISPPARAMS, EXCEPINFO, IClassFactory, IClassFactory_Impl,
-    IDispatch, IDispatch_Impl, IDispatch_Vtbl, IGlobalInterfaceTable, ITypeInfo,
+    CLSCTX_INPROC_SERVER, CoCreateInstance, DISPATCH_FLAGS, DISPPARAMS, EXCEPINFO, IClassFactory,
+    IClassFactory_Impl, IDispatch, IDispatch_Impl, IDispatch_Vtbl, IGlobalInterfaceTable,
+    ITypeInfo,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{
-    BSTR, BOOL, ComObjectInterface, Error, GUID, HRESULT, Interface, IUnknown, PCWSTR, Ref, Result, implement, interface,
+    BOOL, BSTR, ComObjectInterface, Error, GUID, HRESULT, IUnknown, Interface, PCWSTR, Ref, Result,
+    implement, interface,
 };
 
 use com::{Object, Variant};
@@ -124,7 +126,10 @@ impl Connection {
         let mut raw: *mut c_void = std::ptr::null_mut();
         // SAFETY: the cookie is registered until this connection is dropped, and the out parameter
         // is a valid slot.
-        unsafe { self.table.GetInterfaceFromGlobal(self.cookie, &IDispatch::IID, &mut raw) }?;
+        unsafe {
+            self.table
+                .GetInterfaceFromGlobal(self.cookie, &IDispatch::IID, &mut raw)
+        }?;
         // SAFETY: the call succeeded, so the slot holds a counted `IDispatch`.
         Ok(Object::from_dispatch(unsafe { IDispatch::from_raw(raw) }))
     }
@@ -140,11 +145,14 @@ impl Drop for Connection {
 }
 
 /// The class id of the process-wide interface table.
-const CLSID_STD_GLOBAL_INTERFACE_TABLE: GUID = GUID::from_u128(0x00000323_0000_0000_c000_000000000046);
+const CLSID_STD_GLOBAL_INTERFACE_TABLE: GUID =
+    GUID::from_u128(0x00000323_0000_0000_c000_000000000046);
 
 /// Locks a mutex, recovering the value if an earlier call panicked while holding it.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl Addin {
@@ -153,17 +161,28 @@ impl Addin {
     /// `add_in_instance` is the host's own `COMAddIn` object for this add-in. Its `Object` property
     /// is where a host looks for the add-in's interface, so the add-in object is stored there; that
     /// is what `Application.COMAddIns("MathTypeRs.Addin").Object` returns.
-    fn connect(&self, application: Object, add_in_instance: Option<Object>, dispatch: IDispatch) -> HRESULT {
+    fn connect(
+        &self,
+        application: Object,
+        add_in_instance: Option<Object>,
+        dispatch: IDispatch,
+    ) -> HRESULT {
         // SAFETY: the table is a process-wide object and the thread has COM initialised because the
         // host called us through it.
-        let table: IGlobalInterfaceTable =
-            match unsafe { CoCreateInstance(&CLSID_STD_GLOBAL_INTERFACE_TABLE, None, CLSCTX_INPROC_SERVER) } {
-                Ok(table) => table,
-                Err(_) => return E_FAIL,
-            };
+        let table: IGlobalInterfaceTable = match unsafe {
+            CoCreateInstance(
+                &CLSID_STD_GLOBAL_INTERFACE_TABLE,
+                None,
+                CLSCTX_INPROC_SERVER,
+            )
+        } {
+            Ok(table) => table,
+            Err(_) => return E_FAIL,
+        };
         // SAFETY: the application object is alive for as long as the host is connected.
         let application = application.into_dispatch();
-        let cookie = match unsafe { table.RegisterInterfaceInGlobal(&application, &IDispatch::IID) } {
+        let cookie = match unsafe { table.RegisterInterfaceInGlobal(&application, &IDispatch::IID) }
+        {
             Ok(cookie) => cookie,
             Err(_) => return E_FAIL,
         };
@@ -183,7 +202,9 @@ impl Addin {
 
     /// The host application, while the add-in is connected.
     fn application(&self) -> Option<Object> {
-        lock(&self.connection).as_ref().and_then(|connection| connection.application().ok())
+        lock(&self.connection)
+            .as_ref()
+            .and_then(|connection| connection.application().ok())
     }
 
     /// Runs a command against the host application.
@@ -254,9 +275,14 @@ impl Addin_Impl {
         }
         match dispid {
             ribbon::dispid::ON_CONNECTION => {
-                let application = argument_object(parameters, 0).ok_or_else(|| Error::from(E_POINTER))?;
+                let application =
+                    argument_object(parameters, 0).ok_or_else(|| Error::from(E_POINTER))?;
                 let add_in = argument_object(parameters, 2).map(Object::from_dispatch);
-                let _ = self.connect(Object::from_dispatch(application), add_in, self_dispatch(self));
+                let _ = self.connect(
+                    Object::from_dispatch(application),
+                    add_in,
+                    self_dispatch(self),
+                );
                 Ok(Variant::empty())
             }
             ribbon::dispid::ON_DISCONNECTION => {
@@ -327,7 +353,14 @@ impl IDispatch_Impl for Addin_Impl {
         Err(Error::from(E_NOTIMPL))
     }
 
-    fn GetIDsOfNames(&self, _riid: *const GUID, names: *const PCWSTR, count: u32, _lcid: u32, ids: *mut i32) -> Result<()> {
+    fn GetIDsOfNames(
+        &self,
+        _riid: *const GUID,
+        names: *const PCWSTR,
+        count: u32,
+        _lcid: u32,
+        ids: *mut i32,
+    ) -> Result<()> {
         if names.is_null() || ids.is_null() {
             return Err(Error::from(E_POINTER));
         }
@@ -374,7 +407,12 @@ impl Drop for Factory {
 }
 
 impl IClassFactory_Impl for Factory_Impl {
-    fn CreateInstance(&self, outer: Ref<'_, IUnknown>, interface: *const GUID, object: *mut *mut c_void) -> Result<()> {
+    fn CreateInstance(
+        &self,
+        outer: Ref<'_, IUnknown>,
+        interface: *const GUID,
+        object: *mut *mut c_void,
+    ) -> Result<()> {
         if !outer.is_null() {
             return Err(Error::from(CLASS_E_NOAGGREGATION));
         }
@@ -383,7 +421,10 @@ impl IClassFactory_Impl for Factory_Impl {
         }
         // SAFETY: the host offers a slot for the interface it asked for.
         unsafe { *object = std::ptr::null_mut() };
-        let addin: IDispatch = Addin { connection: Mutex::new(None) }.into();
+        let addin: IDispatch = Addin {
+            connection: Mutex::new(None),
+        }
+        .into();
         LIVE_OBJECTS.fetch_add(1, Ordering::SeqCst);
         // SAFETY: the query writes into the slot the host supplied.
         unsafe { addin.query(interface, object) }.ok()
@@ -427,5 +468,9 @@ pub unsafe extern "system" fn DllGetClassObject(
 /// pointer dangling.
 #[unsafe(no_mangle)]
 pub extern "system" fn DllCanUnloadNow() -> HRESULT {
-    if LIVE_OBJECTS.load(Ordering::SeqCst) == 0 { S_OK } else { S_FALSE }
+    if LIVE_OBJECTS.load(Ordering::SeqCst) == 0 {
+        S_OK
+    } else {
+        S_FALSE
+    }
 }

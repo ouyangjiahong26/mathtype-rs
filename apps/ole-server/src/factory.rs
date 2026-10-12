@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::CLASS_E_NOAGGREGATION;
 use windows::Win32::System::Com::{
-    CLSCTX_LOCAL_SERVER, CoRegisterClassObject, IClassFactory, IClassFactory_Impl, REGCLS_MULTIPLEUSE, REGCLS_SUSPENDED,
+    CLSCTX_LOCAL_SERVER, CoRegisterClassObject, IClassFactory, IClassFactory_Impl,
+    REGCLS_MULTIPLEUSE, REGCLS_SUSPENDED,
 };
 use windows::core::{BOOL, Error, GUID, Interface, Ref, Result as WinResult, implement};
 
@@ -191,7 +192,10 @@ mod tests {
     #[test]
     fn a_server_with_no_objects_settles_and_then_may_quit() {
         let state = ServerState::new();
-        assert!(!state.may_quit(), "a server that has not settled may not quit");
+        assert!(
+            !state.may_quit(),
+            "a server that has not settled may not quit"
+        );
         state.object_created();
         assert!(!state.may_quit());
         state.object_released();

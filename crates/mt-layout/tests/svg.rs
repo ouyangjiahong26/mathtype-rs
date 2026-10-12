@@ -1,8 +1,8 @@
 //! Preview tests: the SVG `to_svg` emits.
 
-use mt_core::{Class, Delim, Frac, Fence, Math, Matrix, Node, Scripts, Sqrt};
+use mt_core::{Class, Delim, Fence, Frac, Math, Matrix, Node, Scripts, Sqrt};
 use mt_layout::{
-    constants as c, layout, to_svg, view_box, ApproxMetrics, Box as LBox, LayoutStyle,
+    ApproxMetrics, Box as LBox, LayoutStyle, constants as c, layout, to_svg, view_box,
 };
 
 fn style() -> LayoutStyle {
@@ -27,9 +27,17 @@ fn parse_view_box(svg: &str) -> (f64, f64, f64, f64) {
         .split_whitespace()
         .map(|part| part.parse().expect("a number in the viewBox"))
         .collect();
-    assert_eq!(parts.len(), 4, "viewBox needs four numbers, got {:?}", rest[..end].to_owned());
+    assert_eq!(
+        parts.len(),
+        4,
+        "viewBox needs four numbers, got {:?}",
+        rest[..end].to_owned()
+    );
     assert!(parts.iter().all(|value| value.is_finite()));
-    assert!(parts[2] > 0.0 && parts[3] > 0.0, "the view box needs a positive size");
+    assert!(
+        parts[2] > 0.0 && parts[3] > 0.0,
+        "the view box needs a positive size"
+    );
     (parts[0], parts[1], parts[2], parts[3])
 }
 
@@ -37,13 +45,18 @@ fn parse_view_box(svg: &str) -> (f64, f64, f64, f64) {
 fn a_mixed_equation_previews_one_text_element_per_glyph() {
     // \frac{a}{b} + \sqrt{x_i^2}
     let body = Node::row([
-        Node::Frac(Box::new(Frac::new(Node::variable('a'), Node::variable('b')))),
+        Node::Frac(Box::new(Frac::new(
+            Node::variable('a'),
+            Node::variable('b'),
+        ))),
         Node::symbol('+', Class::Bin),
-        Node::Sqrt(Box::new(Sqrt::square(Node::Scripts(Box::new(Scripts::attach(
-            Node::variable('x'),
-            Some(Node::variable('i')),
-            Some(Node::variable('2')),
-        )))))),
+        Node::Sqrt(Box::new(Sqrt::square(Node::Scripts(Box::new(
+            Scripts::attach(
+                Node::variable('x'),
+                Some(Node::variable('i')),
+                Some(Node::variable('2')),
+            ),
+        ))))),
     ]);
     let boxes = boxes(body);
     let svg = to_svg(&boxes, &style());
@@ -51,17 +64,27 @@ fn a_mixed_equation_previews_one_text_element_per_glyph() {
     // a, b, +, the radical sign, x, i, 2.
     assert_eq!(svg.matches("<text").count(), 7);
     assert_eq!(svg.matches("</text>").count(), 7);
-    assert_eq!(svg.matches("<rect").count(), 2, "the fraction rule and the radical's overbar");
+    assert_eq!(
+        svg.matches("<rect").count(),
+        2,
+        "the fraction rule and the radical's overbar"
+    );
     assert!(svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""));
     assert!(svg.trim_end().ends_with("</svg>"));
-    assert!(svg.contains(
-        "font-family=\"Latin Modern Math, STIX Two Math, Cambria Math, serif\""
-    ));
-    assert!(svg.ends_with("</svg>\n"), "a trailing newline closes the document");
+    assert!(svg.contains("font-family=\"Latin Modern Math, STIX Two Math, Cambria Math, serif\""));
+    assert!(
+        svg.ends_with("</svg>\n"),
+        "a trailing newline closes the document"
+    );
 
     let (x, y, width, height) = parse_view_box(&svg);
     let expected = view_box(&boxes, &style());
-    for (actual, expected) in [(x, expected.0), (y, expected.1), (width, expected.2), (height, expected.3)] {
+    for (actual, expected) in [
+        (x, expected.0),
+        (y, expected.1),
+        (width, expected.2),
+        (height, expected.3),
+    ] {
         assert!(
             (actual - expected).abs() < 1e-3,
             "the viewBox matches the root box: {actual} vs {expected}"
@@ -98,13 +121,19 @@ fn text_is_escaped_and_faces_are_marked() {
     assert!(svg.contains("&gt;"), "greater-than is escaped");
     assert!(!svg.contains(">&lt;&amp;&gt;<"));
     assert_eq!(svg.matches("<text").count(), 5);
-    assert!(svg.contains("font-style=\"italic\""), "italic variables are marked");
+    assert!(
+        svg.contains("font-style=\"italic\""),
+        "italic variables are marked"
+    );
     assert!(svg.contains("font-weight=\"bold\""), "bold runs are marked");
 }
 
 #[test]
 fn empty_slots_are_drawn_as_dashed_rectangles() {
-    let svg = svg(Node::Frac(Box::new(Frac::new(Node::empty(), Node::variable('x')))));
+    let svg = svg(Node::Frac(Box::new(Frac::new(
+        Node::empty(),
+        Node::variable('x'),
+    ))));
     assert!(svg.contains("fill=\"none\" stroke=\"#888888\""));
     assert!(svg.contains("stroke-dasharray=\"1 1\""));
     // The fraction's rule is filled rather than stroked.
@@ -113,7 +142,10 @@ fn empty_slots_are_drawn_as_dashed_rectangles() {
 
 #[test]
 fn rules_are_drawn_as_rectangles_at_their_rule_position() {
-    let math = Math::new(Node::Frac(Box::new(Frac::new(Node::variable('a'), Node::variable('b')))));
+    let math = Math::new(Node::Frac(Box::new(Frac::new(
+        Node::variable('a'),
+        Node::variable('b'),
+    ))));
     let boxes = layout(&math, &ApproxMetrics, &style());
     let svg = to_svg(&boxes, &style());
     // The fraction rule is 0.4 points thick and centred on the axis, 2.5 points up; its two
@@ -134,6 +166,9 @@ fn stretched_glyphs_carry_a_vertical_scale() {
         close: Delim::Paren,
         body: Node::Matrix(Box::new(matrix)),
     })));
-    assert!(svg.contains("scale(1 1.76"), "the stretched delimiter is scaled: {svg}");
+    assert!(
+        svg.contains("scale(1 1.76"),
+        "the stretched delimiter is scaled: {svg}"
+    );
     assert!(svg.contains("font-size=\"28\""));
 }

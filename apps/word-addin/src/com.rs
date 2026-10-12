@@ -9,11 +9,12 @@ use std::mem::{self, ManuallyDrop};
 
 use windows::Win32::Foundation::{DISP_E_PARAMNOTFOUND, DISP_E_UNKNOWNNAME, E_FAIL, VARIANT_BOOL};
 use windows::Win32::System::Com::{
-    DISPATCH_FLAGS, DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT, DISPPARAMS, IDispatch,
+    DISPATCH_FLAGS, DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT, DISPPARAMS,
+    IDispatch,
 };
 use windows::Win32::System::Variant::{
-    VARENUM, VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_BOOL, VT_BSTR, VT_DISPATCH, VT_EMPTY, VT_ERROR, VT_I2,
-    VT_I4, VT_NULL, VT_R4, VT_R8, VariantClear,
+    VARENUM, VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_BOOL, VT_BSTR, VT_DISPATCH,
+    VT_EMPTY, VT_ERROR, VT_I2, VT_I4, VT_NULL, VT_R4, VT_R8, VariantClear,
 };
 use windows::core::{BSTR, Error, GUID, Interface, PCWSTR, Result};
 
@@ -51,22 +52,42 @@ impl Variant {
 
     /// A string; the variant owns a copy of it.
     pub fn bstr(value: &str) -> Self {
-        Self::holding(VT_BSTR, VARIANT_0_0_0 { bstrVal: ManuallyDrop::new(BSTR::from(value)) })
+        Self::holding(
+            VT_BSTR,
+            VARIANT_0_0_0 {
+                bstrVal: ManuallyDrop::new(BSTR::from(value)),
+            },
+        )
     }
 
     /// A boolean.
     pub fn boolean(value: bool) -> Self {
-        Self::holding(VT_BOOL, VARIANT_0_0_0 { boolVal: VARIANT_BOOL(if value { -1 } else { 0 }) })
+        Self::holding(
+            VT_BOOL,
+            VARIANT_0_0_0 {
+                boolVal: VARIANT_BOOL(if value { -1 } else { 0 }),
+            },
+        )
     }
 
     /// The marker for an optional argument the caller leaves out.
     pub fn missing() -> Self {
-        Self::holding(VT_ERROR, VARIANT_0_0_0 { scode: DISP_E_PARAMNOTFOUND.0 })
+        Self::holding(
+            VT_ERROR,
+            VARIANT_0_0_0 {
+                scode: DISP_E_PARAMNOTFOUND.0,
+            },
+        )
     }
 
     /// An interface pointer; the variant takes one reference of its own.
     pub fn dispatch(value: &IDispatch) -> Self {
-        Self::holding(VT_DISPATCH, VARIANT_0_0_0 { pdispVal: ManuallyDrop::new(Some(value.clone())) })
+        Self::holding(
+            VT_DISPATCH,
+            VARIANT_0_0_0 {
+                pdispVal: ManuallyDrop::new(Some(value.clone())),
+            },
+        )
     }
 
     /// A variant with `vt` as its discriminant and `payload` as its value.
@@ -76,7 +97,11 @@ impl Variant {
     fn holding(vt: VARENUM, payload: VARIANT_0_0_0) -> Self {
         Self(VARIANT {
             Anonymous: VARIANT_0 {
-                Anonymous: ManuallyDrop::new(VARIANT_0_0 { vt, Anonymous: payload, ..Default::default() }),
+                Anonymous: ManuallyDrop::new(VARIANT_0_0 {
+                    vt,
+                    Anonymous: payload,
+                    ..Default::default()
+                }),
             },
         })
     }
@@ -109,7 +134,11 @@ impl Variant {
             } else if vt == VT_R8 {
                 Ok(payload.dblVal)
             } else if vt == VT_BOOL {
-                Ok(if payload.boolVal == VARIANT_BOOL(-1) { 1.0 } else { 0.0 })
+                Ok(if payload.boolVal == VARIANT_BOOL(-1) {
+                    1.0
+                } else {
+                    0.0
+                })
             } else {
                 Err(Error::from(E_FAIL))
             }
@@ -205,15 +234,30 @@ impl Object {
         let mut dispid = 0;
         // SAFETY: the name is NUL terminated and outlives the call; `rgdispid` is a valid slot.
         unsafe {
-            self.0.GetIDsOfNames(&GUID::zeroed(), &PCWSTR(wide.as_ptr()), 1, LOCALE_NEUTRAL, &mut dispid)?;
+            self.0.GetIDsOfNames(
+                &GUID::zeroed(),
+                &PCWSTR(wide.as_ptr()),
+                1,
+                LOCALE_NEUTRAL,
+                &mut dispid,
+            )?;
         }
         Ok(dispid)
     }
 
     /// The result of invoking `dispid`.
-    fn invoke(&self, dispid: i32, flags: DISPATCH_FLAGS, arguments: Vec<Variant>) -> Result<Variant> {
+    fn invoke(
+        &self,
+        dispid: i32,
+        flags: DISPATCH_FLAGS,
+        arguments: Vec<Variant>,
+    ) -> Result<Variant> {
         // `DISPPARAMS` carries its arguments in reverse order.
-        let mut raw: Vec<VARIANT> = arguments.into_iter().rev().map(Variant::into_inner).collect();
+        let mut raw: Vec<VARIANT> = arguments
+            .into_iter()
+            .rev()
+            .map(Variant::into_inner)
+            .collect();
         let parameters = DISPPARAMS {
             rgvarg: raw.as_mut_ptr(),
             rgdispidNamedArgs: std::ptr::null_mut(),

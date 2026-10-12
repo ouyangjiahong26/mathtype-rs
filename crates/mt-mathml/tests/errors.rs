@@ -1,7 +1,7 @@
 //! Error fixtures: malformed documents and constructs the tree cannot hold must be reported,
 //! never guessed at and never a panic.
 
-use mt_mathml::{parse, ParseError};
+use mt_mathml::{ParseError, parse};
 
 /// The error `document` produces.
 fn error(document: &str) -> ParseError {
@@ -13,16 +13,31 @@ fn error(document: &str) -> ParseError {
 
 #[test]
 fn the_root_must_be_math() {
-    assert_eq!(error("<mrow><mi>x</mi></mrow>"), ParseError::Root("mrow".to_owned()));
+    assert_eq!(
+        error("<mrow><mi>x</mi></mrow>"),
+        ParseError::Root("mrow".to_owned())
+    );
     assert_eq!(error("<mi>x</mi>"), ParseError::Root("mi".to_owned()));
 }
 
 #[test]
 fn unknown_elements_are_rejected() {
-    assert_eq!(error("<math><mfoo>x</mfoo></math>"), ParseError::UnknownElement("mfoo".to_owned()));
-    assert_eq!(error("<math><mi>x</mi><munderfoo/></math>"), ParseError::UnknownElement("munderfoo".to_owned()));
-    assert!(matches!(error("<math><mtr><mtd><mi>x</mi></mtd></mtr></math>"), ParseError::UnknownElement(_)));
-    assert!(matches!(error("<math><mtd><mi>x</mi></mtd></math>"), ParseError::UnknownElement(_)));
+    assert_eq!(
+        error("<math><mfoo>x</mfoo></math>"),
+        ParseError::UnknownElement("mfoo".to_owned())
+    );
+    assert_eq!(
+        error("<math><mi>x</mi><munderfoo/></math>"),
+        ParseError::UnknownElement("munderfoo".to_owned())
+    );
+    assert!(matches!(
+        error("<math><mtr><mtd><mi>x</mi></mtd></mtr></math>"),
+        ParseError::UnknownElement(_)
+    ));
+    assert!(matches!(
+        error("<math><mtd><mi>x</mi></mtd></math>"),
+        ParseError::UnknownElement(_)
+    ));
 }
 
 #[test]
@@ -46,10 +61,22 @@ fn malformed_xml_is_rejected() {
 
 #[test]
 fn references_that_do_not_resolve_are_rejected() {
-    assert!(matches!(error("<math><mtext>&bogus;</mtext></math>"), ParseError::Xml(_)));
-    assert!(matches!(error("<math><mtext>&#xZZ;</mtext></math>"), ParseError::Xml(_)));
-    assert!(matches!(error("<math><mtext>&#1114112;</mtext></math>"), ParseError::Xml(_)));
-    assert!(matches!(error("<math><mtext>a & b</mtext></math>"), ParseError::Xml(_)));
+    assert!(matches!(
+        error("<math><mtext>&bogus;</mtext></math>"),
+        ParseError::Xml(_)
+    ));
+    assert!(matches!(
+        error("<math><mtext>&#xZZ;</mtext></math>"),
+        ParseError::Xml(_)
+    ));
+    assert!(matches!(
+        error("<math><mtext>&#1114112;</mtext></math>"),
+        ParseError::Xml(_)
+    ));
+    assert!(matches!(
+        error("<math><mtext>a & b</mtext></math>"),
+        ParseError::Xml(_)
+    ));
 }
 
 #[test]
@@ -66,15 +93,27 @@ fn elements_with_the_wrong_number_of_children_are_rejected() {
         "<math><munder><mi>a</mi></munder></math>",
         "<math><munderover><mi>a</mi><mi>b</mi></munderover></math>",
     ] {
-        assert!(matches!(error(document), ParseError::Structure(_)), "{document}");
+        assert!(
+            matches!(error(document), ParseError::Structure(_)),
+            "{document}"
+        );
     }
 }
 
 #[test]
 fn table_parts_out_of_place_are_rejected() {
-    assert!(matches!(error("<math><mtable><mrow/></mtable></math>"), ParseError::Structure(_)));
-    assert!(matches!(error("<math><mtable><mtr><mrow/></mtr></mtable></math>"), ParseError::Structure(_)));
-    assert!(matches!(error("<math><mtable><mtd/></mtable></math>"), ParseError::Structure(_)));
+    assert!(matches!(
+        error("<math><mtable><mrow/></mtable></math>"),
+        ParseError::Structure(_)
+    ));
+    assert!(matches!(
+        error("<math><mtable><mtr><mrow/></mtr></mtable></math>"),
+        ParseError::Structure(_)
+    ));
+    assert!(matches!(
+        error("<math><mtable><mtd/></mtable></math>"),
+        ParseError::Structure(_)
+    ));
 }
 
 #[test]
