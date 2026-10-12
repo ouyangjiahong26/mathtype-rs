@@ -256,6 +256,14 @@ if ($null -ne $editor) {
             [IO.File]::WriteAllText($handoff, $targetLatex, $utf8NoBom)
             Ok "wrote the new equation into the hand-off file: $targetLatex"
 
+            # The window has to exist before it can be asked to close: `CloseMainWindow` does
+            # nothing while the editor is still starting up, and an editor that had to be killed
+            # looks to the object like one that failed, whose hand-off file it will not read.
+            $windowDeadline = (Get-Date).AddSeconds(15)
+            while ((Get-Date) -lt $windowDeadline -and $editor.MainWindowHandle -eq 0) {
+                Start-Sleep -Milliseconds 200
+                $editor.Refresh()
+            }
             $null = $editor.CloseMainWindow()
             if (-not $editor.WaitForExit($EditorTimeoutSeconds * 1000)) {
                 Note 'the editor ignored the close request and was stopped instead'
