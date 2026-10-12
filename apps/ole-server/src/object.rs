@@ -14,6 +14,7 @@
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -88,7 +89,7 @@ const DISPID_GET_STATUS: i32 = 5;
 )]
 pub struct EquationObject {
     state: Arc<ServerState>,
-    inner: Arc<RefCell<Inner>>,
+    inner: Rc<RefCell<Inner>>,
 }
 
 impl Drop for EquationObject {
@@ -143,7 +144,7 @@ thread_local! {
     /// Every object this server has handed out, so the message loop's timer can drive them.
     ///
     /// The object lives in one apartment, and so does this list; nothing here crosses a thread.
-    static LIVE_OBJECTS: RefCell<Vec<std::sync::Weak<RefCell<Inner>>>> = const { RefCell::new(Vec::new()) };
+    static LIVE_OBJECTS: RefCell<Vec<std::rc::Weak<RefCell<Inner>>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Read back whatever every live object's editor session has left behind.
@@ -306,8 +307,8 @@ impl EquationObject {
     /// A new object, counted in `state` until it is released.
     pub fn new(state: Arc<ServerState>) -> Self {
         state.object_created();
-        let inner = Arc::new(RefCell::new(Inner::new()));
-        LIVE_OBJECTS.with(|live| live.borrow_mut().push(Arc::downgrade(&inner)));
+        let inner = Rc::new(RefCell::new(Inner::new()));
+        LIVE_OBJECTS.with(|live| live.borrow_mut().push(Rc::downgrade(&inner)));
         trace::log("creating an equation object");
         Self { state, inner }
     }

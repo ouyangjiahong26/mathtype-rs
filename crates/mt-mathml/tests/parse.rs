@@ -296,7 +296,9 @@ fn a_fence_takes_its_delimiters_from_the_attributes() {
 fn a_table_inside_a_fence_carries_those_delimiters() {
     let document = "<math><mfenced open=\"[\" close=\"]\"><mtable><mtr><mtd><mn>1</mn></mtd></mtr></mtable></mfenced></math>";
     let mut matrix = Matrix::empty(1, 1);
-    matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = digit('1');
+    }
     matrix.delims = Some((Delim::Bracket, Delim::Bracket));
     assert_eq!(
         parse(document).unwrap(),
@@ -308,8 +310,12 @@ fn a_table_inside_a_fence_carries_those_delimiters() {
 fn table_alignment_and_rules_come_from_the_attributes() {
     let document = "<math><mtable columnalign=\"left center\" columnlines=\"solid\"><mtr><mtd><mn>1</mn></mtd><mtd><mn>2</mn></mtd></mtr></mtable></math>";
     let mut matrix = Matrix::empty(1, 2);
-    matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
-    matrix.cell_at_mut(1).map(|cell| *cell = digit('2'));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = digit('1');
+    }
+    if let Some(cell) = matrix.cell_at_mut(1) {
+        *cell = digit('2');
+    }
     matrix.columns = vec![Side::Left, Side::Center];
     matrix.rules = true;
     assert_eq!(
@@ -323,7 +329,9 @@ fn a_column_alignment_repeated_on_every_cell_folds_into_the_default() {
     let document =
         "<math><mtable><mtr><mtd columnalign=\"right\"><mn>1</mn></mtd></mtr></mtable></math>";
     let mut matrix = Matrix::empty(1, 1);
-    matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = digit('1');
+    }
     matrix.align = Side::Right;
     assert_eq!(
         parse(document).unwrap(),
@@ -336,7 +344,9 @@ fn a_table_kind_marker_is_read_back() {
     let document =
         "<math><mtable class=\"mt-cases\"><mtr><mtd><mn>1</mn></mtd></mtr></mtable></math>";
     let mut matrix = Matrix::empty(1, 1);
-    matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = digit('1');
+    }
     matrix.kind = MatrixKind::Cases;
     assert_eq!(
         parse(document).unwrap(),

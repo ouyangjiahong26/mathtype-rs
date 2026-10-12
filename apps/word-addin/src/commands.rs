@@ -195,7 +195,7 @@ pub fn batch_convert(application: &Object) -> Outcome {
     // Selection scope, best effort: a real sub-selection is bookmarked so the pipeline can cut
     // its range out of the document's markup. Any failure here falls back to the whole document.
     let mut scoped = false;
-    if let Some(selection) = word::selection(application).ok() {
+    if let Ok(selection) = word::selection(application) {
         let bounds = (selection.get_i32("Start"), selection.get_i32("End"));
         let content = document
             .get_object("Content")
@@ -205,16 +205,15 @@ pub fn batch_convert(application: &Object) -> Outcome {
             (bounds.0, bounds.1, whole.0, whole.1)
         {
             let partial = start != end && !(start == content_start && end == content_end);
-            if partial {
-                if selection
+            if partial
+                && selection
                     .get_object("Bookmarks")
                     .and_then(|bookmarks| {
                         bookmarks.call_object("Add", vec![Variant::bstr(SCOPE_BOOKMARK)])
                     })
                     .is_ok()
-                {
-                    scoped = true;
-                }
+            {
+                scoped = true;
             }
         }
     }

@@ -917,7 +917,18 @@ fn layout_limits(limits: &Limits, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         .map(|node| layout_node(node, &ctx.slot(2).at_level(level), 0.0, 0.0));
     // Unlike a large operator, material that merely carries limits keeps its own size and stays on
     // the baseline.
-    stack_limits(base, over, under, limits.align, 0.0, ctx, ox, oy)
+    stack_limits(
+        StackLimits {
+            base,
+            over,
+            under,
+            align: limits.align,
+            base_shift: 0.0,
+        },
+        ctx,
+        ox,
+        oy,
+    )
 }
 
 fn layout_big(big: &BigOp, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
@@ -940,7 +951,18 @@ fn layout_big(big: &BigOp, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         // math axis, so the axis passes through it.
         let axis = ctx.metrics.axis_height() * ctx.size();
         let shift = (base.h - base.d) / 2.0 - axis;
-        stack_limits(base, sup, sub, Side::Center, shift, ctx, ox, oy)
+        stack_limits(
+            StackLimits {
+                base,
+                over: sup,
+                under: sub,
+                align: Side::Center,
+                base_shift: shift,
+            },
+            ctx,
+            ox,
+            oy,
+        )
     } else {
         attach_scripts(base, sub, sup, ctx, ox, oy)
     }
@@ -1046,22 +1068,30 @@ fn attach_scripts(
     )
 }
 
+/// The material one stack lays out: a base with an optional over-script and under-script, the
+/// alignment they share and how far the base's baseline shifts from the current one.
+struct StackLimits {
+    base: Laid,
+    over: Option<Laid>,
+    under: Option<Laid>,
+    align: Side,
+    base_shift: f64,
+}
+
 /// Stack limits above and below a base, aligned as `align` asks for.
 ///
 /// The narrower of the base, the over-script and the under-script is aligned inside the widest of
 /// them, so the base, the limits and their common centre line up. `base_shift` moves the base's
 /// baseline away from the current one, which is how a large operator puts its own centre on the
 /// math axis; the limits follow the base's edges, so all three keep that one centre.
-fn stack_limits(
-    base: Laid,
-    over: Option<Laid>,
-    under: Option<Laid>,
-    align: Side,
-    base_shift: f64,
-    ctx: &Ctx,
-    ox: f64,
-    oy: f64,
-) -> Laid {
+fn stack_limits(limits: StackLimits, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
+    let StackLimits {
+        base,
+        over,
+        under,
+        align,
+        base_shift,
+    } = limits;
     let spacing = &ctx.style.spacing;
     let gap = ctx.em(spacing.limit_gap);
     let width = base
@@ -1212,13 +1242,13 @@ fn layout_matrix(matrix: &Matrix, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let mut flat = 0_usize;
     for (r, cells_row) in matrix.rows.iter().enumerate() {
         let mut laid_row = Vec::with_capacity(cols);
-        for c in 0..cols {
+        for (c, width) in col_w.iter_mut().enumerate() {
             match cells_row.get(c) {
                 Some(cell) => {
                     // Cells are addressed row-major across the whole table, the way
                     // `Node::slot` numbers them.
                     let laid = layout_node(cell, &ctx.slot(flat + c), 0.0, 0.0);
-                    col_w[c] = col_w[c].max(laid.w);
+                    *width = width.max(laid.w);
                     row_h[r] = row_h[r].max(laid.h);
                     row_d[r] = row_d[r].max(laid.d);
                     laid_row.push(laid);

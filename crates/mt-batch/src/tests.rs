@@ -8,7 +8,6 @@ use std::io::Write;
 
 use crate::{Entry, Failure, Mode, Options, PlanStats, Progress, Report, TargetFormat, plan, run};
 use mt_docx::Document;
-use mt_tex;
 
 /// The LaTeX sources of the fixture's Office Math formulas; 22 of them.
 fn formulas() -> Vec<&'static str> {
@@ -147,7 +146,7 @@ fn report_mode_leaves_the_document_bytes_alone_and_lists_every_formula() {
     // The 清单 holds one entry per readable formula, in order, matching the sources.
     let sources = formulas();
     for (position, entry) in outcome.report.entries.iter().take(22).enumerate() {
-        let math = mt_tex::parse(&sources[position]).unwrap();
+        let math = mt_tex::parse(sources[position]).unwrap();
         assert_eq!(entry.output, mt_tex::to_latex(&math));
     }
     // The two broken objects failed, with their 序号 and a reason each.

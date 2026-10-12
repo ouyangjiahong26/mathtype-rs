@@ -386,7 +386,7 @@ fn text_element(out: &mut String, text: &str) {
         out.push_str(" xml:space=\"preserve\"");
     }
     out.push('>');
-    out.push_str(&escape(&valid_xml(text)));
+    out.push_str(&escape(valid_xml(text)));
     out.push_str("</m:t>");
 }
 
@@ -395,7 +395,7 @@ fn valued(out: &mut String, name: &str, value: &str) {
     out.push('<');
     out.push_str(name);
     out.push_str(" m:val=\"");
-    out.push_str(&escape(&valid_xml(value)));
+    out.push_str(&escape(valid_xml(value)));
     out.push_str("\"/>");
 }
 

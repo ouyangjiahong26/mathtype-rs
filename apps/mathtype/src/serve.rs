@@ -264,8 +264,7 @@ fn export_html(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, 
         options.math = mt_html::MathMode::parse(&value)
             .ok_or_else(|| format!("unknown ?math= {value}: mathml or image"))?;
     }
-    let result =
-        mt_docx::Document::open(body).and_then(|document| Ok(mt_html::export(&document, &options)));
+    let result = mt_docx::Document::open(body).map(|document| mt_html::export(&document, &options));
     match result {
         Ok(output) => respond(stream, 200, "text/html; charset=utf-8", &output.html),
         Err(error) => respond(
@@ -1620,13 +1619,15 @@ mod tests {
     }
 
     /// A document whose one paragraph embeds a MathTypeRs equation object with a PNG preview.
+    ///
+    /// Only the editor hand-off tests build it, and those stand in a shell script for the editor.
+    #[cfg(unix)]
     fn ole_docx() -> Vec<u8> {
         use std::io::Write;
         let math = mt_tex::parse("\\frac{a+b}{c}").expect("the object equation parses");
         let stream = mt_mtef::write(&math);
         let bin = mt_mtef::ole::create_ole(&stream).expect("the compound file is written");
-        let document = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        let document = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
              <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" \
              xmlns:v=\"urn:schemas-microsoft-com:vml\" \
              xmlns:o=\"urn:schemas-microsoft-com:office:office\" \
@@ -1636,8 +1637,7 @@ mod tests {
              <v:imagedata r:id=\"rIdImg1\" o:title=\"\"/></v:shape>\
              <o:OLEObject Type=\"Embed\" ProgID=\"MathTypeRs.Equation.1\" ShapeID=\"eqobj1\" \
              DrawAspect=\"Content\" ObjectID=\"_1700000001\" r:id=\"rIdObj1\"/>\
-             </w:object></w:r></w:p></w:body></w:document>"
-        );
+             </w:object></w:r></w:p></w:body></w:document>".to_string();
         let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default();
         let text_parts: [(&str, String); 4] = [
@@ -1687,10 +1687,12 @@ mod tests {
     }
 
     /// Tests that point `MATHTYPE_RS_EDITOR` at a script must not race each other.
+    #[cfg(unix)]
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// A shell script standing in for the desktop editor: `fake_editor("a+b")` overwrites the
     /// equation file with that text; `fake_editor("")` makes the editor fail.
+    #[cfg(unix)]
     fn fake_editor(replacement: &str) -> std::path::PathBuf {
         let path =
             std::env::temp_dir().join(format!("mathtype-fake-editor-{}", std::process::id()));
@@ -1714,10 +1716,8 @@ mod tests {
         std::fs::set_permissions(path, permissions).expect("chmod the editor");
     }
 
-    #[cfg(not(unix))]
-    fn make_executable(_path: &std::path::Path) {}
-
     /// An editor that leaves the equation file alone and exits successfully.
+    #[cfg(unix)]
     fn fake_blank_editor() -> std::path::PathBuf {
         let path =
             std::env::temp_dir().join(format!("mathtype-blank-editor-{}", std::process::id()));

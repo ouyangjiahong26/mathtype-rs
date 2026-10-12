@@ -679,7 +679,7 @@ fn rewrite_shape_extent(shape: &str, width_pt: f64, height_pt: f64) -> Result<St
     let mut replaced = false;
     while let Some(at) = rest.find("width:") {
         let after = &rest[at..];
-        let end = after.find(';').map_or(after.len(), |i| i);
+        let end = after.find(';').unwrap_or(after.len());
         out.push_str(&rest[..at]);
         out.push_str(&replacement);
         rest = &after[end..];

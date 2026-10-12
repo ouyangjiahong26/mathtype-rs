@@ -353,8 +353,12 @@ fn a_brace_accent_drawn_on_the_other_side_reads_back_as_that_side_variant() {
 #[test]
 fn matrices_round_trip_with_delimiters_and_alignment() {
     let mut matrix = Matrix::empty(2, 2);
-    matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
-    matrix.cell_at_mut(3).map(|cell| *cell = variable('x'));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = digit('1');
+    }
+    if let Some(cell) = matrix.cell_at_mut(3) {
+        *cell = variable('x');
+    }
     round_trip(&Math::new(Node::Matrix(Box::new(matrix.clone()))));
 
     matrix.delims = Some((Delim::Bracket, Delim::Bracket));
@@ -375,10 +379,12 @@ fn matrices_round_trip_with_delimiters_and_alignment() {
 #[test]
 fn an_aligned_single_column_table_round_trips_as_an_equation_array() {
     let mut matrix = Matrix::empty(2, 1);
-    matrix.cell_at_mut(0).map(|cell| *cell = variable('a'));
-    matrix
-        .cell_at_mut(1)
-        .map(|cell| *cell = row([variable('b'), symbol('=', Class::Rel), digit('1')]));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = variable('a');
+    }
+    if let Some(cell) = matrix.cell_at_mut(1) {
+        *cell = row([variable('b'), symbol('=', Class::Rel), digit('1')]);
+    }
     matrix.kind = MatrixKind::Aligned;
     round_trip(&Math::new(Node::Matrix(Box::new(matrix))));
 }
@@ -546,7 +552,9 @@ fn a_table_kind_office_math_cannot_name_reads_back_as_a_plain_table() {
         MatrixKind::LongDivision,
     ] {
         let mut matrix = Matrix::empty(1, 1);
-        matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
+        if let Some(cell) = matrix.cell_at_mut(0) {
+            *cell = digit('1');
+        }
         matrix.kind = kind;
         let mut expected = matrix.clone();
         expected.kind = MatrixKind::Matrix;
@@ -561,7 +569,9 @@ fn a_table_kind_office_math_cannot_name_reads_back_as_a_plain_table() {
 #[test]
 fn cell_rules_have_no_spelling_and_read_back_off() {
     let mut matrix = Matrix::empty(1, 1);
-    matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = digit('1');
+    }
     matrix.rules = true;
     let mut expected = matrix.clone();
     expected.rules = false;

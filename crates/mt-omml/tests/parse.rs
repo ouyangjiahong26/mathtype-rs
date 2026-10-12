@@ -342,9 +342,9 @@ fn several_arguments_between_delimiters_join_into_one_body() {
 fn a_table_between_delimiters_takes_them_as_its_own() {
     let markup = "<m:d><m:e><m:m><m:mr><m:e><m:r><m:t>1</m:t></m:r></m:e></m:mr></m:m></m:e></m:d>";
     let mut matrix = Matrix::empty(1, 1);
-    matrix
-        .cell_at_mut(0)
-        .map(|cell| *cell = face('1', Class::Ord, Font::Upright));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = face('1', Class::Ord, Font::Upright);
+    }
     matrix.delims = Some((Delim::Paren, Delim::Paren));
     assert_eq!(
         parse(&document(markup)).unwrap(),
@@ -356,8 +356,12 @@ fn a_table_between_delimiters_takes_them_as_its_own() {
 fn a_table_reads_its_rows_cells_and_column_justification() {
     let markup = "<m:m><m:mPr><m:baseJc m:val=\"center\"/><m:mcs><m:mc><m:mcPr><m:count m:val=\"1\"/><m:mcJc m:val=\"left\"/></m:mcPr></m:mc><m:mc><m:mcPr><m:count m:val=\"1\"/><m:mcJc m:val=\"right\"/></m:mcPr></m:mc></m:mcs></m:mPr><m:mr><m:e><m:r><m:t>a</m:t></m:r></m:e><m:e><m:r><m:t>b</m:t></m:r></m:e></m:mr></m:m>";
     let mut matrix = Matrix::empty(1, 2);
-    matrix.cell_at_mut(0).map(|cell| *cell = variable('a'));
-    matrix.cell_at_mut(1).map(|cell| *cell = variable('b'));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = variable('a');
+    }
+    if let Some(cell) = matrix.cell_at_mut(1) {
+        *cell = variable('b');
+    }
     matrix.columns = vec![Side::Left, Side::Right];
     assert_eq!(
         parse(&document(markup)).unwrap(),
@@ -394,8 +398,12 @@ fn an_equation_array_is_an_aligned_table() {
     let markup =
         "<m:eqArr><m:e><m:r><m:t>a</m:t></m:r></m:e><m:e><m:r><m:t>b</m:t></m:r></m:e></m:eqArr>";
     let mut matrix = Matrix::empty(2, 1);
-    matrix.cell_at_mut(0).map(|cell| *cell = variable('a'));
-    matrix.cell_at_mut(1).map(|cell| *cell = variable('b'));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = variable('a');
+    }
+    if let Some(cell) = matrix.cell_at_mut(1) {
+        *cell = variable('b');
+    }
     matrix.kind = MatrixKind::Aligned;
     assert_eq!(
         parse(&document(markup)).unwrap(),

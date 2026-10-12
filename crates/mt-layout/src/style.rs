@@ -201,13 +201,15 @@ mod tests {
 
     #[test]
     fn slots_restyle_the_roles_of_the_tree() {
-        let mut slots = StyleFonts::default();
-        slots.variable = Font::Script;
-        slots.number = Font::Bold;
-        slots.greek = Font::Upright;
-        slots.symbol = Font::BoldItalic;
-        slots.vector = Font::BoldItalic;
-        slots.function = Font::SansSerif;
+        let mut slots = StyleFonts {
+            variable: Font::Script,
+            number: Font::Bold,
+            greek: Font::Upright,
+            symbol: Font::BoldItalic,
+            vector: Font::BoldItalic,
+            function: Font::SansSerif,
+            ..StyleFonts::default()
+        };
         assert_eq!(slots.resolve('x', Class::Ord, Font::Italic), Font::Script);
         assert_eq!(slots.resolve('x', Class::Ord, Font::Upright), Font::Script);
         assert_eq!(slots.resolve('7', Class::Ord, Font::Upright), Font::Bold);

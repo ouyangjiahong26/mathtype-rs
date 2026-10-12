@@ -224,7 +224,7 @@ impl<'a> Exporter<'a> {
     /// its items but always maps to `p`, a heading being meaningless in a cell.
     fn paragraph(&mut self, paragraph: &Paragraph, standalone: bool) -> String {
         let level = standalone
-            .then(|| paragraph.style.as_deref())
+            .then_some(paragraph.style.as_deref())
             .flatten()
             .and_then(heading_level);
         let tag = match level {

@@ -143,7 +143,7 @@ impl Relationships {
             escape_into(&mut out, &rel.kind);
             out.push_str("\" Target=\"");
             escape_into(&mut out, &rel.target);
-            out.push_str("\"");
+            out.push('"');
             if rel.external {
                 out.push_str(" TargetMode=\"External\"");
             }

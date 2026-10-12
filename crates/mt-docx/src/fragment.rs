@@ -204,10 +204,7 @@ mod tests {
 
     #[test]
     fn text_runs_carry_their_style() {
-        assert_eq!(
-            text_run("a<b", &RunStyle::default()).contains("a&lt;b"),
-            true
-        );
+        assert!(text_run("a<b", &RunStyle::default()).contains("a&lt;b"));
         let styled = RunStyle {
             bold: Some(true),
             italic: None,

@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn the_timings_are_what_the_message_loop_and_the_contract_expect() {
-        assert!(TICK_MS > 0 && TICK_MS <= 1000);
+        const { assert!(TICK_MS > 0 && TICK_MS <= 1000) };
         assert!(STARTUP_GRACE > IDLE_GRACE);
     }
 }

@@ -273,7 +273,7 @@ fn slash_fraction_places_the_slash_between_its_arguments() {
 
 #[test]
 fn fraction_grows_when_the_numerator_carries_limits() {
-    let metrics = ApproxMetrics;
+    let _metrics = ApproxMetrics;
     let plain = lay(frac_of(Node::variable('x'), Node::variable('b')));
     let limits = Limits {
         base: Node::symbol('\u{222B}', Class::Op),
@@ -923,13 +923,19 @@ fn integrals_grow_less_than_summations() {
             limits,
         })))
     };
+    let summation = lay(Node::Big(Box::new(BigOp {
+        base: Node::symbol('\u{2211}', Class::Op),
+        sub: Some(Node::variable('a')),
+        sup: Some(Node::variable('b')),
+        limits: true,
+    })));
     close(glyph(&integral(false), '\u{222B}').size, 10.0);
     close(
         glyph(&integral(true), '\u{222B}').size,
         c::BIG_OP_SCALE_INTEGRAL * 10.0,
     );
     // Slimmer than a summation with the same limits, and still larger with limits than without.
-    assert!(c::BIG_OP_SCALE_INTEGRAL < c::BIG_OP_SCALE_LIMITS);
+    assert!(glyph(&integral(true), '\u{222B}').size < glyph(&summation, '\u{2211}').size);
     assert!(glyph(&integral(true), '\u{222B}').size > glyph(&integral(false), '\u{222B}').size);
     close(glyph(&integral(true), 'a').size, 0.7 * 10.0);
 }

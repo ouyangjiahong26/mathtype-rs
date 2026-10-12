@@ -1014,9 +1014,9 @@ mod tests {
     #[test]
     fn matrix_cells_are_addressed_row_major() {
         let mut matrix = Matrix::empty(2, 3);
-        matrix
-            .cell_at_mut(4)
-            .map(|cell| *cell = Node::variable('q'));
+        if let Some(cell) = matrix.cell_at_mut(4) {
+            *cell = Node::variable('q');
+        }
         let node = Node::Matrix(Box::new(matrix));
         assert_eq!(node.slot_count(), 6);
         assert_eq!(node.slot(4), Some(&Node::variable('q')));

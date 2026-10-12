@@ -283,8 +283,12 @@ fn every_accent_shape_round_trips_on_both_sides() {
 #[test]
 fn matrices_round_trip_with_delimiters_alignment_and_rules() {
     let mut matrix = Matrix::empty(2, 2);
-    matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
-    matrix.cell_at_mut(3).map(|cell| *cell = variable('x'));
+    if let Some(cell) = matrix.cell_at_mut(0) {
+        *cell = digit('1');
+    }
+    if let Some(cell) = matrix.cell_at_mut(3) {
+        *cell = variable('x');
+    }
     round_trip(&Math::new(Node::Matrix(Box::new(matrix.clone()))));
 
     matrix.delims = Some((Delim::Bracket, Delim::Bracket));
@@ -310,7 +314,9 @@ fn every_table_kind_round_trips() {
         MatrixKind::LongDivision,
     ] {
         let mut matrix = Matrix::empty(1, 1);
-        matrix.cell_at_mut(0).map(|cell| *cell = digit('1'));
+        if let Some(cell) = matrix.cell_at_mut(0) {
+            *cell = digit('1');
+        }
         matrix.kind = kind;
         round_trip(&Math::new(Node::Matrix(Box::new(matrix))));
     }

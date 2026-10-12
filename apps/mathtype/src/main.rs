@@ -811,8 +811,10 @@ impl App {
         let presets = mt_style_preset::builtins().to_vec();
         let style = presets[0].layout_style();
         let library = library::Library::load_default().unwrap_or_else(|error| {
-            let mut empty = library::Library::default();
-            empty.path = library::default_path();
+            let empty = library::Library {
+                path: library::default_path(),
+                ..Default::default()
+            };
             eprintln!("公式库无法读取：{error}");
             empty
         });
@@ -1263,7 +1265,7 @@ impl App {
         color: Color32,
     ) {
         let cursor = self.editor.cursor();
-        let Some(anchor) = anchors.iter().find(|anchor| &anchor.path == &cursor.path) else {
+        let Some(anchor) = anchors.iter().find(|anchor| anchor.path == cursor.path) else {
             return;
         };
         let last = anchor.offsets.len().saturating_sub(1);
@@ -1290,7 +1292,7 @@ impl App {
             return;
         };
         let cursor = self.editor.cursor();
-        let Some(anchor) = anchors.iter().find(|anchor| &anchor.path == &cursor.path) else {
+        let Some(anchor) = anchors.iter().find(|anchor| anchor.path == cursor.path) else {
             return;
         };
         let last = anchor.offsets.len().saturating_sub(1);
@@ -1737,7 +1739,7 @@ fn node_font(node: &mt_core::Node) -> Option<Font> {
 fn current_font(editor: &Editor) -> Font {
     if let Some((start, _)) = editor.selection() {
         if let Some(mt_core::Node::Row(row)) = editor.math().node_at(&editor.cursor().path) {
-            if let Some(font) = row.iter().nth(start).and_then(node_font) {
+            if let Some(font) = row.get(start).and_then(node_font) {
                 return font;
             }
         }
@@ -2039,9 +2041,12 @@ mod tests {
         assert!(!bytes.is_empty());
     }
 
+    /// The tuple [`drag_fixture`] returns.
+    type DragFixture = (Editor, Vec<RowAnchor>, Box<dyn Fn(usize) -> Pos2>);
+
     /// A pointer fixture: an editor on `ab+cd`, its layout anchors, and a point in item `i`'s
     /// middle (strictly closer to insertion point `i + 1` than to `i`).
-    fn drag_fixture() -> (Editor, Vec<RowAnchor>, Box<dyn Fn(usize) -> Pos2>) {
+    fn drag_fixture() -> DragFixture {
         let editor = Editor::from_math(mt_tex::parse("ab+cd").expect("parses"));
         let metrics = FaceMetrics::parse(MATH_FONT, 0).expect("font parses");
         let style = LayoutStyle::display(18.0);

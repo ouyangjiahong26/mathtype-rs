@@ -176,9 +176,11 @@ fn escaped(text: &str) -> String {
 
 /// A run of text, hidden when asked.
 fn text_run(text: &str, hidden: bool) -> String {
-    let properties = hidden
-        .then(|| "<w:rPr><w:vanish/></w:rPr>".to_owned())
-        .unwrap_or_default();
+    let properties = if hidden {
+        "<w:rPr><w:vanish/></w:rPr>".to_owned()
+    } else {
+        Default::default()
+    };
     format!(
         "<w:r>{properties}<w:t xml:space=\"preserve\">{}</w:t></w:r>",
         escaped(text)
@@ -298,7 +300,7 @@ pub fn bookmark_runs(name: &str, id: i32, inner: &str) -> String {
 fn tabs_properties(side: Side) -> String {
     let tab = match side {
         Side::Right => format!("<w:tab w:val=\"right\" w:pos=\"{MARGIN_TAB}\"/>"),
-        Side::Left => format!("<w:tab w:val=\"left\" w:pos=\"0\"/>"),
+        Side::Left => "<w:tab w:val=\"left\" w:pos=\"0\"/>".to_string(),
     };
     format!("<w:tabs>{tab}</w:tabs>")
 }
@@ -504,23 +506,21 @@ fn scan_numbered(xml: &str) -> Vec<Found> {
                     instr.push_str(&text.xml10_content());
                 }
             }
-            Event::End(end) => {
-                if end.local_name().as_ref() == "instrText" {
-                    if let Some(text) = instr.take() {
-                        if text.contains(PLACE_MACRO) {
-                            if let Some(current) = fields.last_mut() {
-                                *current = true;
-                            }
-                            found.push(Found {
-                                offset,
-                                bookmark: open.last().map(|(name, _)| name.clone()),
-                            });
-                        } else if is_numbering_instr(&text) && !fields.iter().any(|place| *place) {
-                            found.push(Found {
-                                offset,
-                                bookmark: open.last().map(|(name, _)| name.clone()),
-                            });
+            Event::End(end) if end.local_name().as_ref() == "instrText" => {
+                if let Some(text) = instr.take() {
+                    if text.contains(PLACE_MACRO) {
+                        if let Some(current) = fields.last_mut() {
+                            *current = true;
                         }
+                        found.push(Found {
+                            offset,
+                            bookmark: open.last().map(|(name, _)| name.clone()),
+                        });
+                    } else if is_numbering_instr(&text) && !fields.iter().any(|place| *place) {
+                        found.push(Found {
+                            offset,
+                            bookmark: open.last().map(|(name, _)| name.clone()),
+                        });
                     }
                 }
             }

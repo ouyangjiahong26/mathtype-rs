@@ -59,8 +59,8 @@ fn the_index_reads_the_document() {
     };
     assert_eq!((table.rows, table.columns), (2, 2));
     // Cell paragraphs follow their table, one depth in.
-    for index in 4..8 {
-        match &blocks[index] {
+    for (index, block) in blocks.iter().enumerate().take(8).skip(4) {
+        match block {
             Block::Paragraph(paragraph) => assert_eq!(paragraph.table_depth, 1),
             _ => panic!("block {index} is not a cell paragraph"),
         }
@@ -372,14 +372,11 @@ fn an_ole_equation_is_rewritten_in_place() {
 #[test]
 fn ole_formulas_are_replaced_by_omath() {
     let mut document = open(&realistic_docx());
-    loop {
-        let Some(object) = document
-            .equations()
-            .into_iter()
-            .find(|equation| matches!(equation.kind, EquationKind::Ole { .. }))
-        else {
-            break;
-        };
+    while let Some(object) = document
+        .equations()
+        .into_iter()
+        .find(|equation| matches!(equation.kind, EquationKind::Ole { .. }))
+    {
         let math = parse_tex("e^{i\\pi}").unwrap();
         document
             .replace(

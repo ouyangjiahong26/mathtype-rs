@@ -12,7 +12,7 @@
 //! reads back as the full size.
 
 use mt_core::Font;
-use mt_layout::{Spacing, StyleFonts};
+use mt_layout::StyleFonts;
 use mt_mtef::{Dimension, Preferences, StyleDef, Unit};
 
 use crate::{PresetSizes, StylePreset, number};
@@ -61,29 +61,30 @@ pub fn to_preferences(preset: &StylePreset) -> Preferences {
 /// whatever unit they were written in, with percent entries read against the full size; style
 /// slots past the seven functional ones (user styles, MT Extra) are ignored.
 pub fn from_preferences(preferences: &Preferences) -> StylePreset {
-    let mut preset = StylePreset::default();
-    preset.name = "导入的预设".to_owned();
-    let full = dimension(&preferences.sizes.first(), None).unwrap_or(preset.sizes.full);
-    preset.sizes = PresetSizes {
-        full,
-        text: full,
-        script: dimension(&preferences.sizes.get(1), Some(full))
-            .unwrap_or_else(|| full * 7.0 / 12.0),
-        script_script: dimension(&preferences.sizes.get(2), Some(full))
-            .unwrap_or_else(|| full * 5.0 / 12.0),
-    };
+    let default = StylePreset::default();
+    let full = dimension(&preferences.sizes.first(), None).unwrap_or(default.sizes.full);
     let slot = |index: usize| preferences.styles.get(index).copied();
-    preset.styles = StyleFonts {
-        text: font_of(slot(0), Font::Upright),
-        function: font_of(slot(1), Font::Upright),
-        variable: font_of(slot(2), Font::Italic),
-        greek: font_of(slot(3), Font::Italic),
-        symbol: font_of(slot(5), Font::Upright),
-        vector: font_of(slot(6), Font::Bold),
-        number: font_of(slot(7), Font::Upright),
-    };
-    preset.spaces = Spacing::default();
-    preset
+    StylePreset {
+        name: "导入的预设".to_owned(),
+        sizes: PresetSizes {
+            full,
+            text: full,
+            script: dimension(&preferences.sizes.get(1), Some(full))
+                .unwrap_or_else(|| full * 7.0 / 12.0),
+            script_script: dimension(&preferences.sizes.get(2), Some(full))
+                .unwrap_or_else(|| full * 5.0 / 12.0),
+        },
+        styles: StyleFonts {
+            text: font_of(slot(0), Font::Upright),
+            function: font_of(slot(1), Font::Upright),
+            variable: font_of(slot(2), Font::Italic),
+            greek: font_of(slot(3), Font::Italic),
+            symbol: font_of(slot(5), Font::Upright),
+            vector: font_of(slot(6), Font::Bold),
+            number: font_of(slot(7), Font::Upright),
+        },
+        ..default
+    }
 }
 
 /// A stream style def as (1-based font definition index, character style bits).

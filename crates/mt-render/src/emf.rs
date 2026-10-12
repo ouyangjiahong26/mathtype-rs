@@ -60,11 +60,19 @@ pub(crate) fn render(items: &[Item], bounds: (f64, f64, f64, f64), fg: [u8; 4]) 
                 height,
                 depth,
                 dashed,
-            } => {
-                emit_rule(
-                    &mut out, *x, *y, *rw, *height, *depth, *dashed, origin, clip,
-                );
-            }
+            } => emit_rule(
+                &mut out,
+                Rule {
+                    x: *x,
+                    y: *y,
+                    width: *rw,
+                    height: *height,
+                    depth: *depth,
+                    dashed: *dashed,
+                },
+                origin,
+                clip,
+            ),
         }
     }
     eof(&mut out);
@@ -174,19 +182,26 @@ fn emit_glyph(out: &mut Vec<u8>, path: &Path, origin: (f64, f64), clip: (i32, i3
     bare_record(out, EMR_FILLPATH, intersect(ink, clip));
 }
 
-/// Emit one rule: a filled rectangle, or the dashes of the empty-slot placeholder.
-fn emit_rule(
-    out: &mut Vec<u8>,
+/// One rule to draw: its box in layout point coordinates and whether it is the dashed placeholder.
+struct Rule {
     x: f64,
     y: f64,
     width: f64,
     height: f64,
     depth: f64,
     dashed: bool,
-    origin: (f64, f64),
-    clip: (i32, i32, i32, i32),
-) {
-    let polys = crate::rule_polygons(x, y, width, height, depth, dashed);
+}
+
+/// Emit one rule: a filled rectangle, or the dashes of the empty-slot placeholder.
+fn emit_rule(out: &mut Vec<u8>, rule: Rule, origin: (f64, f64), clip: (i32, i32, i32, i32)) {
+    let polys = crate::rule_polygons(
+        rule.x,
+        rule.y,
+        rule.width,
+        rule.height,
+        rule.depth,
+        rule.dashed,
+    );
     let mut points = Vec::with_capacity(polys.len());
     let mut ink = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
     for poly in &polys {
@@ -293,7 +308,7 @@ fn intersect(bounds: (i32, i32, i32, i32), clip: (i32, i32, i32, i32)) -> (i32, 
 }
 
 /// Fill in `nBytes` and `nRecords` now that the whole file is written.
-fn patch_header(out: &mut Vec<u8>) {
+fn patch_header(out: &mut [u8]) {
     let mut records = 0u32;
     let mut offset = 0usize;
     while offset + 8 <= out.len() {
@@ -353,7 +368,7 @@ impl Rec {
         let pad = (4 - self.buf.len() % 4) % 4;
         let size = (self.buf.len() + pad) as u32;
         self.buf[4..8].copy_from_slice(&size.to_le_bytes());
-        self.buf.extend(std::iter::repeat(0).take(pad));
+        self.buf.extend(std::iter::repeat_n(0, pad));
         out.extend_from_slice(&self.buf);
     }
 }

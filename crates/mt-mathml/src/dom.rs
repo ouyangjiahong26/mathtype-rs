@@ -144,7 +144,7 @@ fn element(start: &BytesStart<'_>) -> Result<Elem, ParseError> {
 }
 
 /// Appends a finished element to its parent, or makes it the root.
-fn attach(open: &mut Vec<Elem>, root: &mut Option<Elem>, element: Elem) -> Result<(), ParseError> {
+fn attach(open: &mut [Elem], root: &mut Option<Elem>, element: Elem) -> Result<(), ParseError> {
     match open.last_mut() {
         Some(parent) => {
             parent.children.push(Xml::Elem(element));

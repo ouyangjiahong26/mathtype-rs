@@ -140,13 +140,11 @@ mod tests {
         let written = types.to_xml();
         assert!(written.contains("Extension=\"bin\""));
         let mut read_back = ContentTypes::parse(written.as_bytes()).unwrap();
-        assert!(
-            read_back.ensure_default(
-                "BIN",
-                "application/vnd.openxmlformats-officedocument.oleObject"
-            ) == false
-        );
-        assert!(read_back.ensure_default("png", "image/png") == false);
+        assert!(!read_back.ensure_default(
+            "BIN",
+            "application/vnd.openxmlformats-officedocument.oleObject"
+        ));
+        assert!(!read_back.ensure_default("png", "image/png"));
         // The override survives the round trip with its entity resolved and re-escaped.
         assert!(written.contains("ContentType=\"a&amp;b\""));
     }

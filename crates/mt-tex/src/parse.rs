@@ -51,11 +51,12 @@ fn strip_wrapper(input: &str) -> (&str, usize) {
     let trail = input.len() - input.trim_end().len();
     let trimmed = &input[lead..input.len() - trail];
     let inner = |skip: usize| (&trimmed[skip..trimmed.len() - skip], lead + skip);
-    if trimmed.len() >= 4 && trimmed.starts_with("$$") && trimmed.ends_with("$$") {
-        inner(2)
-    } else if trimmed.len() >= 2 && trimmed.starts_with("\\[") && trimmed.ends_with("\\]") {
-        inner(2)
-    } else if trimmed.len() >= 2 && trimmed.starts_with("\\(") && trimmed.ends_with("\\)") {
+    let wrapped_in_two =
+        (trimmed.len() >= 4 && trimmed.starts_with("$$") && trimmed.ends_with("$$"))
+            || (trimmed.len() >= 2
+                && (trimmed.starts_with("\\[") && trimmed.ends_with("\\]")
+                    || trimmed.starts_with("\\(") && trimmed.ends_with("\\)")));
+    if wrapped_in_two {
         inner(2)
     } else if trimmed.len() >= 2 && trimmed.starts_with('$') && trimmed.ends_with('$') {
         inner(1)

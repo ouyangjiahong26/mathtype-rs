@@ -272,10 +272,10 @@ pub(crate) fn space_of_width(width: &str) -> Option<Space> {
     // Numeric lengths: `em` is the unit of the model, `mu` is 1/18 em.
     let (number, unit) = match width.trim().strip_suffix("em") {
         Some(number) => (number, 1.0),
-        None => match width.trim().strip_suffix("mu") {
-            Some(number) => (number, 1.0 / 18.0),
-            None => return None,
-        },
+        None => {
+            let number = width.trim().strip_suffix("mu")?;
+            (number, 1.0 / 18.0)
+        }
     };
     let em = number.trim().parse::<f64>().ok()? * unit;
     const GRID: [(f64, Space); 9] = [

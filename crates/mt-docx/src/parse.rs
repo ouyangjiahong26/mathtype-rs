@@ -184,10 +184,7 @@ impl<'a> Scanner<'a> {
     /// Indexes a `w:tr`, returning how many cells it holds.
     fn scan_row(&mut self, depth: usize, blocks: &mut Vec<Block>) -> Result<usize, DocxError> {
         let mut cells = 0usize;
-        loop {
-            let Some((event, range)) = self.next()? else {
-                break;
-            };
+        while let Some((event, range)) = self.next()? {
             match event {
                 Event::Start(start) if start.local_name().as_ref() == "tc" => {
                     cells += 1;
@@ -203,10 +200,7 @@ impl<'a> Scanner<'a> {
 
     /// Indexes the paragraphs and nested tables of a `w:tc`.
     fn scan_cell(&mut self, depth: usize, blocks: &mut Vec<Block>) -> Result<(), DocxError> {
-        loop {
-            let Some((event, range)) = self.next()? else {
-                break;
-            };
+        while let Some((event, range)) = self.next()? {
             match event {
                 Event::Start(start) => match start.local_name().as_ref() {
                     "p" => {
@@ -250,7 +244,8 @@ impl<'a> Scanner<'a> {
         let mut items: Vec<Item> = Vec::new();
         // The start of a stretch of unrecognised content, closed when a recognised item begins.
         let mut pending: Option<usize> = None;
-        let paragraph = loop {
+
+        loop {
             let Some((event, range)) = self.next()? else {
                 return Ok(Paragraph {
                     range: start..self.length,
@@ -325,8 +320,7 @@ impl<'a> Scanner<'a> {
                     pending.get_or_insert(range.start);
                 }
             }
-        };
-        paragraph
+        }
     }
 
     /// Reads `w:pStyle` and the presence of `w:numPr` from a `w:pPr` the scanner just entered.
@@ -335,10 +329,7 @@ impl<'a> Scanner<'a> {
         style: &mut Option<String>,
         numbered: &mut bool,
     ) -> Result<(), DocxError> {
-        loop {
-            let Some((event, _)) = self.next()? else {
-                break;
-            };
+        while let Some((event, _)) = self.next()? {
             match event {
                 Event::Start(element) | Event::Empty(element) => {
                     match element.local_name().as_ref() {
@@ -387,10 +378,7 @@ impl<'a> Scanner<'a> {
 
     /// Reads `w:rPr` into a style summary.
     fn read_run_properties(&mut self, style: &mut RunStyle) -> Result<(), DocxError> {
-        loop {
-            let Some((event, _)) = self.next()? else {
-                break;
-            };
+        while let Some((event, _)) = self.next()? {
             match event {
                 Event::Start(element) | Event::Empty(element) => {
                     match element.local_name().as_ref() {
@@ -403,11 +391,9 @@ impl<'a> Scanner<'a> {
                                 _ => None,
                             }
                         }
-                        "sz" | "szCs" => {
-                            if style.size_half_points.is_none() {
-                                style.size_half_points =
-                                    attribute(&element, "val").and_then(|value| value.parse().ok());
-                            }
+                        "sz" | "szCs" if style.size_half_points.is_none() => {
+                            style.size_half_points =
+                                attribute(&element, "val").and_then(|value| value.parse().ok());
                         }
                         _ => {}
                     }
@@ -422,10 +408,7 @@ impl<'a> Scanner<'a> {
     /// Reads the character data of a `w:t` the scanner just entered.
     fn read_text(&mut self) -> Result<String, DocxError> {
         let mut text = String::new();
-        loop {
-            let Some((event, _)) = self.next()? else {
-                break;
-            };
+        while let Some((event, _)) = self.next()? {
             match event {
                 Event::Text(raw) => text.push_str(&decoded(&raw)?),
                 Event::GeneralRef(raw) => text.push_str(&reference(&raw)?),
