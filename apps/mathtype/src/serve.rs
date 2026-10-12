@@ -573,6 +573,16 @@ fn activate(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
             crate::write_math_with_style(&math, crate::Format::Png, &style, 3.0).unwrap_or_default()
         };
         if !picture.is_empty() {
+            if let Some((pixel_width, pixel_height)) = png_size(&picture) {
+                // The regenerated preview shows at its natural size: the shape the old
+                // picture was drawn for would stretch the new one out of proportion.
+                let _ = document.resize_object_preview(
+                    target.block,
+                    target.item,
+                    pixel_width as f64 / 3.0,
+                    pixel_height as f64 / 3.0,
+                );
+            }
             document.set_part(&preview, picture);
         }
     }

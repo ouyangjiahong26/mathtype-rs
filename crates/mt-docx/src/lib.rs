@@ -230,6 +230,43 @@ impl Document {
         self.package.set_part(name, data);
     }
 
+    /// Resizes an object's preview shape to `width_pt` × `height_pt`, so a regenerated preview
+    /// picture is shown at its natural size instead of being stretched into the shape the old
+    /// picture was drawn for. The `v:shape` style and the enclosing `w:object`'s
+    /// `dxaOrig`/`dyaOrig` (twips, 20 per point) are both rewritten.
+    pub fn resize_object_preview(
+        &mut self,
+        block: usize,
+        item: usize,
+        width_pt: f64,
+        height_pt: f64,
+    ) -> Result<(), DocxError> {
+        let (_, object_range) = {
+            let paragraph = self.paragraph_at(block, item)?;
+            match &paragraph.items[item] {
+                Item::Object { range, preview_range: Some(preview), .. } => {
+                    (preview.clone(), range.clone())
+                }
+                _ => return Err(DocxError::Xml("the item has no preview shape to resize".to_owned())),
+            }
+        };
+        let object = self.xml[object_range.clone()].to_owned();
+        let resized_object = rewrite_object_extent(&object, width_pt, height_pt);
+        // Each splice rescans the index, so the shape is re-located after the object edit.
+        self.splice(object_range, &resized_object)?;
+        let shape_range = {
+            let paragraph = self.paragraph_at(block, item)?;
+            match &paragraph.items[item] {
+                Item::Object { preview_range: Some(preview), .. } => preview.clone(),
+                _ => return Err(DocxError::Xml("the preview shape vanished".to_owned())),
+            }
+        };
+        let shape = self.xml[shape_range.clone()].to_owned();
+        let resized = rewrite_shape_extent(&shape, width_pt, height_pt)?;
+        self.splice(shape_range, &resized)?;
+        Ok(())
+    }
+
     /// Every formula in the document, in document order, with its tree when the carrier's bytes
     /// could be read into one.
     pub fn equations(&self) -> Vec<Equation> {
@@ -579,4 +616,49 @@ struct ObjectTarget {
     rel_id: Option<String>,
     prog_id: Option<String>,
     preview_range: Option<Range<usize>>,
+}
+
+
+/// Rewrites a `v:shape`'s `style` width/height (points) to the given natural size.
+fn rewrite_shape_extent(shape: &str, width_pt: f64, height_pt: f64) -> Result<String, DocxError> {
+    let replacement = format!("width:{width_pt:.1}pt;height:{height_pt:.1}pt");
+    let mut out = String::with_capacity(shape.len());
+    let mut rest = shape;
+    let mut replaced = false;
+    while let Some(at) = rest.find("width:") {
+        let after = &rest[at..];
+        let end = after.find(';').map_or(after.len(), |i| i);
+        out.push_str(&rest[..at]);
+        out.push_str(&replacement);
+        rest = &after[end..];
+        replaced = true;
+    }
+    if !replaced {
+        return Err(DocxError::Xml("the preview shape has no size style to rewrite".to_owned()));
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+/// Rewrites a `w:object`'s `dxaOrig`/`dyaOrig` (twips) to the given natural size.
+fn rewrite_object_extent(object: &str, width_pt: f64, height_pt: f64) -> String {
+    let dxa = (width_pt * 20.0).round() as u32;
+    let dya = (height_pt * 20.0).round() as u32;
+    let object = replace_attribute_number(object, "dxaOrig", &dxa.to_string());
+    replace_attribute_number(&object, "dyaOrig", &dya.to_string())
+}
+
+/// Replaces the number inside `name="<digits>"` (first occurrence) with `value`.
+fn replace_attribute_number(text: &str, name: &str, value: &str) -> String {
+    let opener = format!("{name}=\"");
+    let Some(at) = text.find(&opener) else { return text.to_owned() };
+    let digits_start = at + opener.len();
+    let digits_end = text[digits_start..]
+        .find('"')
+        .map_or(text.len(), |i| digits_start + i);
+    let mut out = String::with_capacity(text.len() + value.len());
+    out.push_str(&text[..digits_start]);
+    out.push_str(value);
+    out.push_str(&text[digits_end..]);
+    out
 }

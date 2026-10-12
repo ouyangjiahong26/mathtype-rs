@@ -371,3 +371,18 @@ fn a_whole_document_of_formulas_is_rewritten_in_turn() {
         .filter(|equation| matches!(equation.kind, EquationKind::Omath { .. }))
         .all(|equation| to_latex(equation.math.as_ref().unwrap()).contains("^2")));
 }
+
+
+#[test]
+fn resizing_an_object_preview_rewrites_shape_and_extent() {
+    let mut document = open(&realistic_docx());
+    let equations = document.equations();
+    let equation = &equations[3]; // the first of the two OLE formulas, whose shape has a preview
+    document
+        .resize_object_preview(equation.block, equation.item, 90.0, 40.0)
+        .expect("the shape resizes");
+    let xml = document.document_xml();
+    assert!(xml.contains("width:90.0pt;height:40.0pt"), "the shape style carries the natural size");
+    assert!(xml.contains("dxaOrig=\"1800\""), "dxaOrig is 20 twips per point");
+    assert!(xml.contains("dyaOrig=\"800\""), "dyaOrig is 20 twips per point");
+}
