@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320" role="img" aria-label="mathtype-rs：用 Rust 重建的公式编辑与互通能力">
+  <title>mathtype-rs</title>
+
+  <g font-family="Inter, -apple-system, Segoe UI, Noto Sans SC, Source Han Sans SC, Microsoft YaHei, sans-serif">
+    <text x="64" y="150" font-size="66" font-weight="700" fill="#7c3aed" letter-spacing="-1">mathtype-rs</text>
+    <rect x="64" y="172" width="96" height="6" rx="3" fill="#a78bfa"/>
+    <text x="64" y="222" font-size="23" fill="#6b7280">用 Rust 重建的公式编辑与互通能力</text>
+    <text x="64" y="258" font-size="18" fill="#9ca3af">LaTeX、MathML、OMML、MTEF 双向互通，Word 与 WPS 加载项</text>
+  </g>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 850 170 L 878 232 L 914 120 L 1072 120" stroke="#7c3aed" stroke-width="6"/>
+    <path d="M 906 262 H 1046" stroke="#9ca3af" stroke-width="4"/>
+    <rect x="930" y="228" width="92" height="16" rx="8" fill="#c4b5fd" stroke="none"/>
+    <rect x="930" y="280" width="92" height="16" rx="8" fill="#c4b5fd" stroke="none"/>
+  </g>
+</svg>
