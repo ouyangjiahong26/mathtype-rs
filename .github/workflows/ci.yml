@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支的新提交无需等待旧提交完成。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # mt-docx 与 mt-html 的交叉验证测试、mt-render 的 EMF 测试都调用 soffice（LibreOffice）。
+      # 运行器镜像没有预装，缺了会让这些测试直接失败。libreoffice-math 是公式模块，缺了
+      # Writer 读 OMML 时会把公式降级成纯文本。
+      - name: Install LibreOffice
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-draw libreoffice-math
+
+      - name: Run tests
+        run: cargo test --workspace --no-fail-fast
+
+  # 两个 Windows app 只在 Windows 上编译，Linux 工作区构建把它们当作空 crate。
+  check-windows:
+    name: check-windows
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # COM 服务器的测试需要宿主环境，这里只验证编译。
+      - name: Check Windows apps
+        run: cargo check -p mathtype-word-addin -p mathtype-ole-server

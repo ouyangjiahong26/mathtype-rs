@@ -21,6 +21,8 @@ mt-numbering.workspace = true
 mt-render.workspace = true
 mt-tex.workspace = true
 ttf-parser = "0.25"
+
+[target.'cfg(windows)'.dependencies]
 windows-core = "0.62"
 windows = { version = "0.62", features = [
     "Win32_Foundation",

@@ -7,6 +7,8 @@
 //! `install.ps1` registers the class under `HKCU`; [`CLSID_ADDIN`] must match the class id it
 //! writes.
 
+#![cfg(windows)]
+
 // The members of the interfaces below keep the spelling the host looks them up by, which is the
 // spelling of the Office object model rather than Rust's.
 #![allow(non_snake_case)]
