@@ -30,4 +30,4 @@ ttf-parser = "0.25"
 ctrlc = "3"
 
 [dev-dependencies]
-zip = { version = "2.4", default-features = false, features = ["deflate"] }
+zip = { version = "9.0", default-features = false, features = ["deflate"] }

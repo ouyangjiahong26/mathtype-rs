@@ -17,4 +17,4 @@ mt-render.workspace = true
 mt-tex.workspace = true
 
 [dev-dependencies]
-zip = { version = "2.4", default-features = false, features = ["deflate"] }
+zip = { version = "9.0", default-features = false, features = ["deflate"] }

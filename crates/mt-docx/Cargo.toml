@@ -11,7 +11,7 @@ repository.workspace = true
 mt-core.workspace = true
 mt-omml.workspace = true
 mt-mtef.workspace = true
-zip = { version = "2.4", default-features = false, features = ["deflate"] }
+zip = { version = "9.0", default-features = false, features = ["deflate"] }
 quick-xml = "0.42"
 
 [dev-dependencies]
