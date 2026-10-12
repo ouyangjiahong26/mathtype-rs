@@ -16,21 +16,39 @@
 //! mathtype-ole-server.exe --log                          the tail of this server's log
 //! ```
 
-#![cfg(windows)]
+// The server is a Windows component: COM, OLE storage and the class factory all come from Win32.
+// A workspace-wide build still has to cover this package on other hosts, so every Windows-only
+// item below is gated and the entry point there says what the program is.
+#[cfg(not(windows))]
+fn main() -> ExitCode {
+    eprintln!("mathtype-ole-server 只在 Windows 上运行，用于在文档中托管公式对象。");
+    ExitCode::FAILURE
+}
 
+#[cfg(windows)]
 mod clsid;
+#[cfg(windows)]
 mod factory;
+#[cfg(windows)]
 mod formats;
+#[cfg(windows)]
 mod handoff;
+#[cfg(windows)]
 mod object;
+#[cfg(windows)]
 mod picture;
+#[cfg(windows)]
 mod server;
+#[cfg(windows)]
 mod storage;
+#[cfg(windows)]
 mod trace;
+#[cfg(windows)]
 mod variant;
 
 use std::process::ExitCode;
 
+#[cfg(windows)]
 const USAGE: &str = "\
 mathtype-ole-server: an equation embedded in a document, as an out-of-process OLE server
 
@@ -46,6 +64,7 @@ The editor the object opens is mathtype.exe next to this executable, or the file
 environment variable MATHTYPE_RS_EDITOR.
 ";
 
+#[cfg(windows)]
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     if arguments.iter().any(|argument| is_embedding_switch(argument)) {
@@ -86,6 +105,7 @@ fn main() -> ExitCode {
 ///
 /// COM appends `-Embedding`; some hosts name the same thing `-Automation`, and either spelling may
 /// arrive with a slash instead of a dash.
+#[cfg(windows)]
 fn is_embedding_switch(argument: &str) -> bool {
     let Some(name) = argument.strip_prefix(['-', '/']) else {
         return false;
@@ -93,6 +113,7 @@ fn is_embedding_switch(argument: &str) -> bool {
     name.eq_ignore_ascii_case("embedding") || name.eq_ignore_ascii_case("automation")
 }
 
+#[cfg(windows)]
 fn report(result: Result<String, String>) -> ExitCode {
     match result {
         Ok(text) => {
@@ -110,6 +131,7 @@ fn report(result: Result<String, String>) -> ExitCode {
 }
 
 /// Open the compound file a document embeds, with COM ready to read it.
+#[cfg(windows)]
 fn with_storage<T>(file: &str, read: impl FnOnce(&windows::Win32::System::Com::StructuredStorage::IStorage) -> Result<T, String>) -> Result<T, String> {
     let path = std::path::Path::new(file);
     if !path.is_file() {
@@ -122,6 +144,7 @@ fn with_storage<T>(file: &str, read: impl FnOnce(&windows::Win32::System::Com::S
     result
 }
 
+#[cfg(windows)]
 fn list_streams(file: &str) -> Result<String, String> {
     with_storage(file, |storage| {
         let mut out = String::new();
@@ -132,6 +155,7 @@ fn list_streams(file: &str) -> Result<String, String> {
     })
 }
 
+#[cfg(windows)]
 fn read_stream(file: &str, name: &str) -> Result<String, String> {
     with_storage(file, |storage| match storage::read_stream(storage, name)? {
         Some(bytes) => Ok(storage::text_of(&bytes)),
@@ -139,6 +163,7 @@ fn read_stream(file: &str, name: &str) -> Result<String, String> {
     })
 }
 
+#[cfg(windows)]
 fn read_native(file: &str) -> Result<String, String> {
     with_storage(file, |storage| {
         let bytes = storage::read_stream(storage, clsid::STREAM_NATIVE)?
@@ -148,7 +173,7 @@ fn read_native(file: &str) -> Result<String, String> {
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod tests {
     use super::is_embedding_switch;
 
