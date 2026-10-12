@@ -54,6 +54,6 @@ Word/WPS 的加载项和多种外部格式的互通。这些能力差异很大�
 | `eframe` + `egui` | `apps/mathtype` | 窗口与即时模式界面。自建平台层会让编辑器与核心的边界复杂化，而界面不是本项目的技术风险所在。 |
 | `windows` / `windows-core` | `apps/ole-server`、`apps/word-addin` | COM/OLE 互操作（接口定义、注册、剪贴板、存储）。手写 vtable 与 GUID 不可维护。 |
 
-字体资源：`assets/fonts/latinmodern-math.otf` 为 Latin Modern Math，采用 GUST Font License +
-LPPL 1.3c 许可（`assets/fonts/LM-MATH-LICENSE.txt` 随字体一同入库），作为排版
+字体资源：`crates/mt-render/assets/fonts/latinmodern-math.otf` 为 Latin Modern Math，采用 GUST Font License +
+LPPL 1.3c 许可（`crates/mt-render/assets/fonts/LM-MATH-LICENSE.txt` 随字体一同入库），作为排版
 与渲染的默认字形；其它字体一律运行时从本机读取，不入库。

@@ -9,7 +9,7 @@ use mt_layout::FontMetrics;
 use ttf_parser::Face;
 
 /// Bundled open-licensed math font, the same face the editor draws with.
-pub const MATH_FONT: &[u8] = include_bytes!("../../../assets/fonts/latinmodern-math.otf");
+pub const MATH_FONT: &[u8] = include_bytes!("../assets/fonts/latinmodern-math.otf");
 
 /// Metrics read from a single face.
 pub struct FaceMetrics {
