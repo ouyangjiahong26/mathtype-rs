@@ -62,9 +62,9 @@ fn a_caret_inside_a_fraction_numerator_uses_the_numerator_origin() {
     let denominator = anchor(&anchors, &Path::root().child(1));
     close(numerator.origin.0, 0.0);
     close(numerator.origin.1, -2.5 - 0.2 - c::FRAC_RULE_GAP * 10.0);
-    assert_eq!(numerator.offsets, vec![0.0, 3.5], "the cell is set at script size");
-    close(denominator.origin.1, -2.5 + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 7.0);
-    assert_eq!(denominator.offsets, vec![0.0, 3.5]);
+    assert_eq!(numerator.offsets, vec![0.0, 5.0], "the cell keeps the surrounding size");
+    close(denominator.origin.1, -2.5 + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 10.0);
+    assert_eq!(denominator.offsets, vec![0.0, 5.0]);
 }
 
 #[test]

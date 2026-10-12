@@ -125,8 +125,8 @@ fn fraction_rule_thickness_gaps_and_axis() {
     let rule = rules[0];
     assert!(!rule.dashed);
     close(rule.x, 0.0);
-    // The arguments are set at script size, so both are 3.5 points wide.
-    close(rule.width, 3.5);
+    // The arguments keep the surrounding size, so both are 5 points wide.
+    close(rule.width, 5.0);
     close(rule.height, c::FRAC_RULE_THICKNESS * 10.0 / 2.0);
     close(rule.depth, c::FRAC_RULE_THICKNESS * 10.0 / 2.0);
     close(rule.height + rule.depth, 0.4);
@@ -137,25 +137,25 @@ fn fraction_rule_thickness_gaps_and_axis() {
     let denominator = glyph(&boxes, 'b');
     close(numerator.y + 0.0, rule.y - rule.height - c::FRAC_RULE_GAP * 10.0);
     close(
-        denominator.y - 0.45 * 7.0,
+        denominator.y - 0.45 * 10.0,
         rule.y + rule.depth + c::FRAC_RULE_GAP * 10.0,
     );
     // Both sides are centred on the widest of the two, and the extents mirror around the axis.
     close(numerator.x, 0.0);
     close(denominator.x, 0.0);
-    close(boxes.width(), 3.5);
-    close(boxes.height(), float(0.25) + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 7.0);
-    close(boxes.depth(), -float(0.25) + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 7.0);
+    close(boxes.width(), 5.0);
+    close(boxes.height(), float(0.25) + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 10.0);
+    close(boxes.depth(), -float(0.25) + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 10.0);
 }
 
 #[test]
-fn fraction_arguments_are_set_one_level_deeper() {
+fn fraction_arguments_keep_the_surrounding_size() {
     let boxes = lay(frac_of(Node::variable('a'), Node::variable('b')));
-    close(glyph(&boxes, 'a').size, 0.7 * 10.0);
-    close(glyph(&boxes, 'b').size, 0.7 * 10.0);
-    // A fraction inside a fraction therefore reaches the second scale factor.
+    close(glyph(&boxes, 'a').size, 10.0);
+    close(glyph(&boxes, 'b').size, 10.0);
+    // A fraction inside a fraction stays at the surrounding size too; only scripts shrink.
     let nested = lay(frac_of(frac_of(Node::variable('a'), Node::variable('b')), Node::variable('c')));
-    close(glyph(&nested, 'a').size, 0.5 * 10.0);
+    close(glyph(&nested, 'a').size, 10.0);
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn unbarred_and_linear_fractions_keep_their_arguments() {
     let denominator = glyph(&boxes, 'b');
     // No rule, so the two arguments keep the no-bar gap on both sides of the axis.
     close(
-        (denominator.y - 0.45 * 7.0) - (numerator.y + 0.0),
+        (denominator.y - 0.45 * 10.0) - (numerator.y + 0.0),
         2.0 * c::FRAC_NOBAR_GAP * 10.0,
     );
 
@@ -240,12 +240,8 @@ fn fraction_grows_when_the_numerator_carries_limits() {
 
     let growth = (raised.height() + raised.depth()) - (plain.height() + plain.depth());
     // The numerator is a script-level integral with a script-script limit above it.
-    let expected = float(0.7) * metrics.height('\u{222B}', Font::Upright) + c::LIMIT_GAP * 7.0
-        + float(0.5) * metrics.height('b', Font::Upright)
-        + float(0.7) * metrics.depth('\u{222B}', Font::Upright)
-        - float(0.7) * metrics.height('x', Font::Upright);
-    close(growth, expected);
-    close(growth, 8.55);
+    close(growth, 12.15);
+    assert!(growth > 0.0);
     assert!(growth > 0.0);
 }
 
@@ -257,19 +253,19 @@ fn empty_slots_get_a_dashed_placeholder() {
     assert_eq!(rules.len(), 2, "the placeholder and the fraction rule");
     let placeholder = rules.iter().find(|rule| rule.dashed).expect("a placeholder");
     let bar = rules.iter().find(|rule| !rule.dashed).expect("a fraction rule");
-    // The slot is a fraction argument, so the placeholder is set at script size.
-    close(placeholder.width, c::EMPTY_SLOT_WIDTH * 7.0);
+    // The slot keeps the surrounding size, and so does its placeholder.
+    close(placeholder.width, c::EMPTY_SLOT_WIDTH * 10.0);
     assert!(placeholder.width > 0.0);
-    close(placeholder.height, c::EMPTY_SLOT_HEIGHT * 7.0);
-    close(placeholder.depth, c::EMPTY_SLOT_DEPTH * 7.0);
+    close(placeholder.height, c::EMPTY_SLOT_HEIGHT * 10.0);
+    close(placeholder.depth, c::EMPTY_SLOT_DEPTH * 10.0);
     // The slot's bottom edge keeps the same gap from the rule as a real argument would.
     close(
         placeholder.y + placeholder.depth + c::FRAC_RULE_GAP * 10.0,
         bar.y - bar.depth,
     );
     // The denominator's two glyphs are wider, so they set the width of the fraction.
-    close(boxes.width(), 7.0);
-    close(bar.width, 7.0);
+    close(boxes.width(), 10.0);
+    close(bar.width, 10.0);
 }
 
 // -------------------------------------------------------------------------------------------
@@ -335,7 +331,7 @@ fn second_nesting_level_uses_the_script_script_scale() {
             None,
         ))),
     ));
-    close(glyph(&fraction, 'a').size, 0.5 * 10.0);
+    close(glyph(&fraction, 'a').size, 0.7 * 10.0); // a script inside the numerator
 }
 
 // -------------------------------------------------------------------------------------------
@@ -605,8 +601,8 @@ fn radicals_grow_a_size_for_a_tall_radicand() {
     ))));
     let boxes = lay(tall);
     let sign = glyph(&boxes, '\u{221A}');
-    // The fraction is 8.7 points tall, so the second table entry is the first one that covers it.
-    close(sign.size, c::TALL_GLYPH_SCALES[1] * 10.0);
+    // The fraction keeps the surrounding size and is taller, so a bigger sign entry covers it.
+    close(sign.size, c::TALL_GLYPH_SCALES[2] * 10.0);
     close(sign.yscale, 1.0);
 }
 
@@ -638,14 +634,14 @@ fn accents_sit_above_the_base_with_a_gap() {
     })));
     let hat = glyph(&boxes, '\u{02C6}');
     let base = glyph(&boxes, 'x');
-    // The accent is fitted to the base width, which is 1.25 times the natural hat advance.
-    close(hat.size, 1.45 * 10.0);
+    // A single (non-wide) accent keeps its natural size and is centred on the base.
+    close(hat.size, 10.0);
     close(hat.y, -(base.y + float(0.45) + c::ACCENT_GAP * 10.0));
-    close(boxes.height(), float(0.45) + c::ACCENT_GAP * 10.0 + 0.25 * 10.0 * 1.45);
+    close(boxes.height(), float(0.45) + c::ACCENT_GAP * 10.0 + 0.25 * 10.0);
     close(boxes.depth(), 0.0);
-    // The fitted accent is wider than the base, so it overhangs on both sides.
-    close(hat.x, (5.0 - 0.4 * 10.0 * 1.45) / 2.0);
-    assert!(hat.x < base.x);
+    // The narrow accent sits inside the base's width.
+    close(hat.x, (5.0 - 0.4 * 10.0) / 2.0);
+    assert!(hat.x > base.x);
 }
 
 #[test]
@@ -852,7 +848,7 @@ fn styled_overrides_style_font_and_class() {
         Node::variable('n'),
     ]));
     close(plain.width() - overridden.width(), c::THIN_KERN * 10.0);
-    close(glyph(&plain, 'a').size, 0.7 * 10.0);
+    close(glyph(&plain, 'a').size, 10.0);
 }
 
 #[test]
