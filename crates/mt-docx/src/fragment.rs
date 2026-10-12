@@ -15,6 +15,8 @@ pub(crate) const R: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 /// The Microsoft Office namespace `o:OLEObject` lives in.
 pub(crate) const O: &str = "urn:schemas-microsoft-com:office:office";
+/// The VML namespace the cached view of an embedded object lives in.
+pub(crate) const V: &str = "urn:schemas-microsoft-com:vml";
 /// The WordprocessingML drawing placement namespace.
 pub(crate) const WP: &str =
     "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
@@ -135,6 +137,28 @@ pub(crate) fn image_run(
     out.push_str(&cy.to_string());
     out.push_str("\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>");
     out.push_str("</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>");
+    out
+}
+
+/// The cached view of an embedded object: a VML shape around the preview picture, the shape
+/// Word writes for `w:object` previews.
+pub(crate) fn object_preview(rel_id: &str, extent_emu: (u32, u32), shape_id: u32) -> String {
+    // The size in points, as VML style wants it (914400 EMU per inch, 72 points per inch).
+    let width_pt = extent_emu.0 as f64 / 12700.0;
+    let height_pt = extent_emu.1 as f64 / 12700.0;
+    let mut out = String::from("<v:shape xmlns:v=\"");
+    out.push_str(V);
+    out.push_str("\" xmlns:o=\"");
+    out.push_str(O);
+    out.push_str("\" xmlns:r=\"");
+    out.push_str(R);
+    out.push_str("\" id=\"_mt_shape_");
+    out.push_str(&shape_id.to_string());
+    out.push_str("\" type=\"#_x0000_t75\" style=\"width:");
+    out.push_str(&format!("{width_pt:.1}pt;height:{height_pt:.1}pt"));
+    out.push_str("\"><v:imagedata r:id=\"");
+    escape_into(&mut out, rel_id);
+    out.push_str("\" o:title=\"\"/></v:shape>");
     out
 }
 
