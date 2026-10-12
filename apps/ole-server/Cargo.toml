@@ -20,7 +20,7 @@ mt-tex.workspace = true
 [target.'cfg(windows)'.dependencies]
 # `#[implement]` expands to paths into `windows_core`, so the runtime of the `windows` crate has to
 # be a dependency of its own, exactly as the crate's own macros expect.
-windows-core = "0.62"
+windows-core = "0.100"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

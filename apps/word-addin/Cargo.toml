@@ -23,7 +23,7 @@ mt-tex.workspace = true
 ttf-parser = "0.25"
 
 [target.'cfg(windows)'.dependencies]
-windows-core = "0.62"
+windows-core = "0.100"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Globalization",
