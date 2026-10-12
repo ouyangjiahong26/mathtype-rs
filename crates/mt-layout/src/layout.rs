@@ -584,9 +584,11 @@ fn layout_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
 /// rule is put on the math axis and the whole stack is shifted with it, so the fraction's centre
 /// ends up near the axis.
 fn layout_stacked_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
-    let level = ctx.level + 1;
-    let numerator_ctx = ctx.slot(0).at_level(level);
-    let denominator_ctx = ctx.slot(1).at_level(level).cramped();
+    // The numerator and denominator keep the surrounding size, the convention MathType's
+    // fractions and TeX's display style share; shrinking them a level made every fraction
+    // look undersized next to the text around it.
+    let numerator_ctx = ctx.slot(0);
+    let denominator_ctx = ctx.slot(1).cramped();
     let numerator = layout_node(&frac.num, &numerator_ctx, 0.0, 0.0);
     let denominator = layout_node(&frac.den, &denominator_ctx, 0.0, 0.0);
 
@@ -1170,7 +1172,14 @@ fn layout_accent(accent: &Accent, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     } else {
         let ch = accent_glyph(accent.kind).unwrap_or('~');
         let natural = ctx.metrics.advance(ch, font) * size;
-        let scale = fit_scale(&ACCENT_SCALES, natural, base.w);
+        // Only the accents that legitimately span their base stretch to cover it; a dot or a
+        // breve keeps its natural size, centred — stretched to a wide base it would balloon
+        // and drift far above the glyph it belongs to.
+        let stretches = matches!(
+            accent.kind,
+            AccentKind::WideHat | AccentKind::WideTilde | AccentKind::Vector | AccentKind::ArrowRight | AccentKind::ArrowLeft
+        );
+        let scale = if stretches { fit_scale(&ACCENT_SCALES, natural, base.w) } else { 1.0 };
         let w = natural * scale;
         let h = ctx.metrics.height(ch, font) * size * scale;
         let d = ctx.metrics.depth(ch, font) * size * scale;

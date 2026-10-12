@@ -117,10 +117,10 @@ fn rules_are_drawn_as_rectangles_at_their_rule_position() {
     let boxes = layout(&math, &ApproxMetrics, &style());
     let svg = to_svg(&boxes, &style());
     // The fraction rule is 0.4 points thick and centred on the axis, 2.5 points up; its two
-    // script-size arguments are 3.5 points wide.
+    // full-size arguments are 5 points wide.
     assert!(svg.contains("y=\"-2.7\""), "the rule's top edge: {svg}");
     assert!(svg.contains("height=\"0.4\""));
-    assert!(svg.contains("width=\"3.5\""));
+    assert!(svg.contains("width=\"5\""));
 }
 
 #[test]
