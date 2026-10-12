@@ -71,6 +71,7 @@ fn main() -> ExitCode {
         .iter()
         .any(|argument| is_embedding_switch(argument))
     {
+        trace::log(&format!("started with arguments {arguments:?}"));
         return match server::run() {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {

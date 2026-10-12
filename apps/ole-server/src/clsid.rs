@@ -25,8 +25,7 @@ pub const STREAM_NATIVE: &str = "Equation Native";
 pub const STREAM_LATEX: &str = "MathTypeRs Equation";
 
 /// `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`, the spelling the registry uses.
-pub fn clsid_string() -> String {
-    let id = CLSID_EQUATION;
+pub fn id_string(id: &GUID) -> String {
     format!(
         "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
         id.data1,
@@ -41,6 +40,11 @@ pub fn clsid_string() -> String {
         id.data4[6],
         id.data4[7],
     )
+}
+
+/// [`id_string`] for the equation class.
+pub fn clsid_string() -> String {
+    id_string(&CLSID_EQUATION)
 }
 
 /// What this server is registered as, one fact per line.
