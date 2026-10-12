@@ -13,15 +13,27 @@
       HKLM\Software\Classes\CLSID\{clsid}
           (default)                 "MathType Rs equation"
           ProgID                    MathTypeRs.Equation.1
-          LocalServer32             "<server.exe>" -Embedding
-          DefaultIcon               "<server.exe>",0
-          MiscStatus                0     (the value working equation objects use)
+          LocalServer32\            (default) "<server.exe>" -Embedding
+          DefaultIcon\              (default) "<server.exe>",0
+          InProcHandler32\          (default) "ole32.dll", the handler a host loads for a local server
+          InProcHandler\            (default) "ole2.dll", the same declaration for an OLE 1 host
+          MiscStatus\              (default) 0
+          MiscStatus\16\            (default) 1
           Insertable                (empty: the class appears in the hosts' insert-object dialogs)
+          Programmable              (empty: the automation surface is reachable late-bound)
           AuxUserType\2 / \3        short name and application name
-          Verb\0                    the primary verb, "Edit"
+          Verb\0                    "&Open,0,2", the verb a double-click picks
+          Verb\1                    "&Edit,0,2"
       HKLM\Software\Classes\MathTypeRs.Equation.1\CLSID     the class id
       HKLM\Software\Classes\MathTypeRs.Equation\CLSID       the class id, for the unversioned name
       HKLM\Software\Classes\MathTypeRs.Equation\CurVer      MathTypeRs.Equation.1
+
+    The class key mirrors the one MathType 7.0 Equation registers under
+    {0002CE03-0000-0000-C000-000000000046}, which is the control for what Word expects when it
+    embeds an equation object. Three parts of that control are deliberately not written:
+    `Conversion` and `LocalServer` name a converter component and a 16-bit host this server does
+    not have, and the extra `DataFormats\GetSet` entries advertise MathML and TeX, which the object
+    does not serve through `EnumFormatEtc` (see src/formats.rs).
 
     Under -Scope User every HKLM above is HKCU instead. The keys are otherwise identical, so
     uninstall.ps1 takes the same -Scope and removes exactly what was written.
@@ -53,7 +65,7 @@ $ErrorActionPreference = 'Stop'
 $progId              = 'MathTypeRs.Equation.1'
 $unversioned         = 'MathTypeRs.Equation'
 $classId             = '{7C3E9A54-1B62-4E7D-9F03-5A8C2D6E1B47}'
-$miscStatus          = 0      # the value working equation objects use; 0x10 (16) below is for the 16-bit context
+$miscStatus          = 0      # the value the control registers for the default aspect
 $root                = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $server              = Join-Path $root "target\$Configuration\mathtype-ole-server.exe"
 $editor              = Join-Path $root "target\$Configuration\mathtype.exe"
@@ -79,6 +91,13 @@ $classKey = Join-Path $classes "CLSID\$classId"
 New-Item -Path $classKey -Force | Out-Null
 Set-ItemProperty -Path $classKey -Name '(default)' -Value 'MathType Rs equation'
 
+# Registrations written before this change carried the handler and the status flags as values of
+# the class key. Nothing reads them there, so they go, including on a machine that was registered
+# with an earlier version of this script.
+foreach ($stale in @('InProcHandler32', 'InProcHandler', 'MiscStatus')) {
+    Remove-ItemProperty -Path $classKey -Name $stale -ErrorAction SilentlyContinue
+}
+
 New-Item -Path "$classKey\LocalServer32" -Force | Out-Null
 Set-ItemProperty -Path "$classKey\LocalServer32" -Name '(default)' -Value "`"$server`" -Embedding"
 
@@ -88,14 +107,23 @@ Set-ItemProperty -Path "$classKey\DefaultIcon" -Name '(default)' -Value "`"$serv
 # An empty `Insertable` key is what puts the class in the host's own "insert object" list.
 New-Item -Path "$classKey\Insertable" -Force | Out-Null
 
-# Clients load a handler into their own process and forward to us through it. Without this the
-# host can end up waiting for an object that never answers (Word reports "not responding").
-Set-ItemProperty -Path $classKey -Name 'InProcHandler32' -Value 'ole32.dll'
-Set-ItemProperty -Path $classKey -Name 'InProcHandler' -Value 'ole2.dll'
+# The stock OLE handler is what a host loads into its own process for a local server and forwards
+# to us through; without it the host can end up waiting for an object that never answers (Word
+# reports "not responding"). Both are subkeys whose default value names the handler DLL, which is
+# the shape MathType's own equation class uses. The same names as values on the class key are inert.
+New-Item -Path "$classKey\InProcHandler32" -Force | Out-Null
+Set-ItemProperty -Path "$classKey\InProcHandler32" -Name '(default)' -Value 'ole32.dll'
+New-Item -Path "$classKey\InProcHandler" -Force | Out-Null
+Set-ItemProperty -Path "$classKey\InProcHandler" -Name '(default)' -Value 'ole2.dll'
 
 Set-ItemProperty -Path $classKey -Name 'ProgID' -Value $progId
 Set-ItemProperty -Path $classKey -Name 'VersionIndependentProgID' -Value $unversioned
-Set-ItemProperty -Path $classKey -Name 'MiscStatus' -Value "$miscStatus"
+# The flags for the default aspect go in the default value of the `MiscStatus` subkey. All 164
+# classes under HKLM\Software\Classes\CLSID that carry a `MiscStatus` use the subkey this way.
+New-Item -Path "$classKey\MiscStatus" -Force | Out-Null
+Set-ItemProperty -Path "$classKey\MiscStatus" -Name '(default)' -Value "$miscStatus"
+# The control carries this subkey with the same value, so it stays. 16 is not a documented
+# DVASPECT, but nothing in the comparison says removing it helps.
 New-Item -Path "$classKey\MiscStatus\16" -Force | Out-Null
 Set-ItemProperty -Path "$classKey\MiscStatus\16" -Name '(default)' -Value '1'
 
