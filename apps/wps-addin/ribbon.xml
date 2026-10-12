@@ -15,6 +15,7 @@
         </group>
         <group id="MathTypeRsEditGroup" label="编辑与转换">
           <button id="btnEditEquation" label="编辑公式" onAction="OnEditEquation" size="large"/>
+          <button id="btnCopyEquation" label="复制公式" onAction="OnCopyEquation" size="large"/>
           <button id="btnEquationToLatex" label="转为 LaTeX" onAction="OnEquationToLatex" size="large"/>
           <button id="btnExportPng" label="导出 PNG" onAction="OnExportPng" size="large"/>
         </group>
