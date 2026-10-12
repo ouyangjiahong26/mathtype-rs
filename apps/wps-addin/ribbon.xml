@@ -4,7 +4,7 @@
 <customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" onLoad="OnAddinLoad">
   <ribbon startFromScratch="false">
     <tabs>
-      <tab id="MathTypeRsTab" label="公式">
+      <tab id="MathTypeRsTab" label="MathType-rs">
         <group id="MathTypeRsGroup" label="公式">
           <button id="btnInsertEquation" label="插入公式" onAction="OnInsertEquation" size="large"/>
           <button id="btnEquationToLatex" label="转为 LaTeX" onAction="OnEquationToLatex" size="large"/>
