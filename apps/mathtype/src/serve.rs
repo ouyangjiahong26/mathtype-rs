@@ -11,6 +11,8 @@
 //! POST /batch?to=&mode=&dpi= body=.docx -> JSON report (+ base64 docx in replace mode)
 //! POST /number?style=&side=&at= body=.docx -> JSON {"docx": base64, "count": n}
 //! POST /crossref?to=N|latest body=.docx -> JSON {"docx": base64, "bookmark": name}
+//! POST /clipboard/write (body=LaTeX, or ?path=&index= for a document's object) -> the
+//!     equation lands on the system clipboard in all four formats
 //! POST /compose?seed= (body ignored) -> JSON {"latex": "..."} from one editor session
 //! POST /objectize?token=&latex=[&progid=][&number=right|left][&style=] [path=|body] -> the
 //!     marker text becomes a fresh equation object (MathType's by default) with a rendered
@@ -163,6 +165,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("POST", "/activate") => activate(&mut stream, &query, &request.body),
         ("POST", "/compose") => compose(&mut stream, &query, &request.body),
         ("POST", "/objectize") => objectize(&mut stream, &query, &request.body),
+        ("POST", "/clipboard") => clipboard_write(&mut stream, &query, &request.body),
         ("GET", _) | ("POST", _) => respond(&mut stream, 404, "text/plain", "unknown path"),
         _ => respond(&mut stream, 405, "text/plain", "method not allowed"),
     }?;
@@ -737,6 +740,73 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     let width = u32::from_be_bytes(bytes[16..20].try_into().ok()?);
     let height = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
     Some((width, height))
+}
+
+/// POST /clipboard/write — put one equation on the system clipboard in all four formats
+/// (MTEF, HTML with MathML and OMML, LaTeX text, PNG). The equation comes from the request
+/// body as LaTeX, or from `?path=&index=` straight out of a document's equation object.
+fn clipboard_write(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, String> {
+    fn bad(stream: &mut TcpStream, message: String) -> Result<u16, String> {
+        respond(stream, 400, "text/plain", &message)
+    }
+    let math = if let Some(path) = parameter(query, "path") {
+        let index = match parameter(query, "index").and_then(|value| value.parse::<usize>().ok())
+        {
+            Some(index) if index >= 1 => index,
+            _ => return bad(stream, "?index= must give the 1-based number of the object".to_owned()),
+        };
+        let filters: Vec<String> = parameter(query, "progid")
+            .unwrap_or_else(|| "MathTypeRs,Equation.DSMT4".to_owned())
+            .split(',')
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .collect();
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) => return bad(stream, format!("cannot read {path}: {error}")),
+        };
+        let document = match mt_docx::Document::open(&bytes) {
+            Ok(document) => document,
+            Err(error) => return bad(stream, format!("the document does not open: {error}")),
+        };
+        let equation = document
+            .equations()
+            .into_iter()
+            .filter(|equation| match &equation.kind {
+                mt_docx::EquationKind::Ole { prog_id, .. } => prog_id
+                    .as_deref()
+                    .is_some_and(|id| filters.iter().any(|filter| id.starts_with(filter.as_str()))),
+                _ => false,
+            })
+            .nth(index - 1);
+        match equation.and_then(|equation| equation.math) {
+            Some(math) => math,
+            None => return bad(stream, format!("no equation object {index} to copy")),
+        }
+    } else {
+        let latex = String::from_utf8_lossy(body).trim().to_owned();
+        if latex.is_empty() {
+            return bad(stream, "the body must carry LaTeX, or give ?path=&index=".to_owned());
+        }
+        match mt_tex::parse(&latex) {
+            Ok(math) => math,
+            Err(error) => {
+                return bad(stream, format!("the equation does not parse at byte {}: {}", error.offset, error.message))
+            }
+        }
+    };
+    match crate::clipboard::copy(&math) {
+        Ok(()) => {
+            let latex = mt_tex::to_latex(&math);
+            respond(
+                stream,
+                200,
+                "application/json",
+                &format!("{{\"ok\":true,\"latex\":\"{}\"}}", json_escape(&latex)),
+            )
+        }
+        Err(message) => respond(stream, 500, "text/plain", &message),
+    }
 }
 
 /// POST /compose?seed=<latex> — open the editor on a fresh equation and return its LaTeX.

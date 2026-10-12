@@ -370,6 +370,41 @@ function activateEquationObject(app, index) {
   xhr.send('');
 }
 
+// Ribbon entry: copy the selected equation object to the system clipboard in
+// all four formats (the bridge reads the object and writes the clipboard).
+function OnCopyEquation(control) {
+  var app = hostApp();
+  var doc = app.ActiveDocument;
+  if (!doc || !doc.FullName || !doc.Path) {
+    alert('请先保存文档，再复制公式。');
+    return;
+  }
+  var index = selectedEquationOrdinal(app);
+  if (index === 0) {
+    alert('请先点击选中一个 MathType 公式对象，再点"复制公式"。');
+    return;
+  }
+  var fullPath = doc.FullName;
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', BRIDGE_BASE + '/clipboard/write?path=' + encodeURIComponent(fullPath) +
+    '&index=' + index, true);
+  xhr.setRequestHeader('Content-Type', 'text/plain; charset=utf-8');
+  xhr.timeout = 30000;
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4) return;
+    if (xhr.status !== 200) {
+      alert(bridgeUnreachableMessage('HTTP ' + xhr.status + ': ' + xhr.responseText));
+      return;
+    }
+    try {
+      var answer = JSON.parse(xhr.responseText);
+      console.log('[MathTypeRs] 已复制：' + answer.latex);
+    } catch (e) { /* the receipt is informational */ }
+  };
+  xhr.onerror = function () { alert(bridgeUnreachableMessage('网络错误')); };
+  xhr.send('');
+}
+
 // Ribbon entry: edit the selected equation object.
 function OnEditEquation(control) {
   var app = hostApp();

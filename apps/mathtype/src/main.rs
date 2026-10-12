@@ -7,6 +7,7 @@
 //! - `--serve [port]`: the same conversions over loopback HTTP, for host add-ins that cannot
 //!   (WPS loads its add-ins as web pages).
 
+mod clipboard;
 mod library;
 mod batch;
 mod numbering;
@@ -185,6 +186,32 @@ fn main() -> eframe::Result<()> {
                 std::process::exit(1);
             }
         };
+    }
+    if args.first().map(String::as_str) == Some("clip-copy") {
+        let latex = args.get(1).cloned().unwrap_or_default();
+        let math = match mt_tex::parse(&latex) {
+            Ok(math) => math,
+            Err(error) => {
+                eprintln!("公式解析失败：{}", error.message);
+                std::process::exit(2);
+            }
+        };
+        if let Err(error) = clipboard::copy(&math) {
+            eprintln!("{error}");
+            std::process::exit(2);
+        }
+        println!("已复制到剪贴板（MTEF、HTML、LaTeX、PNG）");
+        return Ok(());
+    }
+    if args.first().map(String::as_str) == Some("clip-paste") {
+        match clipboard::paste() {
+            Ok(math) => println!("{}", mt_tex::to_latex(&math)),
+            Err(message) => {
+                eprintln!("{message}");
+                std::process::exit(2);
+            }
+        }
+        return Ok(());
     }
     if args.first().map(String::as_str) == Some("--edit") {
         let path = args
@@ -1401,6 +1428,31 @@ impl eframe::App for App {
                 if ui.button("保存").clicked() {
                     self.save();
                 }
+                if ui.button("复制").clicked() {
+                    match clipboard::payload(self.editor.math()) {
+                        Ok(payload) => {
+                            match clipboard::copy(self.editor.math()) {
+                                Ok(()) => self.status = format!(
+                                    "已复制（LaTeX：{}）",
+                                    payload.latex
+                                ),
+                                Err(message) => self.status = format!("复制失败：{message}"),
+                            }
+                        }
+                        Err(message) => self.status = format!("复制失败：{message}"),
+                    }
+                }
+                if ui.button("粘贴").clicked() {
+                    match clipboard::paste() {
+                        Ok(math) => {
+                            self.editor.set_math(math);
+                            self.dirty = true;
+                            self.save_shape = SaveShape::New;
+                            self.status = "已从剪贴板粘贴".to_owned();
+                        }
+                        Err(message) => self.status = format!("粘贴失败：{message}"),
+                    }
+                }
                 if ui.button("复制 LaTeX").clicked() {
                     self.copy_as(ui.ctx(), Format::Latex);
                 }
@@ -2170,6 +2222,19 @@ mod tests {
             mt_mtef::write_with_preferences(&math, &mt_style_preset::to_preferences(preset));
         let read = mt_mtef::read(&stream).expect("the stream reads back");
         assert_eq!(read.header.preferences.sizes[0].value, "12", "compact preset full size");
+    }
+
+    #[test]
+    fn clipboard_payload_carries_all_four_formats() {
+        let math = mt_tex::parse("a+\\frac{b}{c}").unwrap();
+        let payload = clipboard::payload(&math).expect("payload builds");
+        assert_eq!(payload.latex, "a+\\frac{b}{c}");
+        assert!(payload.html.contains("<math"), "MathML is in the HTML: {}", payload.html);
+        assert!(payload.html.contains("oMath"), "OMML is in the HTML: {}", payload.html);
+        assert!(payload.html.contains("StartFragment"), "Word fragment markers are in");
+        assert_eq!(&payload.png[..4], b"\x89PNG", "the bitmap fallback is a PNG");
+        let parsed = mt_mtef::read(&payload.mtef).expect("the own format re-parses");
+        assert_eq!(mt_tex::to_latex(&parsed.math), "a+\\frac{b}{c}");
     }
 
     #[test]
