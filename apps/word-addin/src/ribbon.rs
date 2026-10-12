@@ -8,7 +8,7 @@ pub const CUSTOM_UI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui">
   <ribbon>
     <tabs>
-      <tab id="MathTypeRsTab" label="公式">
+      <tab id="MathTypeRsTab" label="MathType-rs">
         <group id="MathTypeRsGroup" label="公式">
           <button id="MathTypeRsInsertObject" label="插入公式对象" size="large"
                   onAction="InsertEquationObject"
