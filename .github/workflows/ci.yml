@@ -39,6 +39,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-draw libreoffice-math
 
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      # 警告即失败，避免逐个放开又慢慢长回来。
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Run tests
         run: cargo test --workspace --no-fail-fast
 
@@ -56,6 +63,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # COM 服务器的测试需要宿主环境，这里只验证编译。
-      - name: Check Windows apps
-        run: cargo check -p mathtype-word-addin -p mathtype-ole-server
+      # COM 服务器的测试需要宿主环境，这里只验证编译与 Windows 专有代码的 lint。
+      - name: Lint Windows apps
+        run: cargo clippy --workspace --all-targets -- -D warnings
