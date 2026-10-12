@@ -6,7 +6,7 @@ use mt_render::{
     Image, RenderError, RenderOptions, image_bounds, image_size, render, render_eps, render_png,
 };
 
-const FONT: &[u8] = include_bytes!("../../../assets/fonts/latinmodern-math.otf");
+const FONT: &[u8] = include_bytes!("../assets/fonts/latinmodern-math.otf");
 
 fn face() -> ttf_parser::Face<'static> {
     ttf_parser::Face::parse(FONT, 0).expect("the bundled font parses")

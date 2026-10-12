@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use mt_layout::{ApproxMetrics, LayoutStyle, layout};
+use mt_render::metrics::MATH_FONT;
 use mt_render::{RenderOptions, render_png};
 use windows::Win32::Foundation::{DISP_E_MEMBERNOTFOUND, DISP_E_UNKNOWNNAME};
 use windows::Win32::System::Com::CLSIDFromProgID;
@@ -14,9 +15,6 @@ use windows::core::PCWSTR;
 use crate::clipboard;
 use crate::com::{Object, Variant};
 use crate::word;
-
-/// The Latin Modern Math face every rendering uses.
-const FACE: &[u8] = include_bytes!("../../../assets/fonts/latinmodern-math.otf");
 
 /// The size used when the host reports no usable font size for the selection.
 const DEFAULT_SIZE: f64 = 11.0;
@@ -123,7 +121,7 @@ pub fn export_png(application: &Object) -> Outcome {
             .ok(),
     );
 
-    let face = ttf_parser::Face::parse(FACE, 0)
+    let face = ttf_parser::Face::parse(MATH_FONT, 0)
         .map_err(|error| format!("the bundled font could not be read: {error}"))?;
     let style = LayoutStyle::display(size);
     let tree = layout(&math, &ApproxMetrics, &style);

@@ -9,7 +9,7 @@
 //! use mt_layout::{layout, ApproxMetrics, LayoutStyle};
 //! use mt_render::{render, RenderOptions};
 //!
-//! let face = ttf_parser::Face::parse(include_bytes!("../../../assets/fonts/latinmodern-math.otf"), 0).unwrap();
+//! let face = ttf_parser::Face::parse(include_bytes!("../assets/fonts/latinmodern-math.otf"), 0).unwrap();
 //! let math = Math::new(Node::row([Node::variable('x')]));
 //! let style = LayoutStyle::display(10.0);
 //! let tree = layout(&math, &ApproxMetrics, &style);

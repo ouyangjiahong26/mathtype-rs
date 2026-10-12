@@ -383,11 +383,7 @@ mod tests {
 
     /// A laid-out fraction `a/b`, which draws glyph outlines plus a rule.
     fn tree() -> (mt_layout::Box, LayoutStyle, Face<'static>) {
-        let face = Face::parse(
-            include_bytes!("../../../assets/fonts/latinmodern-math.otf"),
-            0,
-        )
-        .unwrap();
+        let face = Face::parse(include_bytes!("../assets/fonts/latinmodern-math.otf"), 0).unwrap();
         let math = Math::new(Node::Frac(Box::new(Frac {
             num: Node::variable('a'),
             den: Node::variable('b'),
