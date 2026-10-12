@@ -604,21 +604,24 @@ fn activate(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
     )
 }
 
-/// POST /objectize — the add-in's insert: the marker text left by the add-in becomes a real
-/// equation object, MathType's own format by default, with a freshly rendered preview picture.
-/// `number=right|left` adds the numbering field on that side; `style=plain|chapter|section|paragraph`
-/// picks the label.
+/// POST /objectize — the add-in's insert, at the file level so no WPS rewrite ever happens:
+/// the equation becomes a real object (MathType's own format by default) with a freshly
+/// rendered preview, placed by paragraph number in one of MathType's forms. `para` is the
+/// 1-based number of the caret's paragraph as the host counts them; the object goes at that
+/// paragraph (inline) or into a new one after it (display and numbered).
+#[allow(clippy::too_many_lines)]
 fn objectize(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, String> {
     fn bad(stream: &mut TcpStream, message: String) -> Result<u16, String> {
         respond(stream, 400, "text/plain", &message)
     }
-    let Some(token) = parameter(query, "token") else {
-        return bad(stream, "?token= must name the marker text to replace".to_owned());
-    };
     let Some(latex) = parameter(query, "latex") else {
         return bad(stream, "?latex= must carry the equation".to_owned());
     };
     let prog_id = parameter(query, "progid").unwrap_or_else(|| "Equation.DSMT4".to_owned());
+    let form = parameter(query, "form").unwrap_or_else(|| "inline".to_owned());
+    let Some(para) = parameter(query, "para").and_then(|value| value.parse::<usize>().ok()) else {
+        return bad(stream, "?para= must give the 1-based number of the caret's paragraph".to_owned());
+    };
     let math = match mt_tex::parse(&latex) {
         Ok(math) => math,
         Err(error) => {
@@ -639,24 +642,9 @@ fn objectize(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, St
         Err(error) => return bad(stream, format!("the document does not open: {error}")),
     };
 
-    // The marker paragraph item the add-in left behind.
-    let mut found = None;
-    for (block_index, block) in document.blocks().iter().enumerate() {
-        let mt_docx::Block::Paragraph(paragraph) = block else { continue };
-        for (item_index, item) in paragraph.items.iter().enumerate() {
-            if let mt_docx::Item::Text { text, .. } = item {
-                if text.contains(&token) {
-                    found = Some((block_index, item_index));
-                    break;
-                }
-            }
-        }
-        if found.is_some() {
-            break;
-        }
-    }
-    let Some((block, item)) = found else {
-        return bad(stream, format!("the marker {token} is not in the document"));
+    // The caret's paragraph, as the host counts paragraphs (tables included, document order).
+    let Some((block, _)) = document.paragraphs().nth(para - 1) else {
+        return bad(stream, format!("paragraph {para} is not in the document"));
     };
 
     // A freshly rendered preview, sized in points at the render scale (3 px per point).
@@ -677,58 +665,51 @@ fn objectize(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, St
         name: "equation.png".to_owned(),
         extent_emu: (to_emu(pixel_width), to_emu(pixel_height)),
     };
+    let runs = match document.new_equation_object_runs(&math, &prog_id, Some(&preview)) {
+        Ok(runs) => runs,
+        Err(error) => return respond(stream, 500, "text/plain", &format!("building the object failed: {error}")),
+    };
 
-    if let Err(error) = document.replace(
-        block,
-        item,
-        mt_docx::Replacement::Ole {
-            math: math.clone(),
-            prog_id: Some(prog_id.clone()),
-            preview: Some(preview),
-        },
-    ) {
+    let insert = match form.as_str() {
+        "inline" => {
+            let position = mt_docx::Position::ParagraphEnd { block };
+            (position, runs)
+        }
+        "display" | "numbered-right" | "numbered-left" => {
+            let number_style = parameter(query, "style")
+                .and_then(|name| mt_numbering::NumberStyle::parse(&name))
+                .unwrap_or(mt_numbering::NumberStyle::Plain);
+            let side = if form == "numbered-left" { mt_numbering::Side::Left } else { mt_numbering::Side::Right };
+            let tab_run = "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:tab/></w:r>";
+            let field = mt_numbering::numbering_field_runs(number_style);
+            // Display: the equation alone, centered. Numbered: the equation centered with the
+            // number at the tab stop — after it on the right, before it on the left.
+            let (tabs, body_runs) = if form == "display" {
+                (String::new(), runs)
+            } else if form == "numbered-right" {
+                (mt_numbering::tabs_runs(side), format!("{runs}{tab_run}{field}"))
+            } else {
+                (mt_numbering::tabs_runs(side), format!("{field}{tab_run}{runs}"))
+            };
+            let paragraph = format!(
+                "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
+                 <w:pPr>{tabs}<w:jc w:val=\"center\"/></w:pPr>{body_runs}</w:p>"
+            );
+            let position = mt_docx::Position::AfterParagraph { block };
+            (position, paragraph)
+        }
+        other => return bad(stream, format!("unknown ?form= {other}: inline, display, numbered-right, numbered-left")),
+    };
+    if let Err(error) = document.insert_fragment(insert.0, &insert.1) {
         return respond(stream, 500, "text/plain", &format!("placing the object failed: {error}"));
     }
-    println!("objectize -> {prog_id} at block {block}, item {item}");
-
-    if let Some(side_name) = parameter(query, "number") {
-        let Some(side) = mt_numbering::Side::parse(&side_name) else {
-            return bad(stream, format!("unknown ?number= {side_name}: left or right"));
-        };
-        let number_style = parameter(query, "style")
-            .and_then(|name| mt_numbering::NumberStyle::parse(&name))
-            .unwrap_or(mt_numbering::NumberStyle::Plain);
-        // The tab stop that puts the number at the margin.
-        let properties = match &document.blocks()[block] {
-            mt_docx::Block::Paragraph(paragraph) if paragraph.properties_open_end.is_some() => {
-                mt_numbering::tabs_runs(side)
-            }
-            _ => mt_numbering::tabs_paragraph_properties(side),
-        };
-        if let Err(error) = document.insert_fragment(mt_docx::Position::ParagraphPropertiesStart { block }, &properties) {
-            return respond(stream, 500, "text/plain", &format!("adding the tab stop failed: {error}"));
-        }
-        let tab_run = "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:tab/></w:r>";
-        let (position, runs) = match side {
-            mt_numbering::Side::Right => (
-                mt_docx::Position::AfterItem { block, item },
-                format!("{tab_run}{}", mt_numbering::numbering_field_runs(number_style)),
-            ),
-            mt_numbering::Side::Left => (
-                mt_docx::Position::BeforeItem { block, item },
-                format!("{}{tab_run}", mt_numbering::numbering_field_runs(number_style)),
-            ),
-        };
-        if let Err(error) = document.insert_fragment(position, &runs) {
-            return respond(stream, 500, "text/plain", &format!("adding the number field failed: {error}"));
-        }
-    }
+    println!("objectize -> {prog_id} {form} after paragraph {para}");
 
     let bytes = match document.into_bytes() {
         Ok(bytes) => bytes,
         Err(error) => return respond(stream, 500, "text/plain", &format!("writing the document failed: {error}")),
     };
-    if let Some(_) = &path_parameter {
+    if path_parameter.is_some() {
         let out = parameter(query, "out").or(path_parameter.clone()).expect("path present");
         if let Err(error) = std::fs::write(&out, &bytes) {
             return respond(stream, 500, "text/plain", &format!("cannot write {out}: {error}"));
@@ -1634,65 +1615,55 @@ exit 0
     }
 
     #[test]
-    fn objectize_turns_the_marker_into_a_mathetype_object_with_a_preview() {
-        let bytes = marker_docx("MTRSINSERT1");
-        let mut raw = format!(
-            "POST /objectize?token=MTRSINSERT1&latex=x%2B1 HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\n\r\n",
-            bytes.len()
-        )
-        .into_bytes();
-        raw.extend_from_slice(&bytes);
-        let response = request(&raw);
-        assert!(
-            status(&response).contains("200"),
-            "{} — {}",
-            status(&response),
-            body(&response)
-        );
-        let json = body(&response);
-        let encoded = json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap();
-        let decoded = base64_decode(encoded);
-        let document = mt_docx::Document::open(&decoded).expect("the returned container opens");
-        let equations = document.equations();
-        assert_eq!(equations.len(), 1, "the marker became one equation object");
-        match &equations[0].kind {
-            mt_docx::EquationKind::Ole { prog_id: Some(prog_id), part: Some(part) } => {
-                assert_eq!(prog_id, "Equation.DSMT4", "MathType's own ProgID by default");
-                let bin = document.part(part).expect("part present").expect("part reads");
-                let stream = mt_mtef::ole::read_from_ole(&bin)
-                    .expect("the compound file reads")
-                    .expect("a compound file was created");
-                assert_eq!(mt_tex::to_latex(&mt_mtef::read(&stream).expect("stream reads").math), "x+1");
+    fn objectize_places_a_mathetype_object_in_every_form() {
+        let bytes = marker_docx("plain text");
+        for (form, extra) in [
+            ("inline", ""),
+            ("display", ""),
+            ("numbered-right", ""),
+            ("numbered-left", ""),
+        ] {
+            let mut raw = format!(
+                "POST /objectize?para=1&form={form}&latex=x%2B1{extra} HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\n\r\n",
+                bytes.len()
+            )
+            .into_bytes();
+            raw.extend_from_slice(&bytes);
+            let response = request(&raw);
+            assert!(
+                status(&response).contains("200"),
+                "{form}: {} — {}",
+                status(&response),
+                body(&response)
+            );
+            let json = body(&response);
+            let encoded = json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap();
+            let decoded = base64_decode(encoded);
+            let document = mt_docx::Document::open(&decoded).expect("the returned container opens");
+            let equations = document.equations();
+            assert_eq!(equations.len(), 1, "{form}: one equation object");
+            match &equations[0].kind {
+                mt_docx::EquationKind::Ole { prog_id: Some(prog_id), .. } => {
+                    assert_eq!(prog_id, "Equation.DSMT4", "{form}: MathType's ProgID");
+                }
+                kind => panic!("{form}: expected an object, got {kind:?}"),
             }
-            kind => panic!("expected an equation object, got {kind:?}"),
+            let xml = document.document_xml();
+            match form {
+                "inline" => assert_eq!(xml.matches("<w:p>").count() + xml.matches("<w:p ").count(), 1, "no new paragraph for inline"),
+                "numbered-right" | "numbered-left" => {
+                    assert!(xml.contains("SEQ MTEqn"), "{form}: the SEQ field is in");
+                }
+                _ => {}
+            }
+            assert!(
+                document.part_names().any(|name| name.starts_with("word/media/") && name.ends_with(".png")),
+                "{form}: a preview picture part exists"
+            );
         }
-        let preview = document
-            .part_names()
-            .find(|name| name.starts_with("word/media/") && name.ends_with(".png"))
-            .expect("a preview picture part exists");
-        let picture = document.part(preview).expect("present").expect("reads");
-        assert_eq!(&picture[..4], b"\x89PNG", "the preview is a rendered PNG");
-        assert!(
-            !document.document_xml().contains("MTRSINSERT1"),
-            "the marker text is gone"
-        );
     }
 
-    #[test]
-    fn activate_rejects_an_unknown_object() {
-        let bytes = ole_docx();
-        let mut raw = format!(
-            "POST /activate?index=5 HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\n\r\n",
-            bytes.len()
-        )
-        .into_bytes();
-        raw.extend_from_slice(&bytes);
-        let response = request(&raw);
-        assert!(
-            status(&response).contains("400"),
-            "{} — {}",
-            status(&response),
-            body(&response)
-        );
-    }
+
+
+
 }

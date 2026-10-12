@@ -140,7 +140,26 @@ function OnAddinLoad(ribbonUI) {
 // ---------------------------------------------------------------------------
 
 var inserting = false;
-var MARKER_PREFIX = 'MTRSOBJ';
+
+// The 1-based number of the paragraph the caret sits in, counted the way the host
+// counts (document order, table cells included) — the same order the bridge's index
+// walks, which is what lets it place an insertion by number alone.
+function caretParagraphIndex(app) {
+  var sel = app.Selection;
+  var start = null;
+  try { start = sel.Paragraphs.Item(1).Range.Start; } catch (e) { return 0; }
+  if (start === null) return 0;
+  var paragraphs = app.ActiveDocument.Paragraphs;
+  var count = paragraphs.Count;
+  for (var i = 1; i <= count; i++) {
+    var paragraph;
+    try { paragraph = paragraphs.Item(i); } catch (e2) { continue; }
+    var paragraphStart = null;
+    try { paragraphStart = paragraph.Range.Start; } catch (e3) { paragraphStart = null; }
+    if (paragraphStart !== null && paragraphStart === start) return i;
+  }
+  return 0;
+}
 
 // POST /compose and answer with the LaTeX the user typed in the editor.
 function bridgeCompose(onDone) {
@@ -166,13 +185,12 @@ function bridgeCompose(onDone) {
 }
 
 // The bridge makes the object at the file level and answers with a receipt.
-function bridgeObjectize(path, token, latex, options, onDone) {
+function bridgeObjectize(path, latex, form, para, onDone) {
   var query = '/objectize?path=' + encodeURIComponent(path) +
-    '&token=' + encodeURIComponent(token) +
     '&latex=' + encodeURIComponent(latex) +
-    '&progid=' + encodeURIComponent('Equation.DSMT4');
-  if (options && options.number) query += '&number=' + options.number;
-  if (options && options.style) query += '&style=' + options.style;
+    '&progid=' + encodeURIComponent('Equation.DSMT4') +
+    '&form=' + encodeURIComponent(form) +
+    '&para=' + para;
   var xhr = new XMLHttpRequest();
   xhr.open('POST', BRIDGE_BASE + query, true);
   xhr.setRequestHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -198,37 +216,41 @@ function insertEquationObject(form) {
     alert('请先保存文档，再插入公式。');
     return;
   }
+  // The bridge edits the file on disk; unsaved WPS-side edits would be discarded.
+  var unsaved = true;
+  try { unsaved = doc.Saved === false; } catch (e0) { unsaved = false; }
+  if (unsaved) {
+    var go = false;
+    try { go = wps.confirm('WPS 显示文档有未保存的修改（兼容模式打开也会这样标记）。\n插入公式将以磁盘上的版本为准并重新打开，未保存的修改会丢弃。继续吗？'); } catch (e1) { go = true; }
+    if (!go) return;
+  }
   inserting = true;
   bridgeCompose(function (err, latex) {
     if (err) { inserting = false; alert(bridgeUnreachableMessage(err.message)); return; }
     if (isBlank(latex)) { inserting = false; return; } // empty session: nothing to insert
-    var token = MARKER_PREFIX + new Date().getTime();
-    try {
-      var sel = app.Selection;
-      if (form !== 'inline') {
-        sel.TypeParagraph();               // display and numbered forms get their own paragraph
-        sel.ParagraphFormat.Alignment = 1; // centered, the display convention
-      }
-      sel.TypeText(token);
-      doc.Save();
-    } catch (e) {
+    // The caret's paragraph number, as the host counts paragraphs; the bridge places the
+    // object there (inline) or in a new paragraph after it (display and numbered). Nothing
+    // is typed or saved in WPS, so WPS's writer never touches the document.
+    var para = caretParagraphIndex(app);
+    if (!para) {
       inserting = false;
-      alert('准备插入失败：' + (e && e.message ? e.message : e));
+      alert('无法定位插入点，请将光标放在正文段落中再试。');
       return;
     }
-    var options = {};
-    if (form === 'numbered-right') options.number = 'right';
-    if (form === 'numbered-left') options.number = 'left';
     var fullPath = doc.FullName;
-    bridgeObjectize(fullPath, token, latex, options, function (err2) {
+    bridgeObjectize(fullPath, latex, form, para, function (err2) {
       inserting = false;
       if (err2) { alert(bridgeUnreachableMessage(err2.message)); return; }
       try {
+        try { app.DisplayAlerts = 0; } catch (e4) { /* not all builds expose it */ }
         doc.Saved = true;
         doc.Close(0);
+        try { app.DisplayAlerts = 1; } catch (e5) { /* leave as is */ }
         app.Documents.Open(fullPath);
       } catch (e3) {
-        alert('公式已写入，但重新打开失败（' + (e3 && e3.message ? e3.message : e3) + '）。\n请手动重新打开：' + fullPath);
+        try { app.DisplayAlerts = 1; } catch (e6) { /* leave as is */ }
+        alert('公式已写入。请手动操作：关闭文档时选择「不保存」，然后重新打开：' + fullPath +
+          '\n（不要用 WPS「保存/另存」，那会重写整个文档并破坏 MathType 格式）');
       }
     });
   });
@@ -307,9 +329,16 @@ function activateEquationObject(app, index) {
   }
   activating = true;
   var fullPath = doc.FullName;
-  try {
-    doc.Save();
-  } catch (e) { /* unsaved-changes prompts are the user's own */ }
+  // Never call doc.Save() here: WPS's own writer re-serialises the whole document
+  // (and that is what scrambles MathType documents). The bridge edits the file on
+  // disk, so whatever WPS holds unsaved would be discarded by the reopen — ask first.
+  var unsaved = true;
+  try { unsaved = doc.Saved === false; } catch (e0) { unsaved = false; }
+  if (unsaved) {
+    var go = false;
+    try { go = wps.confirm('WPS 显示文档有未保存的修改（兼容模式打开也会这样标记）。\n编辑公式将以磁盘上的版本为准并重新打开，未保存的修改会丢弃。继续吗？'); } catch (e1) { go = true; }
+    if (!go) { activating = false; return; }
+  }
   var xhr = new XMLHttpRequest();
   xhr.open('POST', BRIDGE_BASE + '/activate?index=' + index +
     '&path=' + encodeURIComponent(fullPath) + '&out=' + encodeURIComponent(fullPath), true);
@@ -323,11 +352,15 @@ function activateEquationObject(app, index) {
       return;
     }
     try {
+      try { app.DisplayAlerts = 0; } catch (e4) { /* not all builds expose it */ }
       doc.Saved = true;
       doc.Close(0);
+      try { app.DisplayAlerts = 1; } catch (e5) { /* leave as is */ }
       app.Documents.Open(fullPath);
     } catch (e) {
-      alert('文档已写回，但重新打开失败（' + (e && e.message ? e.message : e) + '）。\n请手动关闭并重新打开：' + fullPath);
+      try { app.DisplayAlerts = 1; } catch (e6) { /* leave as is */ }
+      alert('文档已在磁盘上更新。请手动操作：关闭文档时选择「不保存」，然后重新打开：' + fullPath +
+        '\n（不要用 WPS「保存/另存」，那会重写整个文档并破坏 MathType 格式）');
     }
   };
   xhr.onerror = function () {
