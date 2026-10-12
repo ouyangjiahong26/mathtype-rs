@@ -509,6 +509,80 @@ pub(crate) fn write_emf(math: &mt_core::Math, style: &LayoutStyle) -> Vec<u8> {
     mt_render::render_emf(&boxes, style, metrics.face(), &mt_render::RenderOptions::default())
 }
 
+/// The bytes a save writes for `math`: the format it came in, or a MathType object for an
+/// equation composed here.
+fn equation_save_bytes(
+    math: &mt_core::Math,
+    shape: &SaveShape,
+    original_object: Option<&[u8]>,
+) -> Vec<u8> {
+    match shape {
+        SaveShape::File { format: Format::Latex, .. } => mt_tex::to_latex(math).into_bytes(),
+        SaveShape::File { format: Format::MathMl, .. } => mt_mathml::write(math).into_bytes(),
+        SaveShape::File { format: Format::Omml, .. } => mt_omml::write(math).into_bytes(),
+        SaveShape::File {
+            format: Format::Mtef,
+            compound,
+            preferences,
+        } => {
+            let stream = mt_mtef::write_with_preferences(
+                math,
+                preferences.as_ref().unwrap_or(&mt_mtef::default_preferences()),
+            );
+            if *compound {
+                match original_object {
+                    Some(ole) => mt_mtef::ole::write_into_ole(ole, &stream)
+                        .unwrap_or_else(|_| mt_mtef::ole::create_ole(&stream).unwrap_or(stream)),
+                    None => mt_mtef::ole::create_ole(&stream).unwrap_or(stream),
+                }
+            } else {
+                stream
+            }
+        }
+        // Images are not loadable, so this shape never occurs; a save treats them as new.
+        SaveShape::File { format: Format::Svg | Format::Png | Format::Eps, .. } | SaveShape::New => {
+            let stream = mt_mtef::write(math);
+            mt_mtef::ole::create_ole(&stream).unwrap_or(stream)
+        }
+    }
+}
+
+/// How `bytes` (already known to be `format`) should be written back.
+fn save_shape_of(bytes: &[u8], format: Format) -> SaveShape {
+    match format {
+        Format::Mtef => {
+            // A real object is a compound file around the stream; both keep the stream's own
+            // preferences so a save does not silently reset them.
+            match mt_mtef::ole::read_from_ole(bytes) {
+                Ok(Some(stream)) => SaveShape::File {
+                    format: Format::Mtef,
+                    compound: true,
+                    preferences: mt_mtef::read(&stream).ok().map(|parsed| parsed.header.preferences),
+                },
+                _ => SaveShape::File {
+                    format: Format::Mtef,
+                    compound: false,
+                    preferences: mt_mtef::read(bytes).ok().map(|parsed| parsed.header.preferences),
+                },
+            }
+        }
+        format => SaveShape::File { format, compound: false, preferences: None },
+    }
+}
+
+/// The save format's name, for the status line.
+fn save_shape_name(shape: &SaveShape) -> &'static str {
+    match shape {
+        SaveShape::New => "MathType 公式对象",
+        SaveShape::File { format: Format::Mtef, compound: true, .. } => "MathType 公式对象",
+        SaveShape::File { format: Format::Mtef, .. } => "MathType 公式流",
+        SaveShape::File { format: Format::Latex, .. } => "LaTeX",
+        SaveShape::File { format: Format::MathMl, .. } => "MathML",
+        SaveShape::File { format: Format::Omml, .. } => "OMML",
+        SaveShape::File { format: Format::Svg | Format::Png | Format::Eps, .. } => "图片",
+    }
+}
+
 fn execute(job: Job) -> Result<(), String> {
     let bytes = match (&job.input, &job.input_file) {
         (Some(text), _) => text.clone().into_bytes(),
@@ -564,6 +638,32 @@ struct App {
     web_dialog: bool,
     web_docx: String,
     web_out: String,
+    /// What a save writes; see [`SaveShape`].
+    save_shape: SaveShape,
+    /// The compound file the equation came in, when it did, so a save rewrites around it.
+    original_object: Option<Vec<u8>>,
+    /// True while the save-as dialog (a new equation's first save) is up.
+    save_prompt: bool,
+    /// The path the save-as dialog is editing.
+    save_path_input: String,
+}
+
+/// What a save writes: the format the equation came from, or — for an equation composed in
+/// this editor — MathType's own object format, so every file MathType-rs produces opens in
+/// MathType too.
+#[derive(Clone, Debug, Default)]
+enum SaveShape {
+    /// Composed here: save as a MathType equation object (a compound file holding the stream).
+    #[default]
+    New,
+    /// Loaded from a file: a save writes the same format back.
+    File {
+        format: Format,
+        /// The stream came inside a compound file, which is rewritten around it.
+        compound: bool,
+        /// Preferences recovered from the stream, written back into it.
+        preferences: Option<mt_mtef::Preferences>,
+    },
 }
 
 /// A parse failure worth showing where it happened: the message and the byte offset.
@@ -658,6 +758,10 @@ impl App {
             web_dialog: false,
             web_docx: String::new(),
             web_out: String::new(),
+            save_shape: SaveShape::New,
+            original_object: None,
+            save_prompt: false,
+            save_path_input: String::new(),
         }
     }
 
@@ -665,29 +769,51 @@ impl App {
     fn editing(cc: &eframe::CreationContext<'_>, path: std::path::PathBuf) -> Self {
         let mut app = Self::new(cc);
         app.status = match std::fs::read(&path) {
-            Ok(bytes) => match read_math(&bytes, detect_format(&String::from_utf8_lossy(&bytes))) {
-                Ok(math) => {
-                    app.editor.set_math(math);
-                    format!("已打开 {}", path.display())
+            Ok(bytes) => {
+                let format = detect_format(&String::from_utf8_lossy(&bytes));
+                match read_math(&bytes, format) {
+                    Ok(math) => {
+                        app.save_shape = save_shape_of(&bytes, format);
+                        if matches!(app.save_shape, SaveShape::File { compound: true, .. }) {
+                            app.original_object = Some(bytes);
+                        }
+                        app.editor.set_math(math);
+                        format!("已打开 {}", path.display())
+                    }
+                    Err(message) => format!("{} 无法解析：{message}", path.display()),
                 }
-                Err(message) => format!("{} 无法解析：{message}", path.display()),
-            },
+            }
             Err(error) => format!("无法读取 {}：{error}", path.display()),
         };
         app.path = Some(path);
         app
     }
 
-    /// Write the equation back to the file it was opened from.
+    /// Write the equation back where it came from; an equation composed here is saved as a
+    /// MathType object, the format every other MathType user opens.
     fn save(&mut self) {
         let Some(path) = self.path.clone() else {
+            if self.save_path_input.is_empty() {
+                self.save_path_input = "equation.bin".to_owned();
+            }
+            self.save_prompt = true; // a new equation asks where its MathType object goes
             return;
         };
-        let text = mt_tex::to_latex(self.editor.math());
-        match std::fs::write(&path, &text) {
+        let bytes = equation_save_bytes(
+            self.editor.math(),
+            &self.save_shape,
+            self.original_object.as_deref(),
+        );
+        match std::fs::write(&path, &bytes) {
             Ok(()) => {
                 self.dirty = false;
-                self.status = format!("已保存到 {}：{text}", path.display());
+                self.status =
+                    format!("已保存到 {}（{}）", path.display(), save_shape_name(&self.save_shape));
+                if matches!(self.save_shape, SaveShape::File { compound: true, .. })
+                    && self.original_object.is_none()
+                {
+                    self.original_object = Some(bytes);
+                }
             }
             Err(error) => self.status = format!("保存失败：{error}"),
         }
@@ -882,6 +1008,7 @@ impl App {
                     self.editor.set_math(math);
                     self.dirty = true;
                     self.parse_error = None;
+                    self.save_shape = SaveShape::New;
                     self.status = "已导入（按 LaTeX 解析）".to_owned();
                 }
                 Err(error) => {
@@ -902,6 +1029,7 @@ impl App {
                 self.editor.set_math(math);
                 self.dirty = true;
                 self.parse_error = None;
+                self.save_shape = SaveShape::New;
                 self.status = format!("已导入（按 {} 解析）", from.name());
             }
             Err(message) => {
@@ -1160,6 +1288,44 @@ impl App {
                 });
             });
     }
+
+    /// First save of a composed equation: where its MathType object should go.
+    fn show_save_prompt(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut do_save = false;
+        egui::Window::new("保存公式（MathType 格式）")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("新公式将保存为 MathType 公式对象（.bin），可直接嵌入文档或交给 MathType 用户。");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.save_path_input)
+                        .desired_width(420.0)
+                        .hint_text("文件路径，如 /tmp/equation.bin"),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("保存").clicked() {
+                        do_save = true;
+                    }
+                    if ui.button("取消").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if do_save && !self.save_path_input.trim().is_empty() {
+            self.path = Some(std::path::PathBuf::from(self.save_path_input.trim()));
+            self.save_shape = SaveShape::New;
+            self.original_object = None;
+            close = true;
+            self.save();
+        } else if do_save {
+            self.status = "请填写保存路径。".to_owned();
+        }
+        if close {
+            self.save_prompt = false;
+        }
+    }
 }
 
 impl eframe::App for App {
@@ -1176,6 +1342,9 @@ impl eframe::App for App {
         }
         if self.exit_prompt {
             self.show_exit_prompt(ui.ctx());
+        }
+        if self.save_prompt {
+            self.show_save_prompt(ui.ctx());
         }
         if self.web_dialog {
             self.show_web_dialog(ui.ctx());
@@ -1229,6 +1398,9 @@ impl eframe::App for App {
                         .text("显示字号")
                         .fixed_decimals(0),
                 );
+                if ui.button("保存").clicked() {
+                    self.save();
+                }
                 if ui.button("复制 LaTeX").clicked() {
                     self.copy_as(ui.ctx(), Format::Latex);
                 }
@@ -1347,7 +1519,7 @@ impl eframe::App for App {
 
     /// The object server reads the file back once this process exits, so write on the way out.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        if self.dirty {
+        if self.dirty && self.path.is_some() {
             self.save();
         }
     }
@@ -1998,5 +2170,35 @@ mod tests {
             mt_mtef::write_with_preferences(&math, &mt_style_preset::to_preferences(preset));
         let read = mt_mtef::read(&stream).expect("the stream reads back");
         assert_eq!(read.header.preferences.sizes[0].value, "12", "compact preset full size");
+    }
+
+    #[test]
+    fn a_new_equation_saves_as_a_mathtype_object() {
+        let math = mt_tex::parse("a+b").unwrap();
+        let bytes = equation_save_bytes(&math, &SaveShape::New, None);
+        let stream =
+            mt_mtef::ole::read_from_ole(&bytes).ok().flatten().expect("a compound file");
+        assert_eq!(mt_tex::to_latex(&mt_mtef::read(&stream).unwrap().math), "a+b");
+    }
+
+    #[test]
+    fn a_loaded_object_round_trips_its_compound() {
+        let math = mt_tex::parse("c^2").unwrap();
+        let ole = mt_mtef::ole::create_ole(&mt_mtef::write(&math)).unwrap();
+        let shape = save_shape_of(&ole, Format::Mtef);
+        assert!(matches!(shape, SaveShape::File { compound: true, .. }));
+        let edited = mt_tex::parse("d^3").unwrap();
+        let bytes = equation_save_bytes(&edited, &shape, Some(&ole));
+        let stream =
+            mt_mtef::ole::read_from_ole(&bytes).ok().flatten().expect("still a compound file");
+        assert_eq!(mt_tex::to_latex(&mt_mtef::read(&stream).unwrap().math), "d^3");
+    }
+
+    #[test]
+    fn a_latex_handoff_file_stays_latex() {
+        let shape = save_shape_of(b"x", Format::Latex);
+        let math = mt_tex::parse("y").unwrap();
+        let bytes = equation_save_bytes(&math, &shape, None);
+        assert_eq!(bytes, b"y");
     }
 }
