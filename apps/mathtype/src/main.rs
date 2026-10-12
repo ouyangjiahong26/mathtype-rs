@@ -27,11 +27,24 @@ use mt_style_preset::StylePreset;
 const MATH_FAMILY: &str = "math";
 
 /// System faces that can supply the CJK glyphs of the interface labels, best first.
-const UI_FONT_CANDIDATES: [&str; 4] = [
+///
+/// The list spans the three desktop platforms; when none of the paths exists (an unusual
+/// Linux setup), fontconfig is asked for a Chinese face before giving up.
+const UI_FONT_CANDIDATES: [&str; 11] = [
+    // Windows
     r"C:\Windows\Fonts\simhei.ttf",
     r"C:\Windows\Fonts\msyh.ttc",
     r"C:\Windows\Fonts\simsun.ttc",
     r"C:\Windows\Fonts\Deng.ttf",
+    // Linux, in coverage order
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
+    // macOS
+    "/System/Library/Fonts/PingFang.ttc",
 ];
 
 /// Input and output formats the command line converts between.
@@ -1513,10 +1526,44 @@ fn install_fonts(ctx: &egui::Context) {
                 .or_default()
                 .push("ui-cjk".to_owned());
         }
-        break;
+        ctx.set_fonts(fonts);
+        return;
     }
-
+    if let Some(bytes) = cjk_face_from_fontconfig() {
+        fonts
+            .font_data
+            .insert("ui-cjk".to_owned(), Arc::new(FontData::from_owned(bytes)));
+        for family in [FontFamily::Proportional, FontFamily::Monospace] {
+            fonts
+                .families
+                .entry(family)
+                .or_default()
+                .push("ui-cjk".to_owned());
+        }
+    } else {
+        eprintln!("warning: no CJK face found; the interface labels may show as boxes");
+    }
     ctx.set_fonts(fonts);
+}
+
+/// The best Chinese face fontconfig can name, read into memory.
+#[cfg(unix)]
+fn cjk_face_from_fontconfig() -> Option<Vec<u8>> {
+    let output = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}", ":lang=zh"])
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if path.is_empty() {
+        return None;
+    }
+    std::fs::read(&path).ok()
+}
+
+/// Windows and macOS have their CJK faces on fixed paths, covered by the candidate list.
+#[cfg(not(unix))]
+fn cjk_face_from_fontconfig() -> Option<Vec<u8>> {
+    None
 }
 
 /// Paint every leaf of a laid-out equation. Coordinates are absolute in points, `y` downwards

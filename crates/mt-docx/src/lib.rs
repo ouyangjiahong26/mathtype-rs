@@ -119,6 +119,12 @@ pub enum Replacement {
     Ole {
         /// The equation.
         math: Math,
+        /// The ProgID of a newly created object; the object's own when one already exists.
+        /// `Equation.DSMT4` makes the object MathType's own, so MathType users can edit it.
+        prog_id: Option<String>,
+        /// A preview picture for a newly created object, shown by hosts that cannot run the
+        /// equation server; an existing object keeps the preview it already has.
+        preview: Option<ImageData>,
     },
     /// Raw XML spliced in verbatim. The caller owns well-formedness and namespaces.
     Raw(String),
@@ -273,8 +279,9 @@ impl Document {
                 let id = self.take_generated_id();
                 fragment::image_run(&rel_id, &data.name, data.extent_emu, id)
             }
-            Replacement::Ole { math } => {
-                let (rel_id, prog_id, preview) = self.ole_replacement(&target, &math)?;
+            Replacement::Ole { math, prog_id, preview } => {
+                let (rel_id, prog_id, preview) =
+                    self.ole_replacement(&target, &math, prog_id.as_deref(), preview.as_ref())?;
                 let id = self.take_generated_id();
                 fragment::object_run(&rel_id, &prog_id, preview.as_deref(), id)
             }
@@ -456,6 +463,8 @@ impl Document {
         &mut self,
         target: &ObjectTarget,
         math: &Math,
+        wanted_prog_id: Option<&str>,
+        wanted_preview: Option<&ImageData>,
     ) -> Result<(String, String, Option<String>), DocxError> {
         let stream = mt_mtef::write(math);
         if let Some(rel_id) = &target.rel_id {
@@ -485,7 +494,16 @@ impl Document {
         self.package.set_part(&part, bytes);
         let rel_id = self.rels.add(kinds::OLE_OBJECT, &rel_target, false);
         self.dirty_rels = true;
-        Ok((rel_id, DEFAULT_PROG_ID.to_owned(), None))
+        let prog_id = wanted_prog_id.unwrap_or(DEFAULT_PROG_ID).to_owned();
+        let preview = match wanted_preview {
+            Some(picture) => {
+                let image_rel = self.add_media_part(picture)?;
+                let id = self.take_generated_id();
+                Some(fragment::object_preview(&image_rel, picture.extent_emu, id))
+            }
+            None => None,
+        };
+        Ok((rel_id, prog_id, preview))
     }
 
     /// Drops the relationship of an object that is being replaced by something else, when no

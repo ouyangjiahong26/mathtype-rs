@@ -201,7 +201,7 @@ fn a_formula_is_replaced_by_an_ole_object() {
     let mut document = open(&realistic_docx());
     let equation = document.equations().into_iter().next().expect("a formula");
     let math = parse_tex("\\sum_i i^2").unwrap();
-    document.replace(equation.block, equation.item, Replacement::Ole { math }).expect("replaced");
+    document.replace(equation.block, equation.item, Replacement::Ole { math, prog_id: None, preview: None }).expect("replaced");
     assert_eq!(kinds(&document, equation.block), vec!["text", "other", "object", "other", "text"]);
 
     let written = document.into_bytes().expect("written");
@@ -232,7 +232,7 @@ fn an_ole_equation_is_rewritten_in_place() {
         .find(|equation| matches!(equation.kind, EquationKind::Ole { .. }))
         .expect("an object formula");
     let math = parse_tex("\\sqrt[n]{x}").unwrap();
-    document.replace(object.block, object.item, Replacement::Ole { math }).expect("rewritten");
+    document.replace(object.block, object.item, Replacement::Ole { math, prog_id: None, preview: None }).expect("rewritten");
 
     // No new part: the existing one was rewritten.
     assert_eq!(document.part_names().filter(|name| name.contains("embeddings")).count(), 1);

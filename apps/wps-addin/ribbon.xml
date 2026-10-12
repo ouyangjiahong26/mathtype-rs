@@ -1,19 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Custom ribbon for the WPS 文字 add-in. WPS parses this file, builds the tab,
-     and dispatches each button's onAction to the like-named global function in main.js. -->
+     and dispatches each button's onAction to the like-named global function in main.js.
+     Grouping follows MathType's tab: the four insert forms first, then editing and
+     conversion, then document-level operations, then the bridge probe. -->
 <customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" onLoad="OnAddinLoad">
   <ribbon startFromScratch="false">
     <tabs>
       <tab id="MathTypeRsTab" label="MathType-rs">
-        <group id="MathTypeRsGroup" label="公式">
-          <button id="btnInsertEquation" label="插入公式" onAction="OnInsertEquation" size="large"/>
+        <group id="MathTypeRsInsertGroup" label="插入公式">
+          <button id="btnInsertInline" label="内联公式" onAction="OnInsertInline" size="large"/>
+          <button id="btnInsertDisplay" label="显示公式" onAction="OnInsertDisplay" size="large"/>
+          <button id="btnInsertNumberedRight" label="右编号公式" onAction="OnInsertNumberedRight" size="large"/>
+          <button id="btnInsertNumberedLeft" label="左编号公式" onAction="OnInsertNumberedLeft" size="large"/>
+        </group>
+        <group id="MathTypeRsEditGroup" label="编辑与转换">
+          <button id="btnEditEquation" label="编辑公式" onAction="OnEditEquation" size="large"/>
           <button id="btnEquationToLatex" label="转为 LaTeX" onAction="OnEquationToLatex" size="large"/>
           <button id="btnExportPng" label="导出 PNG" onAction="OnExportPng" size="large"/>
-          <button id="btnBatchConvert" label="批量转换…" onAction="OnBatchConvert" size="large"/>
-          <button id="btnExportHtml" label="导出网页" onAction="OnExportHtml" size="large"/>
+        </group>
+        <group id="MathTypeRsDocumentGroup" label="文档">
           <button id="btnNumberEquations" label="公式编号…" onAction="OnNumberEquations" size="large"/>
           <button id="btnCrossReference" label="交叉引用…" onAction="OnCrossReference" size="large"/>
-          <button id="btnEditEquation" label="编辑公式" onAction="OnEditEquation" size="large"/>
+          <button id="btnBatchConvert" label="批量转换…" onAction="OnBatchConvert" size="large"/>
+          <button id="btnExportHtml" label="导出网页" onAction="OnExportHtml" size="large"/>
+        </group>
+        <group id="MathTypeRsServiceGroup" label="服务">
           <button id="btnCheckBridge" label="检查转换服务" onAction="OnCheckBridge" size="large"/>
         </group>
       </tab>
