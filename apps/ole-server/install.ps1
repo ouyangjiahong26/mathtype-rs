@@ -30,10 +30,12 @@
 
     The class key mirrors the one MathType 7.0 Equation registers under
     {0002CE03-0000-0000-C000-000000000046}, which is the control for what Word expects when it
-    embeds an equation object. Three parts of that control are deliberately not written:
-    `Conversion` and `LocalServer` name a converter component and a 16-bit host this server does
-    not have, and the extra `DataFormats\GetSet` entries advertise MathML and TeX, which the object
-    does not serve through `EnumFormatEtc` (see src/formats.rs).
+    embeds an equation object, with one deliberate difference: `DataFormats\GetSet` lists the two
+    formats this object actually serves (the enhanced metafile and the bitmap, see src/formats.rs)
+    rather than the control's four, which name formats it does not serve. A host asks for what is
+    advertised there, so advertising more than the object answers is what makes an insertion fail.
+    Two parts of that control are left out for the same reason: `Conversion` and `LocalServer` name
+    a converter component and a 16-bit host this server does not have.
 
     Under -Scope User every HKLM above is HKCU instead. The keys are otherwise identical, so
     uninstall.ps1 takes the same -Scope and removes exactly what was written.
@@ -130,13 +132,15 @@ Set-ItemProperty -Path "$classKey\MiscStatus\16" -Name '(default)' -Value '1'
 # The automation surface is reachable late-bound, which is how the hosts and scripts drive it.
 New-Item -Path "$classKey\Programmable" -Force | Out-Null
 
-# Formats this object exchanges with the clipboard and with a host, in the conventional order:
-# the document, the source, our own data, and a bitmap for display.
+# The formats a host reads to ask this object for its presentation, each written the way the CLSID
+# key documents it: `<clipboard format>, <aspect>, <medium>, <direction>`. These are the three the
+# object answers `GetData` for (`src/formats.rs`), in the order it prefers them, and nothing else:
+# a host that asks for what is advertised here gets a picture, and a host that asks for anything
+# else gets `DV_E_FORMATETC`, which is the failure that stops Word's insertion.
 $formats = @(
-    'Document,1,1,3',
-    'Embed_Source,1,8,1',
-    '1,1,1,3',
-    '3,1,32,1'
+    '3,1,32,1',    # CF_METAFILEPICT, DVASPECT_CONTENT, TYMED_MFPICT, DATADIR_GET
+    '14,1,64,1',   # CF_ENHMETAFILE, DVASPECT_CONTENT, TYMED_ENHMF, DATADIR_GET
+    '8,1,1,1'      # CF_DIB, DVASPECT_CONTENT, TYMED_HGLOBAL, DATADIR_GET
 )
 for ($index = 0; $index -lt $formats.Count; $index++) {
     $key = Join-Path $classKey "DataFormats\GetSet\$index"

@@ -37,15 +37,15 @@ use windows::Win32::System::Com::{
     DISPATCH_PROPERTYPUTREF, DISPPARAMS, DVASPECT, DVASPECT_CONTENT, DVTARGETDEVICE, EXCEPINFO,
     FORMATETC, IAdviseSink, IDataObject, IDataObject_Impl, IDispatch, IDispatch_Impl,
     IEnumFORMATETC, IEnumSTATDATA, IMoniker, IPersist_Impl, ITypeInfo, STGMEDIUM, STGMEDIUM_0,
-    TYMED_ENHMF, TYMED_HGLOBAL,
+    TYMED_ENHMF, TYMED_HGLOBAL, TYMED_MFPICT,
 };
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::{
-    ACTIVEOBJECT_WEAK, CF_ENHMETAFILE, IEnumOLEVERB, IOleClientSite, IOleObject, IOleObject_Impl,
-    IViewObject_Impl, IViewObject2, IViewObject2_Impl, OLECLOSE, OLECLOSE_SAVEIFDIRTY,
-    OLEGETMONIKER, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY, OLEIVERB_SHOW, OLEMISC,
-    OLEMISC_RECOMPOSEONRESIZE, OLEMISC_RENDERINGISDEVICEINDEPENDENT, OLEWHICHMK,
-    RegisterActiveObject, RevokeActiveObject, USERCLASSTYPE, USERCLASSTYPE_APPNAME,
+    ACTIVEOBJECT_WEAK, CF_ENHMETAFILE, CF_METAFILEPICT, IEnumOLEVERB, IOleClientSite, IOleObject,
+    IOleObject_Impl, IViewObject_Impl, IViewObject2, IViewObject2_Impl, OLECLOSE,
+    OLECLOSE_SAVEIFDIRTY, OLEGETMONIKER, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY,
+    OLEIVERB_SHOW, OLEMISC, OLEMISC_RECOMPOSEONRESIZE, OLEMISC_RENDERINGISDEVICEINDEPENDENT,
+    OLEWHICHMK, RegisterActiveObject, RevokeActiveObject, USERCLASSTYPE, USERCLASSTYPE_APPNAME,
     USERCLASSTYPE_SHORT,
 };
 use windows::Win32::System::Variant::VARIANT;
@@ -603,6 +603,7 @@ impl IOleObject_Impl for EquationObject_Impl {
     }
 
     fn GetClientSite(&self) -> WinResult<IOleClientSite> {
+        trace::log("call GetClientSite");
         self.inner
             .borrow()
             .client_site
@@ -742,18 +743,22 @@ impl IOleObject_Impl for EquationObject_Impl {
     }
 
     fn Update(&self) -> WinResult<()> {
+        trace::log("call Update");
         Ok(())
     }
 
     fn IsUpToDate(&self) -> WinResult<()> {
+        trace::log("call IsUpToDate");
         Ok(())
     }
 
     fn GetUserClassID(&self) -> WinResult<GUID> {
+        trace::log("call GetUserClassID");
         Ok(CLSID_EQUATION)
     }
 
     fn GetUserType(&self, dwformoftype: &USERCLASSTYPE) -> WinResult<PWSTR> {
+        trace::log("call GetUserType");
         let text = if *dwformoftype == USERCLASSTYPE_SHORT {
             "Equation"
         } else if *dwformoftype == USERCLASSTYPE_APPNAME {
@@ -765,6 +770,7 @@ impl IOleObject_Impl for EquationObject_Impl {
     }
 
     fn SetExtent(&self, dwdrawaspect: DVASPECT, psizel: *const SIZE) -> WinResult<()> {
+        trace::log("call SetExtent");
         self.state.note_busy();
         if dwdrawaspect != DVASPECT_CONTENT || psizel.is_null() {
             return Ok(());
@@ -786,6 +792,7 @@ impl IOleObject_Impl for EquationObject_Impl {
     }
 
     fn GetExtent(&self, dwdrawaspect: DVASPECT) -> WinResult<SIZE> {
+        trace::log("call GetExtent");
         if dwdrawaspect != DVASPECT_CONTENT {
             return Err(Error::from_hresult(DV_E_DVASPECT));
         }
@@ -824,6 +831,7 @@ impl IOleObject_Impl for EquationObject_Impl {
     }
 
     fn GetMiscStatus(&self, dwaspect: DVASPECT) -> WinResult<OLEMISC> {
+        trace::log("call GetMiscStatus");
         if dwaspect != DVASPECT_CONTENT {
             return Ok(OLEMISC(0));
         }
@@ -838,6 +846,7 @@ impl IOleObject_Impl for EquationObject_Impl {
 
 impl IDataObject_Impl for EquationObject_Impl {
     fn GetData(&self, pformatetcin: *const FORMATETC) -> WinResult<STGMEDIUM> {
+        trace::log("call GetData");
         if pformatetcin.is_null() {
             return Err(Error::from_hresult(DV_E_FORMATETC));
         }
@@ -845,12 +854,34 @@ impl IDataObject_Impl for EquationObject_Impl {
         if !formats::supported(&format) {
             let reason = formats::rejection(&format);
             trace::log(&format!(
-                "GetData(cf={}) -> refused {:#010X}",
-                format.cfFormat, reason.0 as u32
+                "GetData(cf={}, aspect={}, tymed={}, lindex={}) -> refused {:#010X}",
+                format.cfFormat, format.dwAspect, format.tymed, format.lindex, reason.0 as u32
             ));
             return Err(Error::from_hresult(reason));
         }
         let picture = self.picture()?;
+        if format.cfFormat == CF_METAFILEPICT.0 {
+            // The classic picture: the same equation as a Windows-format metafile inside a
+            // `METAFILEPICT` the host frees with `ReleaseStgMedium`.
+            let Some(memory) = picture::metafile_picture(&picture) else {
+                trace::log("GetData -> CF_METAFILEPICT could not be built");
+                return Err(Error::new(
+                    E_FAIL,
+                    "the equation metafile picture could not be built",
+                ));
+            };
+            trace::log(&format!(
+                "GetData -> CF_METAFILEPICT ({:.1}x{:.1} points)",
+                picture.width_pt, picture.height_pt
+            ));
+            return Ok(STGMEDIUM {
+                tymed: TYMED_MFPICT.0 as u32,
+                u: STGMEDIUM_0 {
+                    hMetaFilePict: memory.0,
+                },
+                pUnkForRelease: ManuallyDrop::new(None),
+            });
+        }
         if format.cfFormat == CF_ENHMETAFILE.0 {
             // The vector picture: the metafile bytes become a GDI handle the host plays back at
             // whatever size it is drawing, so zooming stays sharp.
@@ -910,6 +941,7 @@ impl IDataObject_Impl for EquationObject_Impl {
     }
 
     fn QueryGetData(&self, pformatetc: *const FORMATETC) -> HRESULT {
+        trace::log("call QueryGetData");
         if pformatetc.is_null() {
             return DV_E_FORMATETC;
         }
@@ -926,13 +958,14 @@ impl IDataObject_Impl for EquationObject_Impl {
         pformatectin: *const FORMATETC,
         pformatetcout: *mut FORMATETC,
     ) -> HRESULT {
+        trace::log("call GetCanonicalFormatEtc");
         if pformatectin.is_null() || pformatetcout.is_null() {
             return E_NOTIMPL;
         }
         let format = unsafe { *pformatectin };
-        unsafe { pformatetcout.write(format) };
         // The object has one presentation, so what came in is what goes out, without a target
         // device, which is what `DATA_S_SAMEFORMATETC` means.
+        unsafe { pformatetcout.write(formats::canonical(&format)) };
         DATA_S_SAMEFORMATETC
     }
 
@@ -993,6 +1026,7 @@ impl IViewObject_Impl for EquationObject_Impl {
         _pfncontinue: isize,
         _dwcontinue: usize,
     ) -> WinResult<()> {
+        trace::log("call Draw");
         if dwdrawaspect != DVASPECT_CONTENT || lprcbounds.is_null() || hdcdraw.is_invalid() {
             return Err(Error::from_hresult(DV_E_DVASPECT));
         }
@@ -1074,6 +1108,7 @@ impl IViewObject_Impl for EquationObject_Impl {
         _advf: u32,
         padvsink: Ref<IAdviseSink>,
     ) -> WinResult<()> {
+        trace::log("call SetAdvise");
         let mut inner = self.inner.borrow_mut();
         inner.view_advise = padvsink.cloned().map(|sink| (aspects.0, sink));
         trace::log(&format!("SetAdvise(aspects={:#X})", aspects.0));
@@ -1097,6 +1132,7 @@ impl IViewObject2_Impl for EquationObject_Impl {
         _lindex: i32,
         _ptd: *const DVTARGETDEVICE,
     ) -> WinResult<SIZE> {
+        trace::log("call GetExtent (IViewObject2)");
         if dwdrawaspect != DVASPECT_CONTENT {
             return Err(Error::from_hresult(DV_E_DVASPECT));
         }
@@ -1113,6 +1149,7 @@ impl IPersist_Impl for EquationObject_Impl {
 
 impl IPersistStorage_Impl for EquationObject_Impl {
     fn IsDirty(&self) -> HRESULT {
+        trace::log("call IsDirty");
         if self.inner.borrow().dirty {
             HRESULT(0)
         } else {

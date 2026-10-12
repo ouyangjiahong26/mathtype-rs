@@ -30,6 +30,8 @@ mod clsid;
 #[cfg(windows)]
 mod factory;
 #[cfg(windows)]
+mod fatal;
+#[cfg(windows)]
 mod formats;
 #[cfg(windows)]
 mod handoff;
@@ -66,6 +68,8 @@ environment variable MATHTYPE_RS_EDITOR.
 
 #[cfg(windows)]
 fn main() -> ExitCode {
+    // Before anything else: a fault in a COM call would otherwise end this process silently.
+    fatal::install();
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     if arguments
         .iter()
