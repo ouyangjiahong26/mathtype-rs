@@ -36,6 +36,8 @@ mod formats;
 #[cfg(windows)]
 mod handoff;
 #[cfg(windows)]
+mod notify;
+#[cfg(windows)]
 mod object;
 #[cfg(windows)]
 mod picture;

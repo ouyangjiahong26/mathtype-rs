@@ -409,12 +409,12 @@ fn tick(inner: &RefCell<Inner>) {
     match write_streams(inner) {
         Ok(note) => {
             trace::log(&note);
-            {
-                let mut state = inner.borrow_mut();
-                state.dirty = false;
-                state.note(&note);
-            }
-            notify_saved(inner);
+            // The streams are in the host's storage, but the host has not saved the document that
+            // holds them, so the object stays dirty: `IsDirty` is where the host asks whether its
+            // document has changes, and that is what makes it save. The host is deliberately not
+            // asked to save from here, because it may be inside a save of its own at this very
+            // moment: a container told to save while it is saving does not come out of it.
+            inner.borrow_mut().note(&note);
         }
         Err(error) => {
             trace::log(&format!("the new equation is held in memory only: {error}"));
@@ -463,32 +463,24 @@ fn write_streams(inner: &RefCell<Inner>) -> Result<String, String> {
     ))
 }
 
-/// Tell the host the object changed and needs saving.
-fn notify_saved(inner: &RefCell<Inner>) {
-    let (site, sinks, view) = {
+/// Tell the host's advise sinks that the object was saved and that its picture may have changed.
+///
+/// This is what the sinks are for, and it is deliberately all that is said to the host from here:
+/// asking the host to save its document is not this object's business at this point, because the
+/// object being dirty already says so where the host looks for it (`IsDirty`), and a container
+/// that is told to save while it is saving is a container that stops.
+fn announce_saved(inner: &RefCell<Inner>) {
+    let (sinks, view) = {
         let state = inner.borrow();
-        (
-            state.client_site.clone(),
-            state.sinks(),
-            state.view_advise.clone(),
-        )
+        (state.sinks(), state.view_advise.clone())
     };
-    if let Some(site) = site {
-        trace::log("asking the host to save the object");
-        if let Err(error) = unsafe { site.SaveObject() } {
-            trace::log(&format!(
-                "the host refused to save the object: {}",
-                storage::error_text(&error)
-            ));
-        }
-    }
     for (connection, sink) in sinks {
         trace::log(&format!("advise connection {connection}: OnSave"));
-        unsafe { sink.OnSave() };
+        crate::notify::on_save(&sink);
     }
     if let Some((aspects, sink)) = view {
         trace::log("advise connection: OnViewChange");
-        unsafe { sink.OnViewChange(aspects, -1) };
+        crate::notify::on_view_change(&sink, aspects);
     }
 }
 
@@ -538,16 +530,15 @@ impl EquationObject {
     }
 
     /// Write the streams on demand, the way the automation `Save` member does.
+    ///
+    /// The object stays dirty afterwards: its streams are in the host's storage, but the host has
+    /// not saved the document that holds them, and `IsDirty` is what asks it to.
     fn save_now(&self) -> String {
         self.state.note_busy();
         match write_streams(&self.inner) {
             Ok(note) => {
-                {
-                    let mut inner = self.inner.borrow_mut();
-                    inner.dirty = false;
-                    inner.note(&note);
-                }
-                notify_saved(&self.inner);
+                self.inner.borrow_mut().note(&note);
+                announce_saved(&self.inner);
                 String::new()
             }
             Err(error) => error,
@@ -653,7 +644,7 @@ impl IOleObject_Impl for EquationObject_Impl {
                     inner.note(&note);
                 }
                 trace::log(&format!("Close(save={}): {note}", dwsaveoption.0));
-                notify_saved(&self.inner);
+                announce_saved(&self.inner);
                 self.state.object_closed();
                 Ok(())
             }
