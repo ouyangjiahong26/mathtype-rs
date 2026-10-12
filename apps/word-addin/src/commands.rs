@@ -35,7 +35,8 @@ const MAX_SIZE: f64 = 200.0;
 /// size can have — including `NaN`, which compares false against every bound — falls back to the
 /// default instead.
 fn render_size(size: Option<f64>) -> f64 {
-    size.filter(|size| size.is_finite() && (MIN_SIZE..=MAX_SIZE).contains(size)).unwrap_or(DEFAULT_SIZE)
+    size.filter(|size| size.is_finite() && (MIN_SIZE..=MAX_SIZE).contains(size))
+        .unwrap_or(DEFAULT_SIZE)
 }
 
 /// What a command reports: the message for the status bar, or why it could not run.
@@ -48,37 +49,52 @@ fn failed(operation: &'static str) -> impl Fn(windows::core::Error) -> String {
 
 /// Turns the selected LaTeX into a native Word equation.
 pub fn to_equation(application: &Object) -> Outcome {
-    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
+    let selection =
+        word::selection(application).map_err(failed("the selection could not be read"))?;
     if equations_in(&selection)? > 0 {
         return Err("the selection already holds an equation".to_string());
     }
     let latex = selected_latex(&selection)?;
     let math = mt_tex::parse(&latex).map_err(|error| format!("not LaTeX: {error}"))?;
     let markup = mt_omml::write(&math);
-    clipboard::put_equation(&markup, &latex).map_err(failed("the clipboard could not be filled"))?;
-    selection.call("Paste", Vec::new()).map_err(failed("the equation could not be pasted"))?;
+    clipboard::put_equation(&markup, &latex)
+        .map_err(failed("the clipboard could not be filled"))?;
+    selection
+        .call("Paste", Vec::new())
+        .map_err(failed("the equation could not be pasted"))?;
     Ok(format!("equation inserted: {latex}"))
 }
 
 /// Turns the selected equation back into LaTeX text.
 pub fn to_latex(application: &Object) -> Outcome {
-    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
+    let selection =
+        word::selection(application).map_err(failed("the selection could not be read"))?;
     let equation = word::selected_equation(&selection)
         .map_err(failed("the selection could not be read"))?
         .ok_or_else(|| "the selection does not hold an equation".to_string())?;
-    let range = equation.get_object("Range").map_err(failed("the equation could not be read"))?;
-    let xml = range.get_string("WordOpenXML").map_err(failed("the equation could not be read"))?;
-    let markup = word::extract_math(&xml).ok_or_else(|| "the equation holds no Office Math markup".to_string())?;
+    let range = equation
+        .get_object("Range")
+        .map_err(failed("the equation could not be read"))?;
+    let xml = range
+        .get_string("WordOpenXML")
+        .map_err(failed("the equation could not be read"))?;
+    let markup = word::extract_math(&xml)
+        .ok_or_else(|| "the equation holds no Office Math markup".to_string())?;
     let math = mt_omml::parse(markup).map_err(|error| format!("unreadable equation: {error}"))?;
     let latex = mt_tex::to_latex(&math);
-    word::replace_equation(&equation, &latex).map_err(failed("the equation could not be replaced"))?;
+    word::replace_equation(&equation, &latex)
+        .map_err(failed("the equation could not be replaced"))?;
     Ok(format!("converted to LaTeX: {latex}"))
 }
 
 /// Converts whichever way fits the selection.
 pub fn toggle(application: &Object) -> Outcome {
-    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
-    if word::selected_equation(&selection).map_err(failed("the selection could not be read"))?.is_some() {
+    let selection =
+        word::selection(application).map_err(failed("the selection could not be read"))?;
+    if word::selected_equation(&selection)
+        .map_err(failed("the selection could not be read"))?
+        .is_some()
+    {
         to_latex(application)
     } else {
         to_equation(application)
@@ -87,37 +103,57 @@ pub fn toggle(application: &Object) -> Outcome {
 
 /// Renders the selected LaTeX to a PNG next to the document.
 pub fn export_png(application: &Object) -> Outcome {
-    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
+    let selection =
+        word::selection(application).map_err(failed("the selection could not be read"))?;
     let latex = selected_latex(&selection)?;
     let math = mt_tex::parse(&latex).map_err(|error| format!("not LaTeX: {error}"))?;
-    let document = word::active_document(application).map_err(failed("the document could not be read"))?;
-    let directory = document.get_string("Path").map_err(failed("the document could not be read"))?;
-    let name = document.get_string("Name").map_err(failed("the document could not be read"))?;
+    let document =
+        word::active_document(application).map_err(failed("the document could not be read"))?;
+    let directory = document
+        .get_string("Path")
+        .map_err(failed("the document could not be read"))?;
+    let name = document
+        .get_string("Name")
+        .map_err(failed("the document could not be read"))?;
     let size = render_size(
-        selection.get_object("Font").and_then(|font| font.get("Size")).and_then(|size| size.number()).ok(),
+        selection
+            .get_object("Font")
+            .and_then(|font| font.get("Size"))
+            .and_then(|size| size.number())
+            .ok(),
     );
 
-    let face = ttf_parser::Face::parse(FACE, 0).map_err(|error| format!("the bundled font could not be read: {error}"))?;
+    let face = ttf_parser::Face::parse(FACE, 0)
+        .map_err(|error| format!("the bundled font could not be read: {error}"))?;
     let style = LayoutStyle::display(size);
     let tree = layout(&math, &ApproxMetrics, &style);
     let image = render_png(&tree, &style, &face, &RenderOptions::default())
         .map_err(|error| format!("the image could not be encoded: {error}"))?;
     let target = image_path(&directory, &name);
-    std::fs::write(&target, &image).map_err(|error| format!("{} could not be written: {error}", target.display()))?;
+    std::fs::write(&target, &image)
+        .map_err(|error| format!("{} could not be written: {error}", target.display()))?;
     Ok(format!("image written to {}", target.display()))
 }
 
 /// Exports the whole document as a web page directory next to it: `index.html` plus `media/`,
 /// formulas as inline MathML.
 pub fn export_html(application: &Object) -> Outcome {
-    let document = word::active_document(application).map_err(failed("the document could not be read"))?;
-    let directory = document.get_string("Path").map_err(failed("the document could not be read"))?;
-    let name = document.get_string("Name").map_err(failed("the document could not be read"))?;
-    let path = document.get_string("FullName").map_err(failed("the document could not be read"))?;
+    let document =
+        word::active_document(application).map_err(failed("the document could not be read"))?;
+    let directory = document
+        .get_string("Path")
+        .map_err(failed("the document could not be read"))?;
+    let name = document
+        .get_string("Name")
+        .map_err(failed("the document could not be read"))?;
+    let path = document
+        .get_string("FullName")
+        .map_err(failed("the document could not be read"))?;
     if path.is_empty() || directory.is_empty() {
         return Err("the document has never been saved".to_owned());
     }
-    let bytes = std::fs::read(&path).map_err(|error| format!("{path} could not be read: {error}"))?;
+    let bytes =
+        std::fs::read(&path).map_err(|error| format!("{path} could not be read: {error}"))?;
     let opened = mt_docx::Document::open(&bytes)
         .map_err(|error| format!("{path} could not be opened: {error}"))?;
     let stem = Path::new(&name).file_stem().map_or_else(
@@ -141,10 +177,17 @@ pub fn export_html(application: &Object) -> Outcome {
 /// bookmark itself stays in the output and can be deleted there. When no bookmark can be placed
 /// or found, the whole document is converted.
 pub fn batch_convert(application: &Object) -> Outcome {
-    let document = word::active_document(application).map_err(failed("the document could not be read"))?;
-    let directory = document.get_string("Path").map_err(failed("the document could not be read"))?;
-    let name = document.get_string("Name").map_err(failed("the document could not be read"))?;
-    let full_name = document.get_string("FullName").map_err(failed("the document could not be read"))?;
+    let document =
+        word::active_document(application).map_err(failed("the document could not be read"))?;
+    let directory = document
+        .get_string("Path")
+        .map_err(failed("the document could not be read"))?;
+    let name = document
+        .get_string("Name")
+        .map_err(failed("the document could not be read"))?;
+    let full_name = document
+        .get_string("FullName")
+        .map_err(failed("the document could not be read"))?;
     if full_name.is_empty() || directory.is_empty() {
         return Err("the document has never been saved".to_owned());
     }
@@ -152,33 +195,43 @@ pub fn batch_convert(application: &Object) -> Outcome {
     // Selection scope, best effort: a real sub-selection is bookmarked so the pipeline can cut
     // its range out of the document's markup. Any failure here falls back to the whole document.
     let mut scoped = false;
-    if let Some(selection) = word::selection(application).ok() {
+    if let Ok(selection) = word::selection(application) {
         let bounds = (selection.get_i32("Start"), selection.get_i32("End"));
-        let content = document.get_object("Content").map_err(failed("the document could not be read"))?;
+        let content = document
+            .get_object("Content")
+            .map_err(failed("the document could not be read"))?;
         let whole = (content.get_i32("Start"), content.get_i32("End"));
         if let (Ok(start), Ok(end), Ok(content_start), Ok(content_end)) =
             (bounds.0, bounds.1, whole.0, whole.1)
         {
             let partial = start != end && !(start == content_start && end == content_end);
-            if partial {
-                if selection
+            if partial
+                && selection
                     .get_object("Bookmarks")
-                    .and_then(|bookmarks| bookmarks.call_object("Add", vec![Variant::bstr(SCOPE_BOOKMARK)]))
+                    .and_then(|bookmarks| {
+                        bookmarks.call_object("Add", vec![Variant::bstr(SCOPE_BOOKMARK)])
+                    })
                     .is_ok()
-                {
-                    scoped = true;
-                }
+            {
+                scoped = true;
             }
         }
     }
     // The bookmark only exists on disk once the document is saved; saving is what a batch run
     // wants anyway. `Saved` being false only means the disk copy is stale.
-    let saved = document.get("Saved").and_then(|value| value.number()).map(|value| value != 0.0).unwrap_or(false);
+    let saved = document
+        .get("Saved")
+        .and_then(|value| value.number())
+        .map(|value| value != 0.0)
+        .unwrap_or(false);
     if !saved {
-        document.call("Save", Vec::new()).map_err(failed("the document could not be saved"))?;
+        document
+            .call("Save", Vec::new())
+            .map_err(failed("the document could not be saved"))?;
     }
 
-    let bytes = std::fs::read(&full_name).map_err(|error| format!("{full_name} could not be read: {error}"))?;
+    let bytes = std::fs::read(&full_name)
+        .map_err(|error| format!("{full_name} could not be read: {error}"))?;
     let scope = scope_of(&bytes, scoped);
     let directory = PathBuf::from(&directory);
     let options = mt_batch::Options {
@@ -189,7 +242,8 @@ pub fn batch_convert(application: &Object) -> Outcome {
         export_dir: directory.clone(),
         scope,
     };
-    let outcome = mt_batch::run(&bytes, &options, &mut |_| true).map_err(|error| format!("批量转换失败: {error}"))?;
+    let outcome = mt_batch::run(&bytes, &options, &mut |_| true)
+        .map_err(|error| format!("批量转换失败: {error}"))?;
     let report = &outcome.report;
 
     let stem = Path::new(&name).file_stem().map_or_else(
@@ -198,13 +252,18 @@ pub fn batch_convert(application: &Object) -> Outcome {
     );
     let target = directory.join(format!("{stem}-converted.docx"));
     if let Some(docx) = &outcome.docx {
-        std::fs::write(&target, docx).map_err(|error| format!("{} could not be written: {error}", target.display()))?;
+        std::fs::write(&target, docx)
+            .map_err(|error| format!("{} could not be written: {error}", target.display()))?;
     }
     let report_path = directory.join(format!("{stem}-batch-report.txt"));
     std::fs::write(&report_path, report.to_text())
         .map_err(|error| format!("{} could not be written: {error}", report_path.display()))?;
 
-    let scope_note = if scoped { "（仅选区内的公式）" } else { "（整篇文档）" };
+    let scope_note = if scoped {
+        "（仅选区内的公式）"
+    } else {
+        "（整篇文档）"
+    };
     Ok(format!(
         "批量转换{}：共 {} 个，成功 {}，失败 {}；另存为 {}，报告 {}",
         scope_note,
@@ -233,7 +292,12 @@ fn scope_of(bytes: &[u8], scoped: bool) -> Option<(usize, usize)> {
     let name = xml.find(format!("w:name=\"{SCOPE_BOOKMARK}\"").as_str())?;
     let start = xml[..name].rfind("<w:bookmarkStart")?;
     let attributes = &xml[start..name];
-    let id = attributes.split("w:id=\"").nth(1)?.split('"').next()?.to_owned();
+    let id = attributes
+        .split("w:id=\"")
+        .nth(1)?
+        .split('"')
+        .next()?
+        .to_owned();
     let end_marker = format!("w:id=\"{id}\"");
     let end = xml[name..].find("<w:bookmarkEnd")? + name;
     if xml[end..].contains(&end_marker) {
@@ -251,14 +315,19 @@ const OBJECT_SERVER: &str = "MathTypeRs.Equation.1";
 /// The class id is looked up the way any client would, so a server installed for another user or
 /// not installed at all is reported before the host is asked to create the object.
 fn object_server_registered() -> bool {
-    let class: Vec<u16> = OBJECT_SERVER.encode_utf16().chain(std::iter::once(0)).collect();
+    let class: Vec<u16> = OBJECT_SERVER
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     // SAFETY: the name is NUL terminated.
     unsafe { CLSIDFromProgID(PCWSTR(class.as_ptr())) }.is_ok()
 }
 
 /// What to say when the object server is not there.
 fn missing_object_server() -> String {
-    format!("the {OBJECT_SERVER} object server is not registered; run install.ps1 in apps/ole-server")
+    format!(
+        "the {OBJECT_SERVER} object server is not registered; run install.ps1 in apps/ole-server"
+    )
 }
 
 /// Inserts the selected LaTeX as an embedded equation object.
@@ -272,7 +341,8 @@ pub fn insert_object(application: &Object) -> Outcome {
     if !object_server_registered() {
         return Err(missing_object_server());
     }
-    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
+    let selection =
+        word::selection(application).map_err(failed("the selection could not be read"))?;
     let latex = selected_latex(&selection)?;
     // The object is created before anything can be handed to it, so the source is left on the
     // clipboard for its server to pick up as it starts; it is given the source properly below. It
@@ -280,11 +350,20 @@ pub fn insert_object(application: &Object) -> Outcome {
     // can be cleared.
     clipboard::put_latex(&latex).map_err(failed("the clipboard could not be filled"))?;
     // The object takes the place of the source text.
-    selection.call("Delete", Vec::new()).map_err(failed("the selection could not be cleared"))?;
-    let shapes = selection.get_object("InlineShapes").map_err(failed("the selection could not be reached"))?;
+    selection
+        .call("Delete", Vec::new())
+        .map_err(failed("the selection could not be cleared"))?;
+    let shapes = selection
+        .get_object("InlineShapes")
+        .map_err(failed("the selection could not be reached"))?;
     let shape = match shapes.call_object(
         "AddOLEObject",
-        vec![Variant::bstr(OBJECT_SERVER), Variant::missing(), Variant::boolean(false), Variant::boolean(false)],
+        vec![
+            Variant::bstr(OBJECT_SERVER),
+            Variant::missing(),
+            Variant::boolean(false),
+            Variant::boolean(false),
+        ],
     ) {
         Ok(shape) => shape,
         Err(error) => {
@@ -314,7 +393,9 @@ pub fn insert_object(application: &Object) -> Outcome {
 fn restore_source(selection: &Object) -> String {
     match selection.call("Paste", Vec::new()) {
         Ok(_) => "; the source text was put back".to_string(),
-        Err(error) => format!("; the source text could not be put back and is still on the clipboard ({error})"),
+        Err(error) => format!(
+            "; the source text could not be put back and is still on the clipboard ({error})"
+        ),
     }
 }
 
@@ -325,20 +406,26 @@ fn restore_source(selection: &Object) -> String {
 /// take the source, or has nowhere to store it, is not handed the source at all, so a failure here
 /// is told apart from a success instead of being reported as one.
 fn hand_over(shape: &Object, latex: &str) -> Result<(), String> {
-    let format = shape.get_object("OLEFormat").map_err(failed("the equation object could not be reached"))?;
-    let server = format.get_object("Object").map_err(failed("the equation object has no server"))?;
+    let format = shape
+        .get_object("OLEFormat")
+        .map_err(failed("the equation object could not be reached"))?;
+    let server = format
+        .get_object("Object")
+        .map_err(failed("the equation object has no server"))?;
     match server.call("SetLatex", vec![Variant::bstr(latex)]) {
         Ok(_) => {}
         Err(error) if absent_member(&error) => {
-            return Err("the equation object does not accept LaTeX (no SetLatex member)".to_string())
+            return Err(
+                "the equation object does not accept LaTeX (no SetLatex member)".to_string(),
+            );
         }
         Err(error) => return Err(failed("the equation object did not take the LaTeX")(error)),
     }
     match server.call("Save", Vec::new()) {
         Ok(_) => Ok(()),
-        Err(error) if absent_member(&error) => {
-            Err("the equation object has nowhere to store the equation (no Save member)".to_string())
-        }
+        Err(error) if absent_member(&error) => Err(
+            "the equation object has nowhere to store the equation (no Save member)".to_string(),
+        ),
         Err(error) => Err(failed("the equation object could not be stored")(error)),
     }
 }
@@ -350,15 +437,24 @@ fn absent_member(error: &windows::core::Error) -> bool {
 
 /// The document's whole markup as Word writes it, the add-in's view of what is already there.
 fn document_xml(application: &Object) -> Result<String, String> {
-    let document = word::active_document(application).map_err(failed("the document could not be read"))?;
-    let content = document.get_object("Content").map_err(failed("the document could not be read"))?;
-    content.get_string("WordOpenXML").map_err(failed("the document could not be read"))
+    let document =
+        word::active_document(application).map_err(failed("the document could not be read"))?;
+    let content = document
+        .get_object("Content")
+        .map_err(failed("the document could not be read"))?;
+    content
+        .get_string("WordOpenXML")
+        .map_err(failed("the document could not be read"))
 }
 
 /// Inserts raw WordprocessingML at the selection, replacing it.
 fn insert_xml(selection: &Object, xml: &str) -> Result<(), String> {
-    let range = selection.get_object("Range").map_err(failed("the selection could not be read"))?;
-    range.call("InsertXML", vec![Variant::bstr(xml)]).map_err(failed("the markup could not be inserted"))?;
+    let range = selection
+        .get_object("Range")
+        .map_err(failed("the selection could not be read"))?;
+    range
+        .call("InsertXML", vec![Variant::bstr(xml)])
+        .map_err(failed("the markup could not be inserted"))?;
     Ok(())
 }
 
@@ -368,7 +464,8 @@ fn insert_xml(selection: &Object, xml: &str) -> Result<(), String> {
 /// The style and side come from the document's numbering settings (the hidden `MTNumberSettings`
 /// marker), so a document numbered in one shape keeps that shape.
 pub fn insert_numbered_equation(application: &Object) -> Outcome {
-    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
+    let selection =
+        word::selection(application).map_err(failed("the selection could not be read"))?;
     let latex = selected_latex(&selection)?;
     let math = mt_tex::parse(&latex).map_err(|error| format!("not LaTeX: {error}"))?;
     let xml = document_xml(application)?;
@@ -396,18 +493,24 @@ pub fn insert_section_break(application: &Object) -> Outcome {
 }
 
 fn insert_break(application: &Object, kind: mt_numbering::BreakKind) -> Outcome {
-    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
+    let selection =
+        word::selection(application).map_err(failed("the selection could not be read"))?;
     let xml = document_xml(application)?;
     let index = mt_numbering::break_count_in_xml(&xml, kind) + 1;
     let markup = mt_numbering::break_paragraph_standalone(kind, index);
     insert_xml(&selection, &markup)?;
-    Ok(format!("{} break {} inserted; update fields to renumber", kind.as_str(), index))
+    Ok(format!(
+        "{} break {} inserted; update fields to renumber",
+        kind.as_str(),
+        index
+    ))
 }
 
 /// Inserts a cross-reference to the most recently numbered equation (#11): a REF field on its
 /// bookmark, at the selection.
 pub fn insert_cross_reference(application: &Object) -> Outcome {
-    let selection = word::selection(application).map_err(failed("the selection could not be read"))?;
+    let selection =
+        word::selection(application).map_err(failed("the selection could not be read"))?;
     let xml = document_xml(application)?;
     let numbered = mt_numbering::numbered_in_xml(&xml);
     let Some((number, bookmark)) = numbered.last() else {
@@ -418,7 +521,9 @@ pub fn insert_cross_reference(application: &Object) -> Outcome {
         mt_numbering::reference_runs(bookmark, *number)
     );
     insert_xml(&selection, &markup)?;
-    Ok(format!("cross-reference to equation {number} ({bookmark}) inserted"))
+    Ok(format!(
+        "cross-reference to equation {number} ({bookmark}) inserted"
+    ))
 }
 
 /// A command the ribbon can invoke.
@@ -503,12 +608,16 @@ impl Command {
 
     /// The command a member name names, if it names one.
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|command| command.name().eq_ignore_ascii_case(name))
+        Self::ALL
+            .into_iter()
+            .find(|command| command.name().eq_ignore_ascii_case(name))
     }
 
     /// The command a member id names, if it names one.
     pub fn from_dispid(dispid: i32) -> Option<Self> {
-        Self::ALL.into_iter().find(|command| command.dispid() == dispid)
+        Self::ALL
+            .into_iter()
+            .find(|command| command.dispid() == dispid)
     }
 
     /// Runs the command against the host application.
@@ -548,8 +657,15 @@ fn selected_latex(selection: &Object) -> Result<String, String> {
 /// Where a rendered image goes: next to the document, or in the temporary directory when the
 /// document has never been saved.
 fn image_path(directory: &str, name: &str) -> PathBuf {
-    let stem = Path::new(name).file_stem().map_or_else(|| "document".to_string(), |stem| stem.to_string_lossy().into_owned());
-    let directory = if directory.is_empty() { std::env::temp_dir() } else { PathBuf::from(directory) };
+    let stem = Path::new(name).file_stem().map_or_else(
+        || "document".to_string(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    let directory = if directory.is_empty() {
+        std::env::temp_dir()
+    } else {
+        PathBuf::from(directory)
+    };
     directory.join(format!("{stem}-equation.png"))
 }
 
@@ -560,7 +676,10 @@ mod tests {
     #[test]
     fn the_image_sits_next_to_the_document() {
         let path = image_path(r"C:\docs", "paper.docx");
-        assert_eq!(path, std::path::Path::new(r"C:\docs").join("paper-equation.png"));
+        assert_eq!(
+            path,
+            std::path::Path::new(r"C:\docs").join("paper-equation.png")
+        );
     }
 
     #[test]

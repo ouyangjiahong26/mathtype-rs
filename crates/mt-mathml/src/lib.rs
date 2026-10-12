@@ -75,7 +75,11 @@ pub enum ParseError {
     /// The elements nest deeper than the reader accepts (128 levels); see the crate docs.
     Nesting,
     /// An attribute value could not be interpreted.
-    InvalidAttribute { element: String, attribute: String, value: String },
+    InvalidAttribute {
+        element: String,
+        attribute: String,
+        value: String,
+    },
 }
 
 impl std::fmt::Display for ParseError {
@@ -86,8 +90,15 @@ impl std::fmt::Display for ParseError {
             ParseError::UnknownElement(name) => write!(f, "unsupported MathML element <{name}>"),
             ParseError::Structure(detail) => f.write_str(detail),
             ParseError::Nesting => write!(f, "elements nest deeper than the reader accepts"),
-            ParseError::InvalidAttribute { element, attribute, value } => {
-                write!(f, "unsupported value {value:?} for {attribute} on <{element}>")
+            ParseError::InvalidAttribute {
+                element,
+                attribute,
+                value,
+            } => {
+                write!(
+                    f,
+                    "unsupported value {value:?} for {attribute} on <{element}>"
+                )
             }
         }
     }
@@ -261,10 +272,10 @@ pub(crate) fn space_of_width(width: &str) -> Option<Space> {
     // Numeric lengths: `em` is the unit of the model, `mu` is 1/18 em.
     let (number, unit) = match width.trim().strip_suffix("em") {
         Some(number) => (number, 1.0),
-        None => match width.trim().strip_suffix("mu") {
-            Some(number) => (number, 1.0 / 18.0),
-            None => return None,
-        },
+        None => {
+            let number = width.trim().strip_suffix("mu")?;
+            (number, 1.0 / 18.0)
+        }
     };
     let em = number.trim().parse::<f64>().ok()? * unit;
     const GRID: [(f64, Space); 9] = [
@@ -278,7 +289,9 @@ pub(crate) fn space_of_width(width: &str) -> Option<Space> {
         (-4.0 / 18.0, Space::NegativeMedium),
         (-5.0 / 18.0, Space::NegativeThick),
     ];
-    GRID.iter().find(|(grid, _)| (grid - em).abs() < 1e-4).map(|(_, space)| *space)
+    GRID.iter()
+        .find(|(grid, _)| (grid - em).abs() < 1e-4)
+        .map(|(_, space)| *space)
 }
 
 /// The character that stands for an accent kind in markup, the inverse of [`accent_kind`].

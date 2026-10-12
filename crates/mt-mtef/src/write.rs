@@ -5,7 +5,10 @@
 //! definition per extra face the tree uses — followed by the equation itself. Only fields whose
 //! meaning is established are written, and the reader undoes exactly this encoding.
 
-use mt_core::{Char, Class, Delim, Font, FracKind, Math, MathStyle, Matrix, MatrixKind, Node, Row, Styled, TextRun};
+use mt_core::{
+    Char, Class, Delim, Font, FracKind, Math, MathStyle, Matrix, MatrixKind, Node, Row, Styled,
+    TextRun,
+};
 
 use crate::tables::*;
 use crate::{Dimension, Preferences, StyleDef};
@@ -15,8 +18,8 @@ use crate::{Dimension, Preferences, StyleDef};
 /// They describe the object's frame rather than the equation, and are written unchanged so that
 /// a stream this crate produces can be embedded wherever an object written by MathType can.
 const HOST_HEADER: [u8; 24] = [
-    0x02, 0x00, 0x22, 0xC3, 0xC0, 0x00, 0x00, 0x00, 0x54, 0x00, 0xE3, 0x00, 0x50, 0xF1, 0x55,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0xE3, 0x00,
+    0x02, 0x00, 0x22, 0xC3, 0xC0, 0x00, 0x00, 0x00, 0x54, 0x00, 0xE3, 0x00, 0x50, 0xF1, 0x55, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0xE3, 0x00,
 ];
 
 /// Length of the preamble a written stream opens with: the length field and the host header.
@@ -42,15 +45,24 @@ pub(crate) fn default_preferences() -> Preferences {
     Preferences {
         sizes: DEFAULT_SIZES
             .iter()
-            .map(|(unit, value)| Dimension { unit: *unit, value: (*value).to_owned() })
+            .map(|(unit, value)| Dimension {
+                unit: *unit,
+                value: (*value).to_owned(),
+            })
             .collect(),
         spaces: DEFAULT_SPACES
             .iter()
-            .map(|(unit, value)| Dimension { unit: *unit, value: (*value).to_owned() })
+            .map(|(unit, value)| Dimension {
+                unit: *unit,
+                value: (*value).to_owned(),
+            })
             .collect(),
         styles: DEFAULT_STYLES
             .iter()
-            .map(|(font, style)| StyleDef { font: *font, style: *style })
+            .map(|(font, style)| StyleDef {
+                font: *font,
+                style: *style,
+            })
             .collect(),
     }
 }
@@ -60,7 +72,11 @@ pub(crate) fn document_with_preferences(math: &Math, preferences: &Preferences) 
     let mut fonts = Vec::new();
     let body = applied_fonts(&math.body);
     collect_fonts(&body, &mut fonts);
-    let mut writer = Writer { out: Vec::new(), fonts, prefs: preferences };
+    let mut writer = Writer {
+        out: Vec::new(),
+        fonts,
+        prefs: preferences,
+    };
     writer.header();
     writer.definitions();
     writer.size(math.style);
@@ -210,21 +226,33 @@ impl Writer<'_> {
                     FracKind::Linear => 0x0004,
                     FracKind::NoBar => 0x0006,
                 };
-                self.template(11, variation, &[Slot::Node(&frac.num), Slot::Node(&frac.den)], &[]);
+                self.template(
+                    11,
+                    variation,
+                    &[Slot::Node(&frac.num), Slot::Node(&frac.den)],
+                    &[],
+                );
             }
             Node::Sqrt(sqrt) => {
                 let index = match &sqrt.index {
                     Some(index) => Slot::Node(index),
                     None => Slot::Absent,
                 };
-                self.template(10, u32::from(sqrt.index.is_some()), &[Slot::Node(&sqrt.radicand), index], &[]);
+                self.template(
+                    10,
+                    u32::from(sqrt.index.is_some()),
+                    &[Slot::Node(&sqrt.radicand), index],
+                    &[],
+                );
             }
             Node::Scripts(scripts) => {
                 self.node(&scripts.base);
                 match (&scripts.sub, &scripts.sup) {
                     (None, None) => {}
                     (Some(sub), None) => self.template(27, 0, &[Slot::Node(sub)], &[]),
-                    (None, Some(sup)) => self.template(28, 0, &[Slot::Absent, Slot::Node(sup)], &[]),
+                    (None, Some(sup)) => {
+                        self.template(28, 0, &[Slot::Absent, Slot::Node(sup)], &[])
+                    }
                     (Some(sub), Some(sup)) => {
                         self.template(29, 0, &[Slot::Node(sub), Slot::Node(sup)], &[]);
                     }
@@ -245,7 +273,8 @@ impl Writer<'_> {
                     return;
                 }
                 if let Node::Accent(accent) = node {
-                    let (selector, variation, glyph) = template_of_accent(accent.kind, accent.under);
+                    let (selector, variation, glyph) =
+                        template_of_accent(accent.kind, accent.under);
                     self.template(selector, variation, &[Slot::Node(&accent.base)], &[glyph]);
                 }
             }
@@ -322,7 +351,11 @@ impl Writer<'_> {
 
     /// A writer that shares this one's font definitions and collects records of its own.
     fn blank(&self) -> Writer<'_> {
-        Writer { out: Vec::new(), fonts: self.fonts.clone(), prefs: self.prefs }
+        Writer {
+            out: Vec::new(),
+            fonts: self.fonts.clone(),
+            prefs: self.prefs,
+        }
     }
 
     /// A table record, whose cell lines carry the writer's font definitions.
@@ -340,7 +373,10 @@ impl Writer<'_> {
             columns.min(255) as u8,
         ];
         let partition = if matrix.rules { 0xFF } else { 0x00 };
-        out.extend(std::iter::repeat_n(partition, (matrix.row_count() + 1).div_ceil(4)));
+        out.extend(std::iter::repeat_n(
+            partition,
+            (matrix.row_count() + 1).div_ceil(4),
+        ));
         out.extend(std::iter::repeat_n(partition, (columns + 1).div_ceil(4)));
         let mut cells = self.blank();
         for row in &matrix.rows {
@@ -398,7 +434,13 @@ impl Writer<'_> {
     // -------------------------------------------------------------- records
 
     /// Write a template record: its subobject lines and its decorative characters.
-    fn template(&mut self, selector: u8, variation: u32, lines: &[Slot<'_>], glyphs: &[Option<char>]) {
+    fn template(
+        &mut self,
+        selector: u8,
+        variation: u32,
+        lines: &[Slot<'_>],
+        glyphs: &[Option<char>],
+    ) {
         self.out.push(TAG_TMPL);
         self.out.push(0);
         self.out.push(selector);
@@ -505,7 +547,11 @@ impl Writer<'_> {
     /// own right reads back as one whatever class the tree gives it, so it is written in the
     /// function style to keep the stream stable under a round trip.
     fn typeface(&self, ch: char, font: Font, class: Class) -> i32 {
-        let class = if class_of_char(ch) == Class::Op { Class::Op } else { class };
+        let class = if class_of_char(ch) == Class::Op {
+            Class::Op
+        } else {
+            class
+        };
         standard_typeface(font, class).unwrap_or_else(|| {
             let (name, bits) = explicit_font(font);
             let index = self
@@ -541,7 +587,12 @@ fn embellishment_chain(node: &Node) -> Option<(&mt_core::Char, Vec<u8>)> {
 /// The template selector, variation and decorative characters of a fence. A side only uses its
 /// family's template when it draws that family's own glyph on that side, so a custom delimiter
 /// pointing the wrong way falls through to the interval template.
-fn fence_template(open: Delim, close: Delim, left: bool, right: bool) -> (u8, u32, [Option<char>; 2]) {
+fn fence_template(
+    open: Delim,
+    close: Delim,
+    left: bool,
+    right: bool,
+) -> (u8, u32, [Option<char>; 2]) {
     match (family_of(open), family_of(close)) {
         (Some(open_family), Some(close_family))
             if left
@@ -550,7 +601,11 @@ fn fence_template(open: Delim, close: Delim, left: bool, right: bool) -> (u8, u3
                 && natural_side(open, open_family, true)
                 && natural_side(close, close_family, false) =>
         {
-            (open_family.0, 0x0003, [Some(open_family.1), Some(close_family.2)])
+            (
+                open_family.0,
+                0x0003,
+                [Some(open_family.1), Some(close_family.2)],
+            )
         }
         (Some(family), _) if !right && natural_side(open, family, true) => {
             (family.0, 0x0001, [Some(family.1), None])
@@ -561,7 +616,11 @@ fn fence_template(open: Delim, close: Delim, left: bool, right: bool) -> (u8, u3
         _ => {
             let variation =
                 interval_code(open, true).unwrap_or(0) | interval_code(close, false).unwrap_or(0);
-            (9, variation, [delimiter_char(open, true), delimiter_char(close, false)])
+            (
+                9,
+                variation,
+                [delimiter_char(open, true), delimiter_char(close, false)],
+            )
         }
     }
 }
@@ -614,7 +673,10 @@ fn collect_fonts(node: &Node, fonts: &mut Vec<(String, u8)>) {
         if let Some(font) = font {
             if standard_typeface(font, Class::Ord).is_none() {
                 let (name, bits) = explicit_font(font);
-                if !fonts.iter().any(|(seen, seen_bits)| seen == name && *seen_bits == bits) {
+                if !fonts
+                    .iter()
+                    .any(|(seen, seen_bits)| seen == name && *seen_bits == bits)
+                {
                     fonts.push((name.to_owned(), bits));
                 }
             }
@@ -648,8 +710,15 @@ fn apply_font(node: &Node, font: Option<Font>) -> Node {
     let apply = |node: &Node| apply_font(node, font);
     match node {
         Node::Row(row) => Node::Row(row.iter().map(apply).collect()),
-        Node::Char(ch) => Node::Char(Char { ch: ch.ch, class: ch.class, font: font.unwrap_or(ch.font) }),
-        Node::Text(text) => Node::Text(Box::new(TextRun { text: text.text.clone(), font: font.unwrap_or(text.font) })),
+        Node::Char(ch) => Node::Char(Char {
+            ch: ch.ch,
+            class: ch.class,
+            font: font.unwrap_or(ch.font),
+        }),
+        Node::Text(text) => Node::Text(Box::new(TextRun {
+            text: text.text.clone(),
+            font: font.unwrap_or(text.font),
+        })),
         Node::Space(_) | Node::Align | Node::Error(_) => node.clone(),
         Node::Frac(frac) => Node::Frac(Box::new(mt_core::Frac {
             num: apply(&frac.num),
@@ -677,7 +746,11 @@ fn apply_font(node: &Node, font: Option<Font>) -> Node {
             body: apply(&fence.body),
         })),
         Node::Matrix(matrix) => Node::Matrix(Box::new(mt_core::Matrix {
-            rows: matrix.rows.iter().map(|row| row.iter().map(apply).collect()).collect(),
+            rows: matrix
+                .rows
+                .iter()
+                .map(|row| row.iter().map(apply).collect())
+                .collect(),
             delims: matrix.delims,
             kind: matrix.kind,
             align: matrix.align,
@@ -717,7 +790,11 @@ mod tests {
     use crate::Unit;
 
     fn writer() -> Writer<'static> {
-        Writer { out: Vec::new(), fonts: Vec::new(), prefs: &DEFAULT_PREFERENCES }
+        Writer {
+            out: Vec::new(),
+            fonts: Vec::new(),
+            prefs: &DEFAULT_PREFERENCES,
+        }
     }
 
     static DEFAULT_PREFERENCES: LazyLock<Preferences> = LazyLock::new(default_preferences);
@@ -734,7 +811,9 @@ mod tests {
         // Biased by 128 in one byte; `0xFF`, a low byte and a high byte when it does not fit.
         assert_eq!(
             writer.out,
-            vec![131, 125, 0xFF, 0xC8, 0x80, 0xFF, 0x70, 0x7E, 4, 0xFF, 0x2C, 0x01]
+            vec![
+                131, 125, 0xFF, 0xC8, 0x80, 0xFF, 0x70, 0x7E, 4, 0xFF, 0x2C, 0x01
+            ]
         );
     }
 
@@ -742,7 +821,11 @@ mod tests {
     fn a_wide_variation_takes_two_bytes() {
         let mut writer = writer();
         writer.push_variation(0x70);
-        assert_eq!(writer.out, vec![0x70], "the variations in use fit in one byte");
+        assert_eq!(
+            writer.out,
+            vec![0x70],
+            "the variations in use fit in one byte"
+        );
 
         writer.out.clear();
         writer.push_variation(0x0123);
@@ -753,8 +836,14 @@ mod tests {
     fn dimensions_are_packed_two_to_a_byte() {
         let mut writer = writer();
         writer.dimension_array(&[
-            Dimension { unit: Unit::Points, value: "12".to_owned() },
-            Dimension { unit: Unit::Percent, value: "0.5".to_owned() },
+            Dimension {
+                unit: Unit::Points,
+                value: "12".to_owned(),
+            },
+            Dimension {
+                unit: Unit::Percent,
+                value: "0.5".to_owned(),
+            },
         ]);
         // A unit nibble, the digits of the value, a terminator nibble, and a padding nibble to
         // fill the last byte out.

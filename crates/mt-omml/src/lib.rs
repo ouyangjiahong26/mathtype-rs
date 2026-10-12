@@ -81,7 +81,11 @@ pub enum ParseError {
     /// The elements nest deeper than the reader accepts (128 levels); see the crate docs.
     Nesting,
     /// An attribute value could not be interpreted.
-    InvalidAttribute { element: String, attribute: String, value: String },
+    InvalidAttribute {
+        element: String,
+        attribute: String,
+        value: String,
+    },
 }
 
 impl std::fmt::Display for ParseError {
@@ -89,13 +93,25 @@ impl std::fmt::Display for ParseError {
         match self {
             ParseError::Xml(reason) => write!(f, "malformed XML: {reason}"),
             ParseError::Root(name) => {
-                write!(f, "expected an <oMath> or <oMathPara> root element, found <{name}>")
+                write!(
+                    f,
+                    "expected an <oMath> or <oMathPara> root element, found <{name}>"
+                )
             }
-            ParseError::UnknownElement(name) => write!(f, "unsupported Office Math element <{name}>"),
+            ParseError::UnknownElement(name) => {
+                write!(f, "unsupported Office Math element <{name}>")
+            }
             ParseError::Structure(detail) => f.write_str(detail),
             ParseError::Nesting => write!(f, "elements nest deeper than the reader accepts"),
-            ParseError::InvalidAttribute { element, attribute, value } => {
-                write!(f, "unsupported value {value:?} for {attribute} on <{element}>")
+            ParseError::InvalidAttribute {
+                element,
+                attribute,
+                value,
+            } => {
+                write!(
+                    f,
+                    "unsupported value {value:?} for {attribute} on <{element}>"
+                )
             }
         }
     }
@@ -281,7 +297,11 @@ pub(crate) fn font_properties(font: Font) -> (&'static str, &'static str) {
 }
 
 /// Inverse of [`font_properties`]: `None` when a value is not one Office Math defines.
-pub(crate) fn font_of_properties(script: Option<&str>, style: Option<&str>, normal_text: bool) -> Option<Font> {
+pub(crate) fn font_of_properties(
+    script: Option<&str>,
+    style: Option<&str>,
+    normal_text: bool,
+) -> Option<Font> {
     let (bold, italic) = match style {
         None => (false, !normal_text),
         Some("p") => (false, false),

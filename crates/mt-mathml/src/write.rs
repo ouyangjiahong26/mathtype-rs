@@ -1,8 +1,8 @@
 //! Writing MathML from the equation tree.
 
 use crate::{
-    accent_char, class_marker, class_of, delim_chars, font_marker, kind_marker, side_name, space_width, variant_of,
-    NAMESPACE,
+    NAMESPACE, accent_char, class_marker, class_of, delim_chars, font_marker, kind_marker,
+    side_name, space_width, variant_of,
 };
 use mt_core::{Char, Class, Font, FracKind, Math, MathStyle, Matrix, Node, Side, Styled};
 
@@ -15,12 +15,20 @@ pub fn write(math: &Math) -> String {
     out.push_str("<m:math xmlns:m=\"");
     out.push_str(NAMESPACE);
     out.push_str("\" display=\"");
-    out.push_str(if math.style == MathStyle::Full { "block" } else { "inline" });
+    out.push_str(if math.style == MathStyle::Full {
+        "block"
+    } else {
+        "inline"
+    });
     out.push_str("\">");
     match math.style {
         MathStyle::Script | MathStyle::ScriptScript => {
             out.push_str("<m:mstyle scriptlevel=\"");
-            out.push_str(if math.style == MathStyle::Script { "1" } else { "2" });
+            out.push_str(if math.style == MathStyle::Script {
+                "1"
+            } else {
+                "2"
+            });
             out.push_str("\">");
             node(&mut out, &math.body);
             close(&mut out, "m:mstyle");
@@ -77,30 +85,70 @@ fn node(out: &mut String, value: &Node) {
             }
         },
         Node::Scripts(scripts) => {
-            attached(out, &scripts.base, scripts.sub.as_ref(), scripts.sup.as_ref(), false, &[]);
+            attached(
+                out,
+                &scripts.base,
+                scripts.sub.as_ref(),
+                scripts.sup.as_ref(),
+                false,
+                &[],
+            );
         }
         Node::Limits(limits) => {
             let align = side_name(limits.align);
-            let attrs: &[(&str, &str)] = if limits.align == Side::Center { &[] } else { &[("align", align)] };
-            attached(out, &limits.base, limits.under.as_ref(), limits.over.as_ref(), true, attrs);
+            let attrs: &[(&str, &str)] = if limits.align == Side::Center {
+                &[]
+            } else {
+                &[("align", align)]
+            };
+            attached(
+                out,
+                &limits.base,
+                limits.under.as_ref(),
+                limits.over.as_ref(),
+                true,
+                attrs,
+            );
         }
         Node::Big(big) => {
-            attached(out, &big.base, big.sub.as_ref(), big.sup.as_ref(), big.limits, &[]);
+            attached(
+                out,
+                &big.base,
+                big.sub.as_ref(),
+                big.sup.as_ref(),
+                big.limits,
+                &[],
+            );
         }
         Node::Fence(fence) => {
             let (open_character, close_character) = delim_chars(fence.open, fence.close);
             let open_text = open_character.map(String::from).unwrap_or_default();
             let close_text = close_character.map(String::from).unwrap_or_default();
-            open(out, "m:mfenced", &[("open", &open_text), ("close", &close_text)]);
+            open(
+                out,
+                "m:mfenced",
+                &[("open", &open_text), ("close", &close_text)],
+            );
             node(out, &fence.body);
             close(out, "m:mfenced");
         }
         Node::Matrix(matrix) => matrix_node(out, matrix),
         Node::Accent(accent) => {
-            let (name, flag) = if accent.under { ("m:munder", "accentunder") } else { ("m:mover", "accent") };
+            let (name, flag) = if accent.under {
+                ("m:munder", "accentunder")
+            } else {
+                ("m:mover", "accent")
+            };
             open(out, name, &[(flag, "true")]);
             node(out, &accent.base);
-            character_node(out, &Char { ch: accent_char(accent.kind), class: Class::Ord, font: Font::Upright });
+            character_node(
+                out,
+                &Char {
+                    ch: accent_char(accent.kind),
+                    class: Class::Ord,
+                    font: Font::Upright,
+                },
+            );
             close(out, name);
         }
         Node::Styled(styled) => styled_node(out, styled),
@@ -118,7 +166,14 @@ fn node(out: &mut String, value: &Node) {
 ///
 /// The element name records which of the two slots are filled, and a missing slot the element
 /// still takes is written as an empty row, which reads back as absent.
-fn attached(out: &mut String, base: &Node, lower: Option<&Node>, upper: Option<&Node>, limits: bool, attrs: &[(&str, &str)]) {
+fn attached(
+    out: &mut String,
+    base: &Node,
+    lower: Option<&Node>,
+    upper: Option<&Node>,
+    limits: bool,
+    attrs: &[(&str, &str)],
+) {
     let name = match (lower, upper) {
         (Some(_), Some(_)) if limits => "m:munderover",
         (None, Some(_)) if limits => "m:mover",
@@ -161,7 +216,11 @@ fn character_node(out: &mut String, character: &Char) {
         marker_tokens.push(class_marker(character.class));
     }
     let markers = marker_tokens.join(" ");
-    let default = if name == "m:mi" { Font::Italic } else { Font::Upright };
+    let default = if name == "m:mi" {
+        Font::Italic
+    } else {
+        Font::Upright
+    };
     let mut attrs: Vec<(&str, &str)> = Vec::new();
     if character.font != default {
         if let Some(variant) = variant_of(character.font) {
@@ -209,12 +268,25 @@ fn matrix_node(out: &mut String, matrix: &Matrix) {
         let (open_character, close_character) = delim_chars(open_delim, close_delim);
         let open_text = open_character.map(String::from).unwrap_or_default();
         let close_text = close_character.map(String::from).unwrap_or_default();
-        open(out, "m:mfenced", &[("open", &open_text), ("close", &close_text)]);
+        open(
+            out,
+            "m:mfenced",
+            &[("open", &open_text), ("close", &close_text)],
+        );
     }
     let columns = if matrix.columns.is_empty() {
-        if matrix.align == Side::Center { String::new() } else { side_name(matrix.align).to_owned() }
+        if matrix.align == Side::Center {
+            String::new()
+        } else {
+            side_name(matrix.align).to_owned()
+        }
     } else {
-        matrix.columns.iter().map(|side| side_name(*side)).collect::<Vec<_>>().join(" ")
+        matrix
+            .columns
+            .iter()
+            .map(|side| side_name(*side))
+            .collect::<Vec<_>>()
+            .join(" ")
     };
     let kind = kind_marker(matrix.kind);
     let mut attrs: Vec<(&str, &str)> = Vec::new();

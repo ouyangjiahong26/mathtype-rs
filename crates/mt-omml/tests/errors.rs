@@ -1,11 +1,13 @@
 //! Error fixtures: malformed documents and constructs the tree cannot hold must be reported,
 //! never guessed at and never a panic.
 
-use mt_omml::{parse, ParseError};
+use mt_omml::{ParseError, parse};
 
 /// A document wrapping the given markup in `<m:oMath>` with the namespace declared.
 fn document(markup: &str) -> String {
-    format!("<m:oMath xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\">{markup}</m:oMath>")
+    format!(
+        "<m:oMath xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\">{markup}</m:oMath>"
+    )
 }
 
 /// The error the given markup produces.
@@ -17,22 +19,37 @@ fn error(markup: &str) -> ParseError {
     }
 }
 
-
 #[test]
 fn the_root_must_be_an_equation() {
-    assert_eq!(parse("<m:mrow/>").unwrap_err(), ParseError::Root("mrow".to_owned()));
     assert_eq!(
-        parse("<w:p xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"/>").unwrap_err(),
+        parse("<m:mrow/>").unwrap_err(),
+        ParseError::Root("mrow".to_owned())
+    );
+    assert_eq!(
+        parse("<w:p xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"/>")
+            .unwrap_err(),
         ParseError::Root("p".to_owned())
     );
 }
 
 #[test]
 fn unknown_elements_are_rejected() {
-    assert_eq!(error("<m:foo/>"), ParseError::UnknownElement("foo".to_owned()));
-    assert!(matches!(error("<m:e><m:r><m:t>x</m:t></m:r></m:e>"), ParseError::UnknownElement(_)));
-    assert!(matches!(error("<m:t>x</m:t>"), ParseError::UnknownElement(_)));
-    assert!(matches!(error("<m:math><m:r><m:t>x</m:t></m:r></m:math>"), ParseError::UnknownElement(_)));
+    assert_eq!(
+        error("<m:foo/>"),
+        ParseError::UnknownElement("foo".to_owned())
+    );
+    assert!(matches!(
+        error("<m:e><m:r><m:t>x</m:t></m:r></m:e>"),
+        ParseError::UnknownElement(_)
+    ));
+    assert!(matches!(
+        error("<m:t>x</m:t>"),
+        ParseError::UnknownElement(_)
+    ));
+    assert!(matches!(
+        error("<m:math><m:r><m:t>x</m:t></m:r></m:math>"),
+        ParseError::UnknownElement(_)
+    ));
 }
 
 #[test]
@@ -47,7 +64,10 @@ fn malformed_xml_is_rejected() {
         "<m:oMath xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><m:r><m:t>&bogus;</m:t></m:r></m:oMath>",
         "<m:oMath xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><m:r><m:t>a & b</m:t></m:r></m:oMath>",
     ] {
-        assert!(matches!(parse(document), Err(ParseError::Xml(_))), "{document}");
+        assert!(
+            matches!(parse(document), Err(ParseError::Xml(_))),
+            "{document}"
+        );
     }
 }
 
@@ -66,21 +86,39 @@ fn missing_required_arguments_are_rejected() {
         "<m:eqArr><m:eqArrPr/></m:eqArr>",
         "<m:groupChr><m:groupChrPr><m:chr m:val=\"{\"/></m:groupChrPr></m:groupChr>",
     ] {
-        assert!(matches!(error(markup), ParseError::Structure(_)), "{markup}");
+        assert!(
+            matches!(error(markup), ParseError::Structure(_)),
+            "{markup}"
+        );
     }
 }
 
 #[test]
 fn a_row_of_a_table_needs_a_cell() {
-    assert!(matches!(error("<m:m><m:mr></m:mr></m:m>"), ParseError::Structure(_)));
+    assert!(matches!(
+        error("<m:m><m:mr></m:mr></m:m>"),
+        ParseError::Structure(_)
+    ));
 }
 
 #[test]
 fn misplaced_elements_are_rejected() {
-    assert!(matches!(error("<m:num><m:r><m:t>a</m:t></m:r></m:num>"), ParseError::UnknownElement(_)));
-    assert!(matches!(error("<m:f><m:num><m:r><m:t>a</m:t></m:r></m:num><m:e/></m:f>"), ParseError::UnknownElement(_)));
-    assert!(matches!(error("<m:m><m:e/></m:m>"), ParseError::UnknownElement(_)));
-    assert!(matches!(error("<m:box><m:num><m:r><m:t>a</m:t></m:r></m:num></m:box>"), ParseError::UnknownElement(_)));
+    assert!(matches!(
+        error("<m:num><m:r><m:t>a</m:t></m:r></m:num>"),
+        ParseError::UnknownElement(_)
+    ));
+    assert!(matches!(
+        error("<m:f><m:num><m:r><m:t>a</m:t></m:r></m:num><m:e/></m:f>"),
+        ParseError::UnknownElement(_)
+    ));
+    assert!(matches!(
+        error("<m:m><m:e/></m:m>"),
+        ParseError::UnknownElement(_)
+    ));
+    assert!(matches!(
+        error("<m:box><m:num><m:r><m:t>a</m:t></m:r></m:num></m:box>"),
+        ParseError::UnknownElement(_)
+    ));
 }
 
 #[test]
@@ -142,7 +180,9 @@ fn elements_that_nest_too_deeply_are_rejected() {
 
 #[test]
 fn an_error_never_panics_on_a_prefix_of_a_valid_document() {
-    let document = document("<m:r><m:t>x</m:t></m:r><m:f><m:num><m:r><m:t>1</m:t></m:r></m:num><m:den><m:r><m:t>2</m:t></m:r></m:den></m:f>");
+    let document = document(
+        "<m:r><m:t>x</m:t></m:r><m:f><m:num><m:r><m:t>1</m:t></m:r></m:num><m:den><m:r><m:t>2</m:t></m:r></m:den></m:f>",
+    );
     for end in 0..=document.len() {
         if !document.is_char_boundary(end) {
             continue;

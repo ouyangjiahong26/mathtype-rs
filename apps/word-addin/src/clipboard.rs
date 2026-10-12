@@ -5,10 +5,10 @@
 //! Office Math rather than the pure OOXML one.
 
 use windows::Win32::Foundation::{E_FAIL, GlobalFree, HANDLE, HGLOBAL};
+use windows::Win32::Globalization::{CP_ACP, WideCharToMultiByte};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
-use windows::Win32::Globalization::{CP_ACP, WideCharToMultiByte};
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::core::{Error, PCSTR, Result, w};
 
@@ -53,7 +53,11 @@ pub fn put_equation(omml: &str, latex: &str) -> Result<()> {
         escape(latex)
     );
     let html = cf_html(&fragment);
-    let text: Vec<u8> = latex.encode_utf16().chain(std::iter::once(0)).flat_map(u16::to_le_bytes).collect();
+    let text: Vec<u8> = latex
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .flat_map(u16::to_le_bytes)
+        .collect();
 
     // SAFETY: the clipboard is opened, filled with moveable memory that the system takes over,
     // and closed again before returning.
@@ -75,7 +79,11 @@ pub fn put_equation(omml: &str, latex: &str) -> Result<()> {
 /// current and the legacy text formats are offered, so the server sees the source whichever it
 /// reads.
 pub fn put_latex(latex: &str) -> Result<()> {
-    let unicode: Vec<u8> = latex.encode_utf16().chain(std::iter::once(0)).flat_map(u16::to_le_bytes).collect();
+    let unicode: Vec<u8> = latex
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .flat_map(u16::to_le_bytes)
+        .collect();
     let ansi = ansi_bytes(latex);
     // SAFETY: the clipboard is opened, filled with moveable memory that the system takes over, and
     // closed again before returning.
@@ -114,13 +122,25 @@ fn cf_html(fragment: &str) -> String {
     );
     let blank = header(0, 0, 0, 0);
     let start_html = blank.len();
-    let start_fragment = start_html + html.find(FRAGMENT_START).expect("marker is written above") + FRAGMENT_START.len();
-    let header = header(start_html, start_html + html.len(), start_fragment, start_fragment + fragment.len());
+    let start_fragment = start_html
+        + html.find(FRAGMENT_START).expect("marker is written above")
+        + FRAGMENT_START.len();
+    let header = header(
+        start_html,
+        start_html + html.len(),
+        start_fragment,
+        start_fragment + fragment.len(),
+    );
     format!("{header}{html}")
 }
 
 /// The `HTML Format` header, with the offsets written as ten decimal digits.
-fn header(start_html: usize, end_html: usize, start_fragment: usize, end_fragment: usize) -> String {
+fn header(
+    start_html: usize,
+    end_html: usize,
+    start_fragment: usize,
+    end_fragment: usize,
+) -> String {
     format!(
         "Version:1.0\r\nStartHTML:{start_html:010}\r\nEndHTML:{end_html:010}\r\n\
          StartFragment:{start_fragment:010}\r\nEndFragment:{end_fragment:010}\r\n"
@@ -156,7 +176,9 @@ unsafe fn fill(entries: &[(u32, &[u8])]) -> Result<()> {
         // SAFETY: `handle` is a freshly allocated moveable block the system takes over on success.
         if unsafe { SetClipboardData(*format, Some(HANDLE(handle.0))) }.is_err() {
             // SAFETY: the system did not take the block, so it is still ours to free.
-            unsafe { let _ = GlobalFree(Some(handle)); }
+            unsafe {
+                let _ = GlobalFree(Some(handle));
+            }
             return Err(Error::from(E_FAIL));
         }
     }
@@ -200,7 +222,11 @@ mod tests {
         let start = field("StartFragment:");
         let end = field("EndFragment:");
         assert_eq!(&html[start..end], "<m:oMath>x</m:oMath>");
-        assert_eq!(field("StartHTML:"), html.find("<html").expect("the html element follows the header"));
+        assert_eq!(
+            field("StartHTML:"),
+            html.find("<html")
+                .expect("the html element follows the header")
+        );
         assert_eq!(field("EndHTML:"), html.len());
     }
 
@@ -209,8 +235,16 @@ mod tests {
         // The equation markup holds characters outside ASCII, and the offsets must still address
         // the fragment: Word reads the payload as UTF-8 bytes.
         let html = cf_html("<m:r><m:t>α</m:t></m:r>");
-        let start: usize = html.lines().find_map(|line| line.strip_prefix("StartFragment:")).unwrap().parse().unwrap();
-        assert_eq!(&html[start..start + "<m:r><m:t>α</m:t></m:r>".len()], "<m:r><m:t>α</m:t></m:r>");
+        let start: usize = html
+            .lines()
+            .find_map(|line| line.strip_prefix("StartFragment:"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            &html[start..start + "<m:r><m:t>α</m:t></m:r>".len()],
+            "<m:r><m:t>α</m:t></m:r>"
+        );
     }
 
     #[test]

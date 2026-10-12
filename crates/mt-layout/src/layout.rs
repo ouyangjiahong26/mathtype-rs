@@ -18,7 +18,7 @@
 use std::cell::RefCell;
 
 use mt_core::{
-    Accent, AccentKind, BigOp, Char, Class, Delim, Font, Frac, FracKind, Fence, Limits, Math,
+    Accent, AccentKind, BigOp, Char, Class, Delim, Fence, Font, Frac, FracKind, Limits, Math,
     MathStyle, Matrix, MatrixKind, Node, Path, Scripts, Side, Sqrt, Styled, TextRun,
 };
 
@@ -75,17 +75,26 @@ struct Recorder {
 
 impl<'a> Ctx<'a> {
     fn at_level(&self, level: u8) -> Self {
-        Self { level, ..self.clone() }
+        Self {
+            level,
+            ..self.clone()
+        }
     }
 
     /// Context for material set cramped, which suppresses extra superscript clearance.
     fn cramped(&self) -> Self {
-        Self { cramped: true, ..self.clone() }
+        Self {
+            cramped: true,
+            ..self.clone()
+        }
     }
 
     /// Context for material drawn `factor` times larger or smaller than this one.
     fn scaled(&self, factor: f64) -> Self {
-        Self { scale: self.scale * factor, ..self.clone() }
+        Self {
+            scale: self.scale * factor,
+            ..self.clone()
+        }
     }
 
     /// Context for the node held in slot `slot` of the node being laid out.
@@ -106,7 +115,11 @@ impl<'a> Ctx<'a> {
     fn begin_row(&self, ox: f64, oy: f64) -> Option<usize> {
         let tracking = self.tracking.as_ref()?;
         let mut rows = tracking.recorder.rows.borrow_mut();
-        rows.push(RowAnchor { path: tracking.path.clone(), origin: (ox, oy), offsets: Vec::new() });
+        rows.push(RowAnchor {
+            path: tracking.path.clone(),
+            origin: (ox, oy),
+            offsets: Vec::new(),
+        });
         Some(rows.len() - 1)
     }
 
@@ -200,8 +213,10 @@ fn layout_tree(
         cramped: style.cramped,
         font_override: None,
         scale: 1.0,
-        tracking: recorder
-            .map(|recorder| Tracking { recorder, path: Path::root() }),
+        tracking: recorder.map(|recorder| Tracking {
+            recorder,
+            path: Path::root(),
+        }),
     };
     layout_node(&math.body, &ctx, 0.0, 0.0)
 }
@@ -210,7 +225,12 @@ fn layout_tree(
 fn top_level(laid: Laid) -> Box {
     match laid.node {
         node @ Box::HBox { .. } => node,
-        node => Box::HBox { items: vec![node], width: laid.w, height: laid.h, depth: laid.d },
+        node => Box::HBox {
+            items: vec![node],
+            width: laid.w,
+            height: laid.h,
+            depth: laid.d,
+        },
     }
 }
 
@@ -283,9 +303,11 @@ fn layout_row(row: &[Node], ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     for (index, child) in row.iter().enumerate() {
         if atom_index.get(next_atom) == Some(&index) {
             if next_atom > 0 {
-                let kern =
-                    class_space(atom_class[next_atom - 1], atom_class[next_atom], &ctx.style.spacing)
-                        * size;
+                let kern = class_space(
+                    atom_class[next_atom - 1],
+                    atom_class[next_atom],
+                    &ctx.style.spacing,
+                ) * size;
                 if kern != 0.0 {
                     items.push(Box::Kern { width: kern });
                     pen += kern;
@@ -303,7 +325,17 @@ fn layout_row(row: &[Node], ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let width = pen - ox;
     offsets.push(width);
     ctx.finish_row(anchor, offsets);
-    Laid::new(Box::HBox { items, width, height, depth }, width, height, depth)
+    Laid::new(
+        Box::HBox {
+            items,
+            width,
+            height,
+            depth,
+        },
+        width,
+        height,
+        depth,
+    )
 }
 
 /// Atom class of a node, driving the spacing between neighbours.
@@ -323,9 +355,12 @@ fn node_class(node: &Node) -> Option<Class> {
         Node::Limits(limits) => Some(node_class(&limits.base).unwrap_or(Class::Ord)),
         Node::Accent(accent) => Some(node_class(&accent.base).unwrap_or(Class::Ord)),
         Node::Big(_) => Some(Class::Op),
-        Node::Styled(styled) => {
-            Some(styled.class.or_else(|| node_class(&styled.body)).unwrap_or(Class::Ord))
-        }
+        Node::Styled(styled) => Some(
+            styled
+                .class
+                .or_else(|| node_class(&styled.body))
+                .unwrap_or(Class::Ord),
+        ),
         Node::Row(row) => (!row.is_empty()).then_some(Class::Ord),
     }
 }
@@ -409,19 +444,30 @@ fn glyph_leaf(ch: char, font: Font, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let advance = ctx.metrics.advance(ch, font) * size;
     let height = ctx.metrics.height(ch, font) * size;
     let depth = ctx.metrics.depth(ch, font) * size;
-    let glyph = Box::Glyph { ch, font, x: ox, y: oy, size, yscale: 1.0 };
+    let glyph = Box::Glyph {
+        ch,
+        font,
+        x: ox,
+        y: oy,
+        size,
+        yscale: 1.0,
+    };
     leaf(glyph, advance, height, depth)
 }
 
 fn layout_char(character: Char, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
-    let font = ctx
-        .font_override
-        .unwrap_or_else(|| ctx.style.fonts.resolve(character.ch, character.class, character.font));
+    let font = ctx.font_override.unwrap_or_else(|| {
+        ctx.style
+            .fonts
+            .resolve(character.ch, character.class, character.font)
+    });
     glyph_leaf(character.ch, font, ctx, ox, oy)
 }
 
 fn layout_text(run: &TextRun, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
-    let font = ctx.font_override.unwrap_or_else(|| ctx.style.fonts.text_font(run.font));
+    let font = ctx
+        .font_override
+        .unwrap_or_else(|| ctx.style.fonts.text_font(run.font));
     text_leaf(run.text.chars(), font, ctx, ox, oy)
 }
 
@@ -445,7 +491,17 @@ fn text_leaf(chars: impl Iterator<Item = char>, font: Font, ctx: &Ctx, ox: f64, 
         items.push(laid.node);
     }
     let width = pen - ox;
-    Laid::new(Box::HBox { items, width, height, depth }, width, height, depth)
+    Laid::new(
+        Box::HBox {
+            items,
+            width,
+            height,
+            depth,
+        },
+        width,
+        height,
+        depth,
+    )
 }
 
 /// The dashed box drawn where an argument slot was left empty.
@@ -453,17 +509,44 @@ fn placeholder(ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let width = ctx.em(EMPTY_SLOT_WIDTH);
     let height = ctx.em(EMPTY_SLOT_HEIGHT);
     let depth = ctx.em(EMPTY_SLOT_DEPTH);
-    let rule = Box::Rule { x: ox, y: oy, width, height, depth, dashed: true };
+    let rule = Box::Rule {
+        x: ox,
+        y: oy,
+        width,
+        height,
+        depth,
+        dashed: true,
+    };
     leaf(rule, width, height, depth)
 }
 
 fn zero_box() -> Laid {
-    Laid::new(Box::HBox { items: Vec::new(), width: 0.0, height: 0.0, depth: 0.0 }, 0.0, 0.0, 0.0)
+    Laid::new(
+        Box::HBox {
+            items: Vec::new(),
+            width: 0.0,
+            height: 0.0,
+            depth: 0.0,
+        },
+        0.0,
+        0.0,
+        0.0,
+    )
 }
 
 /// Wrap a leaf in the box that carries its extents.
 fn leaf(inner: Box, w: f64, h: f64, d: f64) -> Laid {
-    Laid::new(Box::HBox { items: vec![inner], width: w, height: h, depth: d }, w, h, d)
+    Laid::new(
+        Box::HBox {
+            items: vec![inner],
+            width: w,
+            height: h,
+            depth: d,
+        },
+        w,
+        h,
+        d,
+    )
 }
 
 /// Move every leaf of `node` by `(dx, dy)`.
@@ -523,11 +606,20 @@ fn fit_glyph(ctx: &Ctx, ch: char, font: Font, need: f64) -> Fitted {
             break;
         }
     }
-    let yscale =
-        if extent <= 0.0 || extent * scale >= need { 1.0 } else { need / (extent * scale) };
+    let yscale = if extent <= 0.0 || extent * scale >= need {
+        1.0
+    } else {
+        need / (extent * scale)
+    };
     let h = h0 * scale * yscale;
     let d = d0 * scale * yscale;
-    Fitted { advance: advance * scale, h, d, size: size * scale, yscale }
+    Fitted {
+        advance: advance * scale,
+        h,
+        d,
+        size: size * scale,
+        yscale,
+    }
 }
 
 /// Baseline offset that puts the fitted glyph's top `top` points above the current baseline.
@@ -562,7 +654,14 @@ fn fitted_extents(fitted: &Fitted, y: f64) -> (f64, f64) {
 
 /// Build the single-item box holding a fitted glyph whose baseline sits at `y`.
 fn fitted_leaf(ch: char, font: Font, fitted: &Fitted, x: f64, y: f64) -> Box {
-    let glyph = Box::Glyph { ch, font, x, y, size: fitted.size, yscale: fitted.yscale };
+    let glyph = Box::Glyph {
+        ch,
+        font,
+        x,
+        y,
+        size: fitted.size,
+        yscale: fitted.yscale,
+    };
     leaf(glyph, fitted.advance, fitted.h, fitted.d).node
 }
 
@@ -597,7 +696,11 @@ fn layout_stacked_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         FracKind::Bar => ctx.em(spacing.frac_rule_thickness),
         _ => 0.0,
     };
-    let gap = if thickness > 0.0 { ctx.em(spacing.frac_rule_gap) } else { ctx.em(spacing.frac_nobar_gap) };
+    let gap = if thickness > 0.0 {
+        ctx.em(spacing.frac_rule_gap)
+    } else {
+        ctx.em(spacing.frac_nobar_gap)
+    };
     let axis = ctx.metrics.axis_height() * ctx.size();
 
     let width = numerator.w.max(denominator.w);
@@ -608,7 +711,12 @@ fn layout_stacked_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let mut items = Vec::new();
     let mut numerator_node = numerator.node;
     let numerator_x = ox + (width - numerator.w) / 2.0;
-    place(&mut numerator_node, &numerator_ctx, numerator_x, numerator_baseline);
+    place(
+        &mut numerator_node,
+        &numerator_ctx,
+        numerator_x,
+        numerator_baseline,
+    );
     items.push(numerator_node);
     if thickness > 0.0 {
         let rule = Box::Rule {
@@ -623,12 +731,27 @@ fn layout_stacked_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     }
     let mut denominator_node = denominator.node;
     let denominator_x = ox + (width - denominator.w) / 2.0;
-    place(&mut denominator_node, &denominator_ctx, denominator_x, denominator_baseline);
+    place(
+        &mut denominator_node,
+        &denominator_ctx,
+        denominator_x,
+        denominator_baseline,
+    );
     items.push(denominator_node);
 
     let height = oy - (numerator_baseline - numerator.h);
     let depth = denominator_baseline + denominator.d - oy;
-    Laid::new(Box::VBox { items, width, height, depth }, width, height, depth)
+    Laid::new(
+        Box::VBox {
+            items,
+            width,
+            height,
+            depth,
+        },
+        width,
+        height,
+        depth,
+    )
 }
 
 /// A fraction written with a slash: `raised / lowered` when `stacked`, else `a/b` on one line.
@@ -638,10 +761,23 @@ fn layout_slash_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64, stacked: bool) ->
     let denominator_ctx = ctx.slot(1).at_level(level);
     let numerator = layout_node(&frac.num, &numerator_ctx, 0.0, 0.0);
     let denominator = layout_node(&frac.den, &denominator_ctx, 0.0, 0.0);
-    let slash = layout_char(Char { ch: '/', class: Class::Ord, font: Font::Upright }, ctx, 0.0, 0.0);
+    let slash = layout_char(
+        Char {
+            ch: '/',
+            class: Class::Ord,
+            font: Font::Upright,
+        },
+        ctx,
+        0.0,
+        0.0,
+    );
     let spacing = &ctx.style.spacing;
     let kern = ctx.em(spacing.frac_slash_kern);
-    let shift = if stacked { ctx.em(spacing.frac_slash_shift) } else { 0.0 };
+    let shift = if stacked {
+        ctx.em(spacing.frac_slash_shift)
+    } else {
+        0.0
+    };
 
     let slash_x = ox + numerator.w + kern;
     let denominator_x = slash_x + slash.w + kern;
@@ -652,13 +788,32 @@ fn layout_slash_frac(frac: &Frac, ctx: &Ctx, ox: f64, oy: f64, stacked: bool) ->
     let mut numerator_node = numerator.node;
     place(&mut numerator_node, &numerator_ctx, ox, oy - shift);
     let mut denominator_node = denominator.node;
-    place(&mut denominator_node, &denominator_ctx, denominator_x, oy + shift);
+    place(
+        &mut denominator_node,
+        &denominator_ctx,
+        denominator_x,
+        oy + shift,
+    );
 
     let width = numerator.w + kern + slash.w + kern + denominator.w;
-    let height = (shift + numerator.h).max(slash.h).max(denominator.h - shift);
-    let depth = (shift + denominator.d).max(slash.d).max(numerator.d - shift);
+    let height = (shift + numerator.h)
+        .max(slash.h)
+        .max(denominator.h - shift);
+    let depth = (shift + denominator.d)
+        .max(slash.d)
+        .max(numerator.d - shift);
     let items = vec![numerator_node, slash_node, denominator_node];
-    Laid::new(Box::HBox { items, width, height, depth }, width, height, depth)
+    Laid::new(
+        Box::HBox {
+            items,
+            width,
+            height,
+            depth,
+        },
+        width,
+        height,
+        depth,
+    )
 }
 
 // -------------------------------------------------------------------------------------------
@@ -681,7 +836,10 @@ fn layout_sqrt(sqrt: &Sqrt, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let sign_y = align_top(&sign, top);
 
     let index_ctx = ctx.slot(0).at_level(ctx.level + 1);
-    let index = sqrt.index.as_ref().map(|node| layout_node(node, &index_ctx, 0.0, 0.0));
+    let index = sqrt
+        .index
+        .as_ref()
+        .map(|node| layout_node(node, &index_ctx, 0.0, 0.0));
     let index_width = index.as_ref().map_or(0.0, |laid| laid.w);
     // How far the index reaches above the baseline, and where its own baseline goes.
     let index_span = index
@@ -715,7 +873,17 @@ fn layout_sqrt(sqrt: &Sqrt, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let (sign_h, sign_d) = fitted_extents(&sign, sign_y);
     let height = index_span.map_or(sign_h, |span| sign_h.max(span));
     let depth = radicand.d.max(sign_d);
-    Laid::new(Box::HBox { items, width, height, depth }, width, height, depth)
+    Laid::new(
+        Box::HBox {
+            items,
+            width,
+            height,
+            depth,
+        },
+        width,
+        height,
+        depth,
+    )
 }
 
 // -------------------------------------------------------------------------------------------
@@ -749,7 +917,18 @@ fn layout_limits(limits: &Limits, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         .map(|node| layout_node(node, &ctx.slot(2).at_level(level), 0.0, 0.0));
     // Unlike a large operator, material that merely carries limits keeps its own size and stays on
     // the baseline.
-    stack_limits(base, over, under, limits.align, 0.0, ctx, ox, oy)
+    stack_limits(
+        StackLimits {
+            base,
+            over,
+            under,
+            align: limits.align,
+            base_shift: 0.0,
+        },
+        ctx,
+        ox,
+        oy,
+    )
 }
 
 fn layout_big(big: &BigOp, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
@@ -759,14 +938,31 @@ fn layout_big(big: &BigOp, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         let ctx = ctx.slot(slot).at_level(ctx.level + 1);
         if big.limits { ctx } else { ctx.cramped() }
     };
-    let sub = big.sub.as_ref().map(|node| layout_node(node, &script_ctx(1), 0.0, 0.0));
-    let sup = big.sup.as_ref().map(|node| layout_node(node, &script_ctx(2), 0.0, 0.0));
+    let sub = big
+        .sub
+        .as_ref()
+        .map(|node| layout_node(node, &script_ctx(1), 0.0, 0.0));
+    let sup = big
+        .sup
+        .as_ref()
+        .map(|node| layout_node(node, &script_ctx(2), 0.0, 0.0));
     if big.limits {
         // Stacked limits are centred on the operator, and the operator's own centre is put on the
         // math axis, so the axis passes through it.
         let axis = ctx.metrics.axis_height() * ctx.size();
         let shift = (base.h - base.d) / 2.0 - axis;
-        stack_limits(base, sup, sub, Side::Center, shift, ctx, ox, oy)
+        stack_limits(
+            StackLimits {
+                base,
+                over: sup,
+                under: sub,
+                align: Side::Center,
+                base_shift: shift,
+            },
+            ctx,
+            ox,
+            oy,
+        )
     } else {
         attach_scripts(base, sub, sup, ctx, ox, oy)
     }
@@ -776,7 +972,10 @@ fn layout_big(big: &BigOp, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
 fn is_integral(node: &Node) -> bool {
     match node {
         Node::Char(character) => {
-            matches!(character.ch, '\u{222B}' | '\u{222E}' | '\u{222F}' | '\u{2230}')
+            matches!(
+                character.ch,
+                '\u{222B}' | '\u{222E}' | '\u{222F}' | '\u{2230}'
+            )
         }
         Node::Row(row) => row.iter().any(is_integral),
         Node::Styled(styled) => is_integral(&styled.body),
@@ -792,11 +991,7 @@ fn is_integral(node: &Node) -> bool {
 /// shape. The factor applies to the operator itself only; its scripts stay at script size.
 fn operator_scale(node: &Node, limits: bool) -> f64 {
     if is_integral(node) {
-        if limits {
-            BIG_OP_SCALE_INTEGRAL
-        } else {
-            1.0
-        }
+        if limits { BIG_OP_SCALE_INTEGRAL } else { 1.0 }
     } else if limits {
         BIG_OP_SCALE_LIMITS
     } else {
@@ -820,7 +1015,11 @@ fn attach_scripts(
 ) -> Laid {
     let spacing = &ctx.style.spacing;
     let kern = ctx.em(spacing.script_kern);
-    let offset = if ctx.cramped { 0.0 } else { ctx.em(spacing.script_offset) };
+    let offset = if ctx.cramped {
+        0.0
+    } else {
+        ctx.em(spacing.script_offset)
+    };
     let mut raise = (base.h - base.d) / 2.0 + offset;
     let drop = base.d + ctx.em(spacing.subscript_offset);
     if let (Some(sub), Some(sup)) = (&sub, &sup) {
@@ -831,7 +1030,10 @@ fn attach_scripts(
     }
 
     let script_x = ox + base.w + kern;
-    let widest = sub.as_ref().map_or(0.0, |laid| laid.w).max(sup.as_ref().map_or(0.0, |laid| laid.w));
+    let widest = sub
+        .as_ref()
+        .map_or(0.0, |laid| laid.w)
+        .max(sup.as_ref().map_or(0.0, |laid| laid.w));
     let width = base.w + kern + widest;
     let mut height = base.h;
     let mut depth = base.d;
@@ -853,7 +1055,27 @@ fn attach_scripts(
         depth = depth.max(sup.d - raise);
         items.push(node);
     }
-    Laid::new(Box::HBox { items, width, height, depth }, width, height, depth)
+    Laid::new(
+        Box::HBox {
+            items,
+            width,
+            height,
+            depth,
+        },
+        width,
+        height,
+        depth,
+    )
+}
+
+/// The material one stack lays out: a base with an optional over-script and under-script, the
+/// alignment they share and how far the base's baseline shifts from the current one.
+struct StackLimits {
+    base: Laid,
+    over: Option<Laid>,
+    under: Option<Laid>,
+    align: Side,
+    base_shift: f64,
 }
 
 /// Stack limits above and below a base, aligned as `align` asks for.
@@ -862,16 +1084,14 @@ fn attach_scripts(
 /// them, so the base, the limits and their common centre line up. `base_shift` moves the base's
 /// baseline away from the current one, which is how a large operator puts its own centre on the
 /// math axis; the limits follow the base's edges, so all three keep that one centre.
-fn stack_limits(
-    base: Laid,
-    over: Option<Laid>,
-    under: Option<Laid>,
-    align: Side,
-    base_shift: f64,
-    ctx: &Ctx,
-    ox: f64,
-    oy: f64,
-) -> Laid {
+fn stack_limits(limits: StackLimits, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
+    let StackLimits {
+        base,
+        over,
+        under,
+        align,
+        base_shift,
+    } = limits;
     let spacing = &ctx.style.spacing;
     let gap = ctx.em(spacing.limit_gap);
     let width = base
@@ -891,20 +1111,45 @@ fn stack_limits(
     let mut depth = base_bottom;
     if let Some(over) = over {
         let mut node = over.node;
-        place(&mut node, &ctx.slot(2), ox + aligned(over.w), oy + base_top - gap - over.d);
+        place(
+            &mut node,
+            &ctx.slot(2),
+            ox + aligned(over.w),
+            oy + base_top - gap - over.d,
+        );
         height = height.max(-(base_top - gap - over.d) + over.h);
         items.push(node);
     }
     let mut base_node = base.node;
-    place(&mut base_node, &ctx.slot(0), ox + aligned(base.w), oy + base_shift);
+    place(
+        &mut base_node,
+        &ctx.slot(0),
+        ox + aligned(base.w),
+        oy + base_shift,
+    );
     items.push(base_node);
     if let Some(under) = under {
         let mut node = under.node;
-        place(&mut node, &ctx.slot(1), ox + aligned(under.w), oy + base_bottom + gap + under.h);
+        place(
+            &mut node,
+            &ctx.slot(1),
+            ox + aligned(under.w),
+            oy + base_bottom + gap + under.h,
+        );
         depth = depth.max(base_bottom + gap + under.h + under.d);
         items.push(node);
     }
-    Laid::new(Box::VBox { items, width, height, depth }, width, height, depth)
+    Laid::new(
+        Box::VBox {
+            items,
+            width,
+            height,
+            depth,
+        },
+        width,
+        height,
+        depth,
+    )
 }
 
 // -------------------------------------------------------------------------------------------
@@ -919,12 +1164,22 @@ fn layout_fence(fence: &Fence, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let kern = ctx.em(spacing.fence_kern);
     let need = body.h + body.d;
     let centre = (body.d - body.h) / 2.0;
-    let open = fence.open.open().map(|ch| (ch, fit_glyph(ctx, ch, font, need)));
-    let close = fence.close.close().map(|ch| (ch, fit_glyph(ctx, ch, font, need)));
+    let open = fence
+        .open
+        .open()
+        .map(|ch| (ch, fit_glyph(ctx, ch, font, need)));
+    let close = fence
+        .close
+        .close()
+        .map(|ch| (ch, fit_glyph(ctx, ch, font, need)));
     // A delimiter contributes its advance less the kern that pulls the body towards it; a missing
     // one contributes nothing at all.
-    let open_part = open.as_ref().map_or(0.0, |(_, fitted)| fitted.advance - kern);
-    let close_part = close.as_ref().map_or(0.0, |(_, fitted)| fitted.advance - kern);
+    let open_part = open
+        .as_ref()
+        .map_or(0.0, |(_, fitted)| fitted.advance - kern);
+    let close_part = close
+        .as_ref()
+        .map_or(0.0, |(_, fitted)| fitted.advance - kern);
     let close_advance = close.as_ref().map_or(0.0, |(_, fitted)| fitted.advance);
 
     let body_x = ox + open_part;
@@ -951,7 +1206,17 @@ fn layout_fence(fence: &Fence, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         height = height.max(h);
         depth = depth.max(d);
     }
-    Laid::new(Box::HBox { items, width, height, depth }, width, height, depth)
+    Laid::new(
+        Box::HBox {
+            items,
+            width,
+            height,
+            depth,
+        },
+        width,
+        height,
+        depth,
+    )
 }
 
 // -------------------------------------------------------------------------------------------
@@ -977,13 +1242,13 @@ fn layout_matrix(matrix: &Matrix, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let mut flat = 0_usize;
     for (r, cells_row) in matrix.rows.iter().enumerate() {
         let mut laid_row = Vec::with_capacity(cols);
-        for c in 0..cols {
+        for (c, width) in col_w.iter_mut().enumerate() {
             match cells_row.get(c) {
                 Some(cell) => {
                     // Cells are addressed row-major across the whole table, the way
                     // `Node::slot` numbers them.
                     let laid = layout_node(cell, &ctx.slot(flat + c), 0.0, 0.0);
-                    col_w[c] = col_w[c].max(laid.w);
+                    *width = width.max(laid.w);
                     row_h[r] = row_h[r].max(laid.h);
                     row_d[r] = row_d[r].max(laid.d);
                     laid_row.push(laid);
@@ -1025,10 +1290,18 @@ fn layout_matrix(matrix: &Matrix, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     let (open_delim, close_delim) = matrix.delims.unwrap_or_else(|| default_delims(matrix.kind));
     let need = table_h + table_d;
     let centre = (table_d - table_h) / 2.0;
-    let open = open_delim.open().map(|ch| (ch, fit_glyph(ctx, ch, font, need)));
-    let close = close_delim.close().map(|ch| (ch, fit_glyph(ctx, ch, font, need)));
-    let open_part = open.as_ref().map_or(0.0, |(_, fitted)| fitted.advance - kern);
-    let close_part = close.as_ref().map_or(0.0, |(_, fitted)| fitted.advance - kern);
+    let open = open_delim
+        .open()
+        .map(|ch| (ch, fit_glyph(ctx, ch, font, need)));
+    let close = close_delim
+        .close()
+        .map(|ch| (ch, fit_glyph(ctx, ch, font, need)));
+    let open_part = open
+        .as_ref()
+        .map_or(0.0, |(_, fitted)| fitted.advance - kern);
+    let close_part = close
+        .as_ref()
+        .map_or(0.0, |(_, fitted)| fitted.advance - kern);
     let close_advance = close.as_ref().map_or(0.0, |(_, fitted)| fitted.advance);
     let body_x = ox + open_part;
     let close_x = body_x + table_width + close_part - close_advance;
@@ -1058,7 +1331,12 @@ fn layout_matrix(matrix: &Matrix, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     for r in 0..rows {
         let row = std::mem::take(&mut cells[r]);
         let items = row.into_iter().map(|cell| cell.node).collect();
-        row_boxes.push(Box::HBox { items, width: table_width, height: row_h[r], depth: row_d[r] });
+        row_boxes.push(Box::HBox {
+            items,
+            width: table_width,
+            height: row_h[r],
+            depth: row_d[r],
+        });
     }
 
     let mut items: Vec<Box> = Vec::new();
@@ -1071,7 +1349,12 @@ fn layout_matrix(matrix: &Matrix, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         height = height.max(h);
         depth = depth.max(d);
     }
-    items.push(Box::VBox { items: row_boxes, width: table_width, height: table_h, depth: table_d });
+    items.push(Box::VBox {
+        items: row_boxes,
+        width: table_width,
+        height: table_h,
+        depth: table_d,
+    });
     if matrix.rules {
         let thickness = ctx.em(spacing.matrix_rule_thickness);
         for r in 1..rows {
@@ -1106,7 +1389,17 @@ fn layout_matrix(matrix: &Matrix, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         height = height.max(h);
         depth = depth.max(d);
     }
-    Laid::new(Box::HBox { items, width, height, depth }, width, height, depth)
+    Laid::new(
+        Box::HBox {
+            items,
+            width,
+            height,
+            depth,
+        },
+        width,
+        height,
+        depth,
+    )
 }
 
 /// Alignment of column `col`: an explicit per-column rule wins, else the kind decides.
@@ -1150,7 +1443,10 @@ fn layout_accent(accent: &Accent, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
 
     let mut accent_node: Box;
     let (accent_w, accent_h, accent_d);
-    if matches!(accent.kind, AccentKind::Bar | AccentKind::Line | AccentKind::Strike) {
+    if matches!(
+        accent.kind,
+        AccentKind::Bar | AccentKind::Line | AccentKind::Strike
+    ) {
         let thickness = ctx.em(spacing.accent_rule_thickness);
         let y = match accent.kind {
             AccentKind::Strike => (base.d - base.h) / 2.0,
@@ -1177,14 +1473,33 @@ fn layout_accent(accent: &Accent, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         // and drift far above the glyph it belongs to.
         let stretches = matches!(
             accent.kind,
-            AccentKind::WideHat | AccentKind::WideTilde | AccentKind::Vector | AccentKind::ArrowRight | AccentKind::ArrowLeft
+            AccentKind::WideHat
+                | AccentKind::WideTilde
+                | AccentKind::Vector
+                | AccentKind::ArrowRight
+                | AccentKind::ArrowLeft
         );
-        let scale = if stretches { fit_scale(&ACCENT_SCALES, natural, base.w) } else { 1.0 };
+        let scale = if stretches {
+            fit_scale(&ACCENT_SCALES, natural, base.w)
+        } else {
+            1.0
+        };
         let w = natural * scale;
         let h = ctx.metrics.height(ch, font) * size * scale;
         let d = ctx.metrics.depth(ch, font) * size * scale;
-        let y = if over { -(base.h + gap + d) } else { base.d + gap + h };
-        let glyph = Box::Glyph { ch, font, x: 0.0, y: oy + y, size: size * scale, yscale: 1.0 };
+        let y = if over {
+            -(base.h + gap + d)
+        } else {
+            base.d + gap + h
+        };
+        let glyph = Box::Glyph {
+            ch,
+            font,
+            x: 0.0,
+            y: oy + y,
+            size: size * scale,
+            yscale: 1.0,
+        };
         accent_node = leaf(glyph, w, h, d).node;
         accent_w = w;
         accent_h = h;
@@ -1193,8 +1508,16 @@ fn layout_accent(accent: &Accent, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
     translate(&mut accent_node, ox + (base.w - accent_w) / 2.0, 0.0);
 
     let strike = accent.kind == AccentKind::Strike;
-    let height = if over && !strike { base.h + gap + accent_d + accent_h } else { base.h };
-    let depth = if !over && !strike { base.d + gap + accent_h + accent_d } else { base.d };
+    let height = if over && !strike {
+        base.h + gap + accent_d + accent_h
+    } else {
+        base.h
+    };
+    let depth = if !over && !strike {
+        base.d + gap + accent_h + accent_d
+    } else {
+        base.d
+    };
     let width = base.w.max(accent_w);
 
     let mut items = Vec::new();
@@ -1207,7 +1530,17 @@ fn layout_accent(accent: &Accent, ctx: &Ctx, ox: f64, oy: f64) -> Laid {
         items.push(base_node);
         items.push(accent_node);
     }
-    Laid::new(Box::VBox { items, width, height, depth }, width, height, depth)
+    Laid::new(
+        Box::VBox {
+            items,
+            width,
+            height,
+            depth,
+        },
+        width,
+        height,
+        depth,
+    )
 }
 
 /// The glyph an accent is drawn with.

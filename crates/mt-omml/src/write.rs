@@ -1,9 +1,12 @@
 //! Writing Office Math from the equation tree.
 
 use crate::{
-    accent_char, delim_chars, font_properties, is_group_character, side_name, space_text, NAMESPACE,
+    NAMESPACE, accent_char, delim_chars, font_properties, is_group_character, side_name, space_text,
 };
-use mt_core::{Accent, AccentKind, Class, Delim, Font, FracKind, Math, Matrix, MatrixKind, Node, Scripts, Styled};
+use mt_core::{
+    Accent, AccentKind, Class, Delim, Font, FracKind, Math, Matrix, MatrixKind, Node, Scripts,
+    Styled,
+};
 use quick_xml::escape::escape;
 
 /// Writes an `<m:oMath>` fragment with the namespace declared, ready to paste into a paragraph.
@@ -69,7 +72,12 @@ fn item(out: &mut String, node: &Node) {
         }
         Node::Char(character) => {
             let mut buffer = [0u8; 4];
-            run(out, character.ch.encode_utf8(&mut buffer), character.font, false);
+            run(
+                out,
+                character.ch.encode_utf8(&mut buffer),
+                character.font,
+                false,
+            );
         }
         Node::Text(text) => run(out, &text.text, text.font, true),
         Node::Space(space) => {
@@ -96,7 +104,11 @@ fn item(out: &mut String, node: &Node) {
         }
         Node::Sqrt(radical) => {
             out.push_str("<m:rad><m:radPr>");
-            valued(out, "m:degHide", if radical.index.is_some() { "0" } else { "1" });
+            valued(
+                out,
+                "m:degHide",
+                if radical.index.is_some() { "0" } else { "1" },
+            );
             out.push_str("</m:radPr>");
             if let Some(index) = &radical.index {
                 argument(out, "m:deg", index);
@@ -105,7 +117,12 @@ fn item(out: &mut String, node: &Node) {
             out.push_str("</m:rad>");
         }
         Node::Scripts(scripts) => scripts_element(out, scripts),
-        Node::Limits(limits) => limits_element(out, &limits.base, limits.under.as_ref(), limits.over.as_ref()),
+        Node::Limits(limits) => limits_element(
+            out,
+            &limits.base,
+            limits.under.as_ref(),
+            limits.over.as_ref(),
+        ),
         Node::Big(big) => match &big.base {
             // A character base is the n-ary operator itself.
             Node::Char(character) => {
@@ -127,7 +144,14 @@ fn item(out: &mut String, node: &Node) {
                 if big.limits {
                     limits_element(out, other, big.sub.as_ref(), big.sup.as_ref());
                 } else {
-                    scripts_element(out, &Scripts { base: other.clone(), sub: big.sub.clone(), sup: big.sup.clone() });
+                    scripts_element(
+                        out,
+                        &Scripts {
+                            base: other.clone(),
+                            sub: big.sub.clone(),
+                            sup: big.sup.clone(),
+                        },
+                    );
                 }
             }
         },
@@ -216,8 +240,16 @@ fn limits_element(out: &mut String, base: &Node, under: Option<&Node>, over: Opt
 fn delimiter_element(out: &mut String, open: Delim, close: Delim, body: &Node) {
     let (open_character, close_character) = delim_chars(open, close);
     out.push_str("<m:d><m:dPr>");
-    valued(out, "m:begChr", &open_character.map(String::from).unwrap_or_default());
-    valued(out, "m:endChr", &close_character.map(String::from).unwrap_or_default());
+    valued(
+        out,
+        "m:begChr",
+        &open_character.map(String::from).unwrap_or_default(),
+    );
+    valued(
+        out,
+        "m:endChr",
+        &close_character.map(String::from).unwrap_or_default(),
+    );
     out.push_str("</m:dPr>");
     argument(out, "m:e", body);
     out.push_str("</m:d>");
@@ -229,8 +261,16 @@ fn matrix_element(out: &mut String, matrix: &Matrix) {
     if let Some((open, close)) = matrix.delims {
         let (open_character, close_character) = delim_chars(open, close);
         out.push_str("<m:d><m:dPr>");
-        valued(out, "m:begChr", &open_character.map(String::from).unwrap_or_default());
-        valued(out, "m:endChr", &close_character.map(String::from).unwrap_or_default());
+        valued(
+            out,
+            "m:begChr",
+            &open_character.map(String::from).unwrap_or_default(),
+        );
+        valued(
+            out,
+            "m:endChr",
+            &close_character.map(String::from).unwrap_or_default(),
+        );
         out.push_str("</m:dPr><m:e>");
     }
     // Stacked one-column material is an equation array; everything else is a matrix.
@@ -308,7 +348,8 @@ fn accent_element(out: &mut String, accent: &Accent) {
 
 /// Writes a wrapper: a border box only when the tree marks it as an inner atom.
 fn styled_element(out: &mut String, styled: &Styled) {
-    let bordered = styled.class == Some(Class::Inner) && styled.style.is_none() && styled.font.is_none();
+    let bordered =
+        styled.class == Some(Class::Inner) && styled.style.is_none() && styled.font.is_none();
     let name = if bordered { "m:borderBox" } else { "m:box" };
     out.push('<');
     out.push_str(name);
@@ -345,7 +386,7 @@ fn text_element(out: &mut String, text: &str) {
         out.push_str(" xml:space=\"preserve\"");
     }
     out.push('>');
-    out.push_str(&escape(&valid_xml(text)));
+    out.push_str(&escape(valid_xml(text)));
     out.push_str("</m:t>");
 }
 
@@ -354,7 +395,7 @@ fn valued(out: &mut String, name: &str, value: &str) {
     out.push('<');
     out.push_str(name);
     out.push_str(" m:val=\"");
-    out.push_str(&escape(&valid_xml(value)));
+    out.push_str(&escape(valid_xml(value)));
     out.push_str("\"/>");
 }
 

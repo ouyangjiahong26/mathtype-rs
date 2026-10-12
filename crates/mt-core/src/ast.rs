@@ -16,7 +16,10 @@ pub struct Math {
 impl Math {
     /// An equation wrapping `body` at full size.
     pub fn new(body: impl Into<Node>) -> Self {
-        Self { body: body.into(), style: MathStyle::Full }
+        Self {
+            body: body.into(),
+            style: MathStyle::Full,
+        }
     }
 
     pub fn node_at(&self, path: &Path) -> Option<&Node> {
@@ -111,16 +114,27 @@ impl Node {
 
     /// A default-class italic variable.
     pub fn variable(ch: char) -> Self {
-        Node::Char(Char { ch, class: Class::Ord, font: Font::Italic })
+        Node::Char(Char {
+            ch,
+            class: Class::Ord,
+            font: Font::Italic,
+        })
     }
 
     /// A default-class upright operator or symbol.
     pub fn symbol(ch: char, class: Class) -> Self {
-        Node::Char(Char { ch, class, font: Font::Upright })
+        Node::Char(Char {
+            ch,
+            class,
+            font: Font::Upright,
+        })
     }
 
     pub fn text(text: impl Into<String>) -> Self {
-        Node::Text(Box::new(TextRun { text: text.into(), font: Font::Upright }))
+        Node::Text(Box::new(TextRun {
+            text: text.into(),
+            font: Font::Upright,
+        }))
     }
 
     /// True when the node is an empty row, which renderers draw as an empty slot.
@@ -234,7 +248,9 @@ impl Node {
 
     /// Slots in visual order. Allocates; use [`Node::slot_count`] plus [`Node::slot`] in hot paths.
     pub fn slots(&self) -> Vec<&Node> {
-        (0..self.slot_count()).filter_map(|i| self.slot(i)).collect()
+        (0..self.slot_count())
+            .filter_map(|i| self.slot(i))
+            .collect()
     }
 
     /// Depth-first walk over the node and every node reachable through its slots.
@@ -354,13 +370,19 @@ impl From<char> for Node {
 
 impl From<&str> for Node {
     fn from(text: &str) -> Self {
-        Node::Text(Box::new(TextRun { text: text.to_owned(), font: Font::Upright }))
+        Node::Text(Box::new(TextRun {
+            text: text.to_owned(),
+            font: Font::Upright,
+        }))
     }
 }
 
 impl From<String> for Node {
     fn from(text: String) -> Self {
-        Node::Text(Box::new(TextRun { text, font: Font::Upright }))
+        Node::Text(Box::new(TextRun {
+            text,
+            font: Font::Upright,
+        }))
     }
 }
 
@@ -436,14 +458,22 @@ pub enum Font {
 impl Font {
     /// Whether the face is set in italics, which layout needs for metric selection.
     pub fn is_italic(self) -> bool {
-        matches!(self, Font::Italic | Font::BoldItalic | Font::SansSerifItalic | Font::SansSerifBoldItalic)
+        matches!(
+            self,
+            Font::Italic | Font::BoldItalic | Font::SansSerifItalic | Font::SansSerifBoldItalic
+        )
     }
 
     /// Whether the face is bold.
     pub fn is_bold(self) -> bool {
         matches!(
             self,
-            Font::Bold | Font::BoldItalic | Font::SansSerifBold | Font::SansSerifBoldItalic | Font::BoldScript | Font::BoldFraktur
+            Font::Bold
+                | Font::BoldItalic
+                | Font::SansSerifBold
+                | Font::SansSerifBoldItalic
+                | Font::BoldScript
+                | Font::BoldFraktur
         )
     }
 }
@@ -505,7 +535,11 @@ pub struct Frac {
 
 impl Frac {
     pub fn new(num: Node, den: Node) -> Self {
-        Self { num, den, kind: FracKind::Bar }
+        Self {
+            num,
+            den,
+            kind: FracKind::Bar,
+        }
     }
 }
 
@@ -533,11 +567,17 @@ pub struct Sqrt {
 
 impl Sqrt {
     pub fn square(radicand: Node) -> Self {
-        Self { index: None, radicand }
+        Self {
+            index: None,
+            radicand,
+        }
     }
 
     pub fn nth(index: Node, radicand: Node) -> Self {
-        Self { index: Some(index), radicand }
+        Self {
+            index: Some(index),
+            radicand,
+        }
     }
 }
 
@@ -890,12 +930,19 @@ mod tests {
     use super::*;
 
     fn scripts(base: Node, sub: Node, sup: Node) -> Node {
-        Node::Scripts(Box::new(Scripts { base, sub: Some(sub), sup: Some(sup) }))
+        Node::Scripts(Box::new(Scripts {
+            base,
+            sub: Some(sub),
+            sup: Some(sup),
+        }))
     }
 
     #[test]
     fn fraction_slots_are_numerator_then_denominator() {
-        let frac = Node::Frac(Box::new(Frac::new(Node::variable('a'), Node::variable('b'))));
+        let frac = Node::Frac(Box::new(Frac::new(
+            Node::variable('a'),
+            Node::variable('b'),
+        )));
         assert_eq!(frac.slot_count(), 2);
         assert_eq!(frac.slot(0), Some(&Node::variable('a')));
         assert_eq!(frac.slot(1), Some(&Node::variable('b')));
@@ -908,7 +955,10 @@ mod tests {
         assert_eq!(root.slot_count(), 1);
         assert_eq!(root.slot(0), Some(&Node::variable('x')));
 
-        let nth = Node::Sqrt(Box::new(Sqrt::nth(Node::variable('n'), Node::variable('x'))));
+        let nth = Node::Sqrt(Box::new(Sqrt::nth(
+            Node::variable('n'),
+            Node::variable('x'),
+        )));
         assert_eq!(nth.slot_count(), 2);
         assert_eq!(nth.slot(0), Some(&Node::variable('n')));
         assert_eq!(nth.slot(1), Some(&Node::variable('x')));
@@ -918,12 +968,19 @@ mod tests {
     fn path_navigation_reaches_nested_slots() {
         let math = Math::new(Node::row([
             Node::variable('x'),
-            scripts(Node::variable('a'), Node::variable('i'), Node::variable('2')),
+            scripts(
+                Node::variable('a'),
+                Node::variable('i'),
+                Node::variable('2'),
+            ),
         ]));
         let sup = Path::root().child(1).child(2);
         assert_eq!(math.node_at(&sup), Some(&Node::variable('2')));
         assert_eq!(sup.to_string(), "1.2");
-        assert_eq!(sup.parent().map(|path| path.to_string()), Some("1".to_owned()));
+        assert_eq!(
+            sup.parent().map(|path| path.to_string()),
+            Some("1".to_owned())
+        );
         assert_eq!(math.node_at(&Path::root()), Some(&math.body));
     }
 
@@ -934,22 +991,32 @@ mod tests {
             Node::Sqrt(Box::new(Sqrt::square(Node::variable('x')))),
         ]));
         let radicand = Path::root().child(1).child(0);
-        let replaced = math.node_at_mut(&radicand).map(|node| std::mem::replace(node, Node::variable('y')));
+        let replaced = math
+            .node_at_mut(&radicand)
+            .map(|node| std::mem::replace(node, Node::variable('y')));
         assert_eq!(replaced, Some(Node::variable('x')));
         assert_eq!(math.node_at(&radicand), Some(&Node::variable('y')));
 
         let row = Path::root();
         assert!(math.body.insert_at(&row, Node::variable('z')));
         assert_eq!(math.body.slot_count(), 3);
-        assert_eq!(math.node_at(&Path::root().child(2)), Some(&Node::variable('z')));
-        assert_eq!(math.body.remove_at(&Path::root().child(2)), Some(Node::variable('z')));
+        assert_eq!(
+            math.node_at(&Path::root().child(2)),
+            Some(&Node::variable('z'))
+        );
+        assert_eq!(
+            math.body.remove_at(&Path::root().child(2)),
+            Some(Node::variable('z'))
+        );
         assert_eq!(math.body.slot_count(), 2);
     }
 
     #[test]
     fn matrix_cells_are_addressed_row_major() {
         let mut matrix = Matrix::empty(2, 3);
-        matrix.cell_at_mut(4).map(|cell| *cell = Node::variable('q'));
+        if let Some(cell) = matrix.cell_at_mut(4) {
+            *cell = Node::variable('q');
+        }
         let node = Node::Matrix(Box::new(matrix));
         assert_eq!(node.slot_count(), 6);
         assert_eq!(node.slot(4), Some(&Node::variable('q')));
@@ -973,9 +1040,19 @@ mod tests {
 
     #[test]
     fn normalisation_flattens_nested_rows_only() {
-        let mut node = Node::row([Node::variable('a'), Node::row([Node::variable('b'), Node::variable('c')])]);
+        let mut node = Node::row([
+            Node::variable('a'),
+            Node::row([Node::variable('b'), Node::variable('c')]),
+        ]);
         node.normalize();
-        assert_eq!(node, Node::row([Node::variable('a'), Node::variable('b'), Node::variable('c')]));
+        assert_eq!(
+            node,
+            Node::row([
+                Node::variable('a'),
+                Node::variable('b'),
+                Node::variable('c')
+            ])
+        );
 
         let mut node = Node::row([Node::row([Node::variable('a')])]);
         node.normalize();

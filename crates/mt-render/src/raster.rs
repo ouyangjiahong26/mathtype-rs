@@ -98,7 +98,13 @@ pub(crate) fn rasterize(polys: &[Vec<[f64; 2]>], clip_w: u32, clip_h: u32) -> Op
         }
     }
 
-    Some(Mask { x0: cx0 as i32, y0: cy0 as i32, w: w as u32, h: h as u32, cov })
+    Some(Mask {
+        x0: cx0 as i32,
+        y0: cy0 as i32,
+        w: w as u32,
+        h: h as u32,
+        cov,
+    })
 }
 
 /// Add the horizontal coverage of the span `xa .. xb` (in mask-local pixel coordinates) to one

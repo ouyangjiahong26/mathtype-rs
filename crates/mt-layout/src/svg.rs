@@ -28,8 +28,18 @@ pub fn to_svg(root: &Box, style: &LayoutStyle) -> String {
     let (x, y, width, height) = view_box(root, style);
     let mut svg = String::new();
     svg.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\"");
-    svg.push_str(&format!(" viewBox=\"{} {} {} {}\"", number(x), number(y), number(width), number(height)));
-    svg.push_str(&format!(" width=\"{}pt\" height=\"{}pt\">\n", number(width), number(height)));
+    svg.push_str(&format!(
+        " viewBox=\"{} {} {} {}\"",
+        number(x),
+        number(y),
+        number(width),
+        number(height)
+    ));
+    svg.push_str(&format!(
+        " width=\"{}pt\" height=\"{}pt\">\n",
+        number(width),
+        number(height)
+    ));
     write_box(&mut svg, root);
     svg.push_str("</svg>\n");
     svg
@@ -43,7 +53,14 @@ fn write_box(svg: &mut String, node: &Box) {
             }
         }
         Box::Kern { .. } => {}
-        Box::Glyph { ch, font, x, y, size, yscale } => {
+        Box::Glyph {
+            ch,
+            font,
+            x,
+            y,
+            size,
+            yscale,
+        } => {
             let (x, y, size) = (number(*x), number(*y), number(*size));
             svg.push_str(&format!("<text x=\"{x}\" y=\"{y}\" font-size=\"{size}\""));
             svg.push_str(&format!(" font-family=\"{FONT_FAMILY}\""));
@@ -63,7 +80,14 @@ fn write_box(svg: &mut String, node: &Box) {
             push_escaped(svg, *ch);
             svg.push_str("</text>\n");
         }
-        Box::Rule { x, y, width, height, depth, dashed } => {
+        Box::Rule {
+            x,
+            y,
+            width,
+            height,
+            depth,
+            dashed,
+        } => {
             let top = number(y - height);
             let (x, width, full_height) = (number(*x), number(*width), number(height + depth));
             if *dashed {
@@ -83,7 +107,11 @@ fn write_box(svg: &mut String, node: &Box) {
 
 /// Format a coordinate: three decimals, trailing zeros removed, never `-0`.
 fn number(value: f64) -> String {
-    let rounded = if value == 0.0 { 0.0 } else { (value * 1000.0).round() / 1000.0 };
+    let rounded = if value == 0.0 {
+        0.0
+    } else {
+        (value * 1000.0).round() / 1000.0
+    };
     format!("{rounded}")
 }
 

@@ -2,7 +2,7 @@
 //! or an error, never as a panic.
 
 use mt_core::{Class, Delim, Fence, Font, Frac, FracKind, Math, Node, Sqrt};
-use mt_mtef::{parse_bare, read_bare, write_bare, MtefError};
+use mt_mtef::{MtefError, parse_bare, read_bare, write_bare};
 
 /// An equation that uses most of the records the writer emits.
 fn rich_equation() -> Math {
@@ -10,7 +10,11 @@ fn rich_equation() -> Math {
     Math::new(Node::row([
         Node::Frac(Box::new(Frac {
             num: Node::row([variable('a'), Node::symbol('+', Class::Bin), variable('b')]),
-            den: Node::Char(mt_core::Char { ch: 'x', class: Class::Ord, font: Font::Bold }),
+            den: Node::Char(mt_core::Char {
+                ch: 'x',
+                class: Class::Ord,
+                font: Font::Bold,
+            }),
             kind: FracKind::Bar,
         })),
         Node::Sqrt(Box::new(Sqrt::nth(variable('n'), variable('x')))),

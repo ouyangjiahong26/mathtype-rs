@@ -14,19 +14,43 @@ use mt_core::Font;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Box {
     /// Horizontal sequence, laid out left to right.
-    HBox { items: Vec<Box>, width: f64, height: f64, depth: f64 },
+    HBox {
+        items: Vec<Box>,
+        width: f64,
+        height: f64,
+        depth: f64,
+    },
     /// Vertical sequence, listed top to bottom.
-    VBox { items: Vec<Box>, width: f64, height: f64, depth: f64 },
+    VBox {
+        items: Vec<Box>,
+        width: f64,
+        height: f64,
+        depth: f64,
+    },
     /// One glyph, positioned by the baseline point of its left edge.
     ///
     /// `size` is the font size in points. `yscale` is the vertical stretch factor applied about
     /// the anchor: 1.0 for ordinary glyphs, larger for delimiters and radicals that had to grow
     /// beyond the largest glyph of the size table. Horizontal stretch is expressed through
     /// `size` instead, so that a stretched glyph keeps its proportions.
-    Glyph { ch: char, font: Font, x: f64, y: f64, size: f64, yscale: f64 },
+    Glyph {
+        ch: char,
+        font: Font,
+        x: f64,
+        y: f64,
+        size: f64,
+        yscale: f64,
+    },
     /// Filled rectangle, spanning `x .. x + width` horizontally and
     /// `y - height .. y + depth` vertically. `dashed` marks the placeholder of an empty slot.
-    Rule { x: f64, y: f64, width: f64, height: f64, depth: f64, dashed: bool },
+    Rule {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        depth: f64,
+        dashed: bool,
+    },
     /// Horizontal advance without ink, either an explicit space or inter-atom spacing.
     Kern { width: f64 },
 }

@@ -10,8 +10,8 @@
 //! `rclFrame` carries the physical size in 0.01 mm so hosts can scale the picture to the extent
 //! they set with `SetExtent`.
 
-use crate::outline::{Path, Seg};
 use crate::Item;
+use crate::outline::{Path, Seg};
 
 /// EMF record type numbers, from `wingdi.h`.
 const EMR_HEADER: u32 = 1;
@@ -53,9 +53,26 @@ pub(crate) fn render(items: &[Item], bounds: (f64, f64, f64, f64), fg: [u8; 4]) 
     for item in items {
         match item {
             Item::Glyph { path } => emit_glyph(&mut out, path, origin, clip),
-            Item::Rule { x, y, width: rw, height, depth, dashed } => {
-                emit_rule(&mut out, *x, *y, *rw, *height, *depth, *dashed, origin, clip);
-            }
+            Item::Rule {
+                x,
+                y,
+                width: rw,
+                height,
+                depth,
+                dashed,
+            } => emit_rule(
+                &mut out,
+                Rule {
+                    x: *x,
+                    y: *y,
+                    width: *rw,
+                    height: *height,
+                    depth: *depth,
+                    dashed: *dashed,
+                },
+                origin,
+                clip,
+            ),
         }
     }
     eof(&mut out);
@@ -66,7 +83,10 @@ pub(crate) fn render(items: &[Item], bounds: (f64, f64, f64, f64), fg: [u8; 4]) 
 
 /// Map a layout point to EMF device units (points, top-down), relative to the image box.
 fn dev(p: [f64; 2], origin: (f64, f64)) -> (i32, i32) {
-    ((p[0] - origin.0).round() as i32, (p[1] - origin.1).round() as i32)
+    (
+        (p[0] - origin.0).round() as i32,
+        (p[1] - origin.1).round() as i32,
+    )
 }
 
 /// Write `EMR_HEADER`, the 88-byte fixed part: bounds in device units, frame in 0.01 mm.
@@ -162,19 +182,26 @@ fn emit_glyph(out: &mut Vec<u8>, path: &Path, origin: (f64, f64), clip: (i32, i3
     bare_record(out, EMR_FILLPATH, intersect(ink, clip));
 }
 
-/// Emit one rule: a filled rectangle, or the dashes of the empty-slot placeholder.
-fn emit_rule(
-    out: &mut Vec<u8>,
+/// One rule to draw: its box in layout point coordinates and whether it is the dashed placeholder.
+struct Rule {
     x: f64,
     y: f64,
     width: f64,
     height: f64,
     depth: f64,
     dashed: bool,
-    origin: (f64, f64),
-    clip: (i32, i32, i32, i32),
-) {
-    let polys = crate::rule_polygons(x, y, width, height, depth, dashed);
+}
+
+/// Emit one rule: a filled rectangle, or the dashes of the empty-slot placeholder.
+fn emit_rule(out: &mut Vec<u8>, rule: Rule, origin: (f64, f64), clip: (i32, i32, i32, i32)) {
+    let polys = crate::rule_polygons(
+        rule.x,
+        rule.y,
+        rule.width,
+        rule.height,
+        rule.depth,
+        rule.dashed,
+    );
     let mut points = Vec::with_capacity(polys.len());
     let mut ink = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
     for poly in &polys {
@@ -202,7 +229,6 @@ fn emit_rule(
     }
     rec.finish(out);
 }
-
 
 /// Emit the pending bezier run, if any, as one `EMR_POLYBEZIERTO16`.
 fn flush_beziers(
@@ -273,11 +299,16 @@ fn intersect(bounds: (i32, i32, i32, i32), clip: (i32, i32, i32, i32)) -> (i32, 
     if bounds.0 > bounds.2 || bounds.1 > bounds.3 {
         return clip;
     }
-    (bounds.0.max(clip.0), bounds.1.max(clip.1), bounds.2.min(clip.2), bounds.3.min(clip.3))
+    (
+        bounds.0.max(clip.0),
+        bounds.1.max(clip.1),
+        bounds.2.min(clip.2),
+        bounds.3.min(clip.3),
+    )
 }
 
 /// Fill in `nBytes` and `nRecords` now that the whole file is written.
-fn patch_header(out: &mut Vec<u8>) {
+fn patch_header(out: &mut [u8]) {
     let mut records = 0u32;
     let mut offset = 0usize;
     while offset + 8 <= out.len() {
@@ -304,7 +335,9 @@ struct Rec {
 impl Rec {
     /// Start a record of `kind`.
     fn new(kind: u32) -> Self {
-        Self { buf: kind.to_le_bytes().iter().chain(&[0; 4]).copied().collect() }
+        Self {
+            buf: kind.to_le_bytes().iter().chain(&[0; 4]).copied().collect(),
+        }
     }
 
     /// Append a payload word.
@@ -335,7 +368,7 @@ impl Rec {
         let pad = (4 - self.buf.len() % 4) % 4;
         let size = (self.buf.len() + pad) as u32;
         self.buf[4..8].copy_from_slice(&size.to_le_bytes());
-        self.buf.extend(std::iter::repeat(0).take(pad));
+        self.buf.extend(std::iter::repeat_n(0, pad));
         out.extend_from_slice(&self.buf);
     }
 }
@@ -345,12 +378,16 @@ mod tests {
     use super::render as emf_bytes;
     use crate::{RenderOptions, image_size, render_png};
     use mt_core::{Frac, FracKind, Math, Node};
-    use mt_layout::{layout, ApproxMetrics, LayoutStyle};
+    use mt_layout::{ApproxMetrics, LayoutStyle, layout};
     use ttf_parser::Face;
 
     /// A laid-out fraction `a/b`, which draws glyph outlines plus a rule.
     fn tree() -> (mt_layout::Box, LayoutStyle, Face<'static>) {
-        let face = Face::parse(include_bytes!("../../../assets/fonts/latinmodern-math.otf"), 0).unwrap();
+        let face = Face::parse(
+            include_bytes!("../../../assets/fonts/latinmodern-math.otf"),
+            0,
+        )
+        .unwrap();
         let math = Math::new(Node::Frac(Box::new(Frac {
             num: Node::variable('a'),
             den: Node::variable('b'),
@@ -377,7 +414,10 @@ mod tests {
             let kind = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
             let size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap());
             assert!(size >= 8 && size % 4 == 0, "record {kind} has size {size}");
-            assert!(offset + size as usize <= bytes.len(), "record {kind} overruns the file");
+            assert!(
+                offset + size as usize <= bytes.len(),
+                "record {kind} overruns the file"
+            );
             out.push((kind, size));
             offset += size as usize;
         }
@@ -390,25 +430,43 @@ mod tests {
         let (bytes, _) = picture();
         assert_eq!(u32::from_le_bytes(bytes[0..4].try_into().unwrap()), 1); // EMR_HEADER
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 88); // its size
-        assert_eq!(u32::from_le_bytes(bytes[40..44].try_into().unwrap()), 0x464D4520); // " EMF"
+        assert_eq!(
+            u32::from_le_bytes(bytes[40..44].try_into().unwrap()),
+            0x464D4520
+        ); // " EMF"
         let walked = records(&bytes);
         let count = walked.len() as u32;
         assert_eq!(u32::from_le_bytes(bytes[52..56].try_into().unwrap()), count);
-        assert_eq!(u32::from_le_bytes(bytes[48..52].try_into().unwrap()), bytes.len() as u32);
+        assert_eq!(
+            u32::from_le_bytes(bytes[48..52].try_into().unwrap()),
+            bytes.len() as u32
+        );
         assert_eq!(walked.last().copied(), Some((super::EMR_EOF, 20)));
     }
 
     #[test]
     fn the_bounds_match_the_png_size_and_the_frame_is_himetric() {
         let (bytes, bounds) = picture();
-        let (width, height) = image_size(&tree().0, &tree().1, &tree().2, &RenderOptions::default());
+        let (width, height) =
+            image_size(&tree().0, &tree().1, &tree().2, &RenderOptions::default());
         let field = |off: usize| i32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
-        assert_eq!((field(8), field(12), field(16), field(20)), (0, 0, width as i32 - 1, height as i32 - 1));
+        assert_eq!(
+            (field(8), field(12), field(16), field(20)),
+            (0, 0, width as i32 - 1, height as i32 - 1)
+        );
         // rclFrame is the same rectangle in 0.01 mm, i.e. points * 2540 / 72.
         let expect = (width as f64 * 2540.0 / 72.0).round() as i32;
-        assert!((field(32) - expect).abs() <= 1, "frame right was {}", field(32));
+        assert!(
+            (field(32) - expect).abs() <= 1,
+            "frame right was {}",
+            field(32)
+        );
         let expect = (height as f64 * 2540.0 / 72.0).round() as i32;
-        assert!((field(36) - expect).abs() <= 1, "frame bottom was {}", field(36));
+        assert!(
+            (field(36) - expect).abs() <= 1,
+            "frame bottom was {}",
+            field(36)
+        );
         assert!(bounds.2 > bounds.0 && bounds.3 > bounds.1);
 
         // The PNG of the same tree keeps the EMF picture's aspect ratio.
@@ -437,7 +495,10 @@ mod tests {
             super::EMR_FILLPATH,
             super::EMR_POLYPOLYGON16,
         ] {
-            assert!(kinds.contains(&needed), "missing record type {needed} in {kinds:?}");
+            assert!(
+                kinds.contains(&needed),
+                "missing record type {needed} in {kinds:?}"
+            );
         }
         // No text output: everything is outlines, so no host font substitution can occur.
         assert!(!kinds.contains(&84) && !kinds.contains(&83));
@@ -463,10 +524,18 @@ mod tests {
             .arg(&path)
             .output()
             .expect("soffice must be installed");
-        assert!(status.status.success(), "soffice failed: {}", String::from_utf8_lossy(&status.stderr));
+        assert!(
+            status.status.success(),
+            "soffice failed: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
         let png_path = dir.join("equation.png");
-        let png = std::fs::read(&png_path)
-            .unwrap_or_else(|_| panic!("soffice wrote no png; stdout: {}", String::from_utf8_lossy(&status.stdout)));
+        let png = std::fs::read(&png_path).unwrap_or_else(|_| {
+            panic!(
+                "soffice wrote no png; stdout: {}",
+                String::from_utf8_lossy(&status.stdout)
+            )
+        });
         assert!(png.len() > 100, "the png is suspiciously small");
 
         // LibreOffice places the picture on a page of its own choosing, so only that it
@@ -481,7 +550,9 @@ mod tests {
     /// Count pixels darker than mid-grey, i.e. the ink LibreOffice drew.
     fn ink_pixels(bytes: &[u8]) -> usize {
         let decoder = png::Decoder::new(std::io::Cursor::new(bytes.to_vec()));
-        let mut reader = decoder.read_info().expect("soffice produced a readable png");
+        let mut reader = decoder
+            .read_info()
+            .expect("soffice produced a readable png");
         let mut buffer = vec![0; reader.output_buffer_size().unwrap_or_default()];
         let info = reader.next_frame(&mut buffer).expect("the png decodes");
         let (w, h) = (info.width as usize, info.height as usize);
@@ -502,7 +573,12 @@ mod tests {
     /// Width and height of a PNG from its `IHDR` chunk.
     fn png_dimensions(bytes: &[u8]) -> (f64, f64) {
         let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
-        let reader = decoder.read_info().expect("soffice produced a readable png");
-        (f64::from(reader.info().width), f64::from(reader.info().height))
+        let reader = decoder
+            .read_info()
+            .expect("soffice produced a readable png");
+        (
+            f64::from(reader.info().width),
+            f64::from(reader.info().height),
+        )
     }
 }

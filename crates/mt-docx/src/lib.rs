@@ -203,10 +203,13 @@ impl Document {
 
     /// The paragraphs, with their block numbers, in document order.
     pub fn paragraphs(&self) -> impl Iterator<Item = (usize, &Paragraph)> {
-        self.blocks.iter().enumerate().filter_map(|(index, block)| match block {
-            Block::Paragraph(paragraph) => Some((index, paragraph)),
-            Block::Table(_) => None,
-        })
+        self.blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, block)| match block {
+                Block::Paragraph(paragraph) => Some((index, paragraph)),
+                Block::Table(_) => None,
+            })
     }
 
     /// The main part's XML, as edited so far.
@@ -244,10 +247,16 @@ impl Document {
         let (_, object_range) = {
             let paragraph = self.paragraph_at(block, item)?;
             match &paragraph.items[item] {
-                Item::Object { range, preview_range: Some(preview), .. } => {
-                    (preview.clone(), range.clone())
+                Item::Object {
+                    range,
+                    preview_range: Some(preview),
+                    ..
+                } => (preview.clone(), range.clone()),
+                _ => {
+                    return Err(DocxError::Xml(
+                        "the item has no preview shape to resize".to_owned(),
+                    ));
                 }
-                _ => return Err(DocxError::Xml("the item has no preview shape to resize".to_owned())),
             }
         };
         let object = self.xml[object_range.clone()].to_owned();
@@ -257,7 +266,10 @@ impl Document {
         let shape_range = {
             let paragraph = self.paragraph_at(block, item)?;
             match &paragraph.items[item] {
-                Item::Object { preview_range: Some(preview), .. } => preview.clone(),
+                Item::Object {
+                    preview_range: Some(preview),
+                    ..
+                } => preview.clone(),
                 _ => return Err(DocxError::Xml("the preview shape vanished".to_owned())),
             }
         };
@@ -272,7 +284,9 @@ impl Document {
     pub fn equations(&self) -> Vec<Equation> {
         let mut found = Vec::new();
         for (block_index, block) in self.blocks.iter().enumerate() {
-            let Block::Paragraph(paragraph) = block else { continue };
+            let Block::Paragraph(paragraph) = block else {
+                continue;
+            };
             for (item_index, item) in paragraph.items.iter().enumerate() {
                 match item {
                     Item::OMath { range, display } => found.push(Equation {
@@ -281,12 +295,18 @@ impl Document {
                         kind: EquationKind::Omath { display: *display },
                         math: mt_omml::parse(&self.xml[range.clone()]).ok(),
                     }),
-                    Item::Object { data_rel_id, prog_id, .. } => found.push(Equation {
+                    Item::Object {
+                        data_rel_id,
+                        prog_id,
+                        ..
+                    } => found.push(Equation {
                         block: block_index,
                         item: item_index,
                         kind: EquationKind::Ole {
                             prog_id: prog_id.clone(),
-                            part: data_rel_id.as_deref().and_then(|id| self.relationship_part(id)),
+                            part: data_rel_id
+                                .as_deref()
+                                .and_then(|id| self.relationship_part(id)),
                         },
                         math: self.object_tree(data_rel_id),
                     }),
@@ -318,7 +338,11 @@ impl Document {
                 let id = self.take_generated_id();
                 fragment::image_run(&rel_id, &data.name, data.extent_emu, id)
             }
-            Replacement::Ole { math, prog_id, preview } => {
+            Replacement::Ole {
+                math,
+                prog_id,
+                preview,
+            } => {
                 let (rel_id, prog_id, preview) =
                     self.ole_replacement(&target, &math, prog_id.as_deref(), preview.as_ref())?;
                 let id = self.take_generated_id();
@@ -335,11 +359,20 @@ impl Document {
     }
 
     /// The range an edit cuts and the object facts an edit may reuse, for one item.
-    fn replace_target(&self, block: usize, item: usize) -> Result<(Range<usize>, ObjectTarget), DocxError> {
+    fn replace_target(
+        &self,
+        block: usize,
+        item: usize,
+    ) -> Result<(Range<usize>, ObjectTarget), DocxError> {
         let paragraph = self.paragraph_at(block, item)?;
         let target = &paragraph.items[item];
         let object = match target {
-            Item::Object { data_rel_id, prog_id, preview_range, .. } => ObjectTarget {
+            Item::Object {
+                data_rel_id,
+                prog_id,
+                preview_range,
+                ..
+            } => ObjectTarget {
                 rel_id: data_rel_id.clone(),
                 prog_id: prog_id.clone(),
                 preview_range: preview_range.clone(),
@@ -380,7 +413,9 @@ impl Document {
             Position::ParagraphEnd { block } => self.paragraph_at_block(block)?.content_end,
             Position::ParagraphPropertiesStart { block } => {
                 let paragraph = self.paragraph_at_block(block)?;
-                paragraph.properties_open_end.unwrap_or(paragraph.open_tag_end)
+                paragraph
+                    .properties_open_end
+                    .unwrap_or(paragraph.open_tag_end)
             }
             Position::AfterParagraph { block } => {
                 let paragraph = self.paragraph_at_block(block)?;
@@ -419,7 +454,8 @@ impl Document {
             self.package.set_part(CONTENT_TYPES_PART, xml.into_bytes());
         }
         if self.dirty_xml {
-            self.package.set_part(DOCUMENT_PART, self.xml.clone().into_bytes());
+            self.package
+                .set_part(DOCUMENT_PART, self.xml.clone().into_bytes());
         }
         self.package.into_bytes()
     }
@@ -429,18 +465,19 @@ impl Document {
     /// The paragraph that owns this item.
     fn paragraph_at(&self, block: usize, item: usize) -> Result<&Paragraph, DocxError> {
         let paragraph = self.paragraph_at_block(block)?;
-        paragraph.items.get(item).ok_or_else(|| {
-            DocxError::Xml(format!("paragraph {block} has no item {item}"))
-        })?;
+        paragraph
+            .items
+            .get(item)
+            .ok_or_else(|| DocxError::Xml(format!("paragraph {block} has no item {item}")))?;
         Ok(paragraph)
     }
 
     fn paragraph_at_block(&self, block: usize) -> Result<&Paragraph, DocxError> {
         match self.blocks.get(block) {
             Some(Block::Paragraph(paragraph)) => Ok(paragraph),
-            Some(Block::Table(_)) => {
-                Err(DocxError::Xml(format!("block {block} is a table, not a paragraph")))
-            }
+            Some(Block::Table(_)) => Err(DocxError::Xml(format!(
+                "block {block} is a table, not a paragraph"
+            ))),
             None => Err(DocxError::Xml(format!("the document has no block {block}"))),
         }
     }
@@ -491,7 +528,10 @@ impl Document {
     fn add_media_part(&mut self, data: &ImageData) -> Result<String, DocxError> {
         let part = self.unused_part_name("word/media", "image", &data.extension);
         let target = relationship_target(&part);
-        if self.content_types.ensure_default(&data.extension, &data.content_type) {
+        if self
+            .content_types
+            .ensure_default(&data.extension, &data.content_type)
+        {
             self.dirty_content_types = true;
         }
         self.package.set_part(&part, data.bytes.clone());
@@ -519,15 +559,21 @@ impl Document {
                             .preview_range
                             .clone()
                             .map(|range| self.xml[range].to_owned());
-                        let prog_id =
-                            target.prog_id.clone().unwrap_or_else(|| DEFAULT_PROG_ID.to_owned());
+                        let prog_id = target
+                            .prog_id
+                            .clone()
+                            .unwrap_or_else(|| DEFAULT_PROG_ID.to_owned());
                         return Ok((rel_id.clone(), prog_id, preview));
                     }
                 }
             }
         }
         // No usable object behind the item: a new minimal one.
-        self.create_equation_object(math, wanted_prog_id.unwrap_or(DEFAULT_PROG_ID), wanted_preview)
+        self.create_equation_object(
+            math,
+            wanted_prog_id.unwrap_or(DEFAULT_PROG_ID),
+            wanted_preview,
+        )
     }
 
     /// Creates a fresh equation object — a compound-file part holding `math`, an optional
@@ -572,7 +618,12 @@ impl Document {
     ) -> Result<String, DocxError> {
         let (rel_id, _prog_id, preview) = self.create_equation_object(math, prog_id, preview)?;
         let id = self.take_generated_id();
-        Ok(fragment::object_run(&rel_id, prog_id, preview.as_deref(), id))
+        Ok(fragment::object_run(
+            &rel_id,
+            prog_id,
+            preview.as_deref(),
+            id,
+        ))
     }
 
     /// Drops the relationship of an object that is being replaced by something else, when no
@@ -580,7 +631,9 @@ impl Document {
     /// relationships may still point at it.
     fn retire_object(&mut self, rel_id: &str, block: usize, item: usize) {
         let still_used = self.blocks.iter().enumerate().any(|(block_index, other)| {
-            let Block::Paragraph(paragraph) = other else { return false };
+            let Block::Paragraph(paragraph) = other else {
+                return false;
+            };
             paragraph.items.iter().enumerate().any(|(item_index, entry)| {
                 (block_index != block || item_index != item)
                     && matches!(entry, Item::Object { data_rel_id: Some(id), .. } if id == rel_id)
@@ -618,7 +671,6 @@ struct ObjectTarget {
     preview_range: Option<Range<usize>>,
 }
 
-
 /// Rewrites a `v:shape`'s `style` width/height (points) to the given natural size.
 fn rewrite_shape_extent(shape: &str, width_pt: f64, height_pt: f64) -> Result<String, DocxError> {
     let replacement = format!("width:{width_pt:.1}pt;height:{height_pt:.1}pt");
@@ -627,14 +679,16 @@ fn rewrite_shape_extent(shape: &str, width_pt: f64, height_pt: f64) -> Result<St
     let mut replaced = false;
     while let Some(at) = rest.find("width:") {
         let after = &rest[at..];
-        let end = after.find(';').map_or(after.len(), |i| i);
+        let end = after.find(';').unwrap_or(after.len());
         out.push_str(&rest[..at]);
         out.push_str(&replacement);
         rest = &after[end..];
         replaced = true;
     }
     if !replaced {
-        return Err(DocxError::Xml("the preview shape has no size style to rewrite".to_owned()));
+        return Err(DocxError::Xml(
+            "the preview shape has no size style to rewrite".to_owned(),
+        ));
     }
     out.push_str(rest);
     Ok(out)
@@ -651,7 +705,9 @@ fn rewrite_object_extent(object: &str, width_pt: f64, height_pt: f64) -> String 
 /// Replaces the number inside `name="<digits>"` (first occurrence) with `value`.
 fn replace_attribute_number(text: &str, name: &str, value: &str) -> String {
     let opener = format!("{name}=\"");
-    let Some(at) = text.find(&opener) else { return text.to_owned() };
+    let Some(at) = text.find(&opener) else {
+        return text.to_owned();
+    };
     let digits_start = at + opener.len();
     let digits_end = text[digits_start..]
         .find('"')

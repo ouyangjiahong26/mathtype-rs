@@ -34,7 +34,12 @@ impl FaceMetrics {
         let math_leading = constants
             .map(|constants| f64::from(constants.math_leading().value) / units_per_em)
             .unwrap_or(0.05);
-        Some(Self { face, units_per_em, axis_height, math_leading })
+        Some(Self {
+            face,
+            units_per_em,
+            axis_height,
+            math_leading,
+        })
     }
 
     /// Distance from the top of the line box down to the baseline, in em units.
@@ -51,7 +56,9 @@ impl FaceMetrics {
     }
 
     fn glyph(&self, ch: char) -> Option<ttf_parser::GlyphId> {
-        self.face.glyph_index(ch).or_else(|| self.face.glyph_index('?'))
+        self.face
+            .glyph_index(ch)
+            .or_else(|| self.face.glyph_index('?'))
     }
 
     fn extent(&self, ch: char, above: bool) -> f64 {

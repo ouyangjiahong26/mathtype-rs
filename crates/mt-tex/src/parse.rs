@@ -39,7 +39,10 @@ pub fn parse(input: &str) -> Result<Math, ParseError> {
     if let Some(ch) = parser.peek() {
         return Err(parser.err(&format!("unexpected `{ch}` after the end of the equation")));
     }
-    Ok(Math { body: Node::Row(row), style: MathStyle::Full })
+    Ok(Math {
+        body: Node::Row(row),
+        style: MathStyle::Full,
+    })
 }
 
 /// Remove one layer of math delimiters and report the byte offset of the remaining text.
@@ -48,11 +51,12 @@ fn strip_wrapper(input: &str) -> (&str, usize) {
     let trail = input.len() - input.trim_end().len();
     let trimmed = &input[lead..input.len() - trail];
     let inner = |skip: usize| (&trimmed[skip..trimmed.len() - skip], lead + skip);
-    if trimmed.len() >= 4 && trimmed.starts_with("$$") && trimmed.ends_with("$$") {
-        inner(2)
-    } else if trimmed.len() >= 2 && trimmed.starts_with("\\[") && trimmed.ends_with("\\]") {
-        inner(2)
-    } else if trimmed.len() >= 2 && trimmed.starts_with("\\(") && trimmed.ends_with("\\)") {
+    let wrapped_in_two =
+        (trimmed.len() >= 4 && trimmed.starts_with("$$") && trimmed.ends_with("$$"))
+            || (trimmed.len() >= 2
+                && (trimmed.starts_with("\\[") && trimmed.ends_with("\\]")
+                    || trimmed.starts_with("\\(") && trimmed.ends_with("\\)")));
+    if wrapped_in_two {
         inner(2)
     } else if trimmed.len() >= 2 && trimmed.starts_with('$') && trimmed.ends_with('$') {
         inner(1)
@@ -85,7 +89,13 @@ struct Parser {
 
 impl Parser {
     fn new(input: &str, base: usize) -> Self {
-        Self { src: input.char_indices().collect(), pos: 0, base, input_len: input.len(), depth: 0 }
+        Self {
+            src: input.char_indices().collect(),
+            pos: 0,
+            base,
+            input_len: input.len(),
+            depth: 0,
+        }
     }
 
     /// Enter one level of nesting, rejecting input deeper than [`MAX_DEPTH`].
@@ -113,11 +123,18 @@ impl Parser {
     }
 
     fn offset(&self) -> usize {
-        self.src.get(self.pos).map(|&(off, _)| off).unwrap_or(self.input_len) + self.base
+        self.src
+            .get(self.pos)
+            .map(|&(off, _)| off)
+            .unwrap_or(self.input_len)
+            + self.base
     }
 
     fn err(&self, message: &str) -> ParseError {
-        ParseError { message: message.to_owned(), offset: self.offset() }
+        ParseError {
+            message: message.to_owned(),
+            offset: self.offset(),
+        }
     }
 
     /// Skip whitespace. Math mode ignores spaces, tabs and newlines.
@@ -283,7 +300,11 @@ impl Parser {
     fn parse_arg(&mut self) -> Result<Node, ParseError> {
         self.enter()?;
         self.skip_spaces();
-        let arg = if self.peek() == Some('{') { self.parse_group() } else { self.parse_atom() };
+        let arg = if self.peek() == Some('{') {
+            self.parse_group()
+        } else {
+            self.parse_atom()
+        };
         self.depth -= 1;
         arg
     }
@@ -353,11 +374,19 @@ impl Parser {
                 let ch = name.chars().next().unwrap();
                 Ok(char_node_with(ch, char_class(ch), symbols::char_font(ch)))
             }
-            "backslash" => Ok(char_node_with('\\', char_class('\\'), symbols::char_font('\\'))),
+            "backslash" => Ok(char_node_with(
+                '\\',
+                char_class('\\'),
+                symbols::char_font('\\'),
+            )),
             "frac" | "dfrac" | "tfrac" | "cfrac" => {
                 let num = self.parse_arg()?;
                 let den = self.parse_arg()?;
-                let frac = Node::Frac(Box::new(Frac { num, den, kind: FracKind::Bar }));
+                let frac = Node::Frac(Box::new(Frac {
+                    num,
+                    den,
+                    kind: FracKind::Bar,
+                }));
                 Ok(match name.as_str() {
                     "dfrac" => styled_style(MathStyle::Full, frac),
                     "tfrac" => styled_style(MathStyle::Text, frac),
@@ -367,7 +396,11 @@ impl Parser {
             "binom" => {
                 let num = self.parse_arg()?;
                 let den = self.parse_arg()?;
-                let frac = Node::Frac(Box::new(Frac { num, den, kind: FracKind::NoBar }));
+                let frac = Node::Frac(Box::new(Frac {
+                    num,
+                    den,
+                    kind: FracKind::NoBar,
+                }));
                 Ok(Node::Fence(Box::new(Fence {
                     open: Delim::Paren,
                     close: Delim::Paren,
@@ -377,7 +410,11 @@ impl Parser {
             "genfrac" => self.parse_genfrac(),
             "sqrt" => {
                 self.skip_spaces();
-                let index = if self.peek() == Some('[') { Some(self.parse_bracket()?) } else { None };
+                let index = if self.peek() == Some('[') {
+                    Some(self.parse_bracket()?)
+                } else {
+                    None
+                };
                 let radicand = self.parse_arg()?;
                 Ok(Node::Sqrt(Box::new(Sqrt { index, radicand })))
             }
@@ -392,9 +429,17 @@ impl Parser {
                     false
                 };
                 let text = self.read_brace_string()?;
-                let body = Node::Text(Box::new(TextRun { text, font: Font::Upright }));
+                let body = Node::Text(Box::new(TextRun {
+                    text,
+                    font: Font::Upright,
+                }));
                 if limits {
-                    Ok(Node::Big(Box::new(BigOp { base: body, sub: None, sup: None, limits: true })))
+                    Ok(Node::Big(Box::new(BigOp {
+                        base: body,
+                        sub: None,
+                        sup: None,
+                        limits: true,
+                    })))
                 } else {
                     Ok(Node::Styled(Box::new(Styled {
                         body,
@@ -448,12 +493,22 @@ impl Parser {
             "overset" | "stackrel" => {
                 let over = self.parse_arg()?;
                 let base = self.parse_arg()?;
-                Ok(Node::Limits(Box::new(Limits { base, under: None, over: Some(over), align: Side::Center })))
+                Ok(Node::Limits(Box::new(Limits {
+                    base,
+                    under: None,
+                    over: Some(over),
+                    align: Side::Center,
+                })))
             }
             "underset" => {
                 let under = self.parse_arg()?;
                 let base = self.parse_arg()?;
-                Ok(Node::Limits(Box::new(Limits { base, under: Some(under), over: None, align: Side::Center })))
+                Ok(Node::Limits(Box::new(Limits {
+                    base,
+                    under: Some(under),
+                    over: None,
+                    align: Side::Center,
+                })))
             }
             "overleftrightarrow" => {
                 let base = self.parse_arg()?;
@@ -466,7 +521,11 @@ impl Parser {
             }
             "not" => {
                 let base = self.parse_arg()?;
-                Ok(Node::Accent(Box::new(Accent { kind: AccentKind::Strike, base, under: false })))
+                Ok(Node::Accent(Box::new(Accent {
+                    kind: AccentKind::Strike,
+                    base,
+                    under: false,
+                })))
             }
             _ => {
                 if let Some((kind, under)) = accent_macro(&name) {
@@ -483,15 +542,32 @@ impl Parser {
                         message: format!("`\\{name}` needs a delimiter"),
                         offset: start,
                     })?;
-                    return Ok(Node::Char(mt_core::Char { ch, class, font: Font::Upright }));
+                    return Ok(Node::Char(mt_core::Char {
+                        ch,
+                        class,
+                        font: Font::Upright,
+                    }));
                 }
                 if let Some((ch, limits)) = symbols::big_op(&name) {
                     let base = char_node_with(ch, Class::Op, Font::Upright);
-                    return Ok(Node::Big(Box::new(BigOp { base, sub: None, sup: None, limits })));
+                    return Ok(Node::Big(Box::new(BigOp {
+                        base,
+                        sub: None,
+                        sup: None,
+                        limits,
+                    })));
                 }
                 if let Some(limits) = symbols::named_op(&name) {
-                    let body = Node::Text(Box::new(TextRun { text: name.clone(), font: Font::Upright }));
-                    return Ok(Node::Big(Box::new(BigOp { base: body, sub: None, sup: None, limits })));
+                    let body = Node::Text(Box::new(TextRun {
+                        text: name.clone(),
+                        font: Font::Upright,
+                    }));
+                    return Ok(Node::Big(Box::new(BigOp {
+                        base: body,
+                        sub: None,
+                        sup: None,
+                        limits,
+                    })));
                 }
                 if let Some((ch, class)) = symbols::lookup(&name) {
                     return Ok(char_node_with(ch, class, symbols::char_font(ch)));
@@ -515,12 +591,20 @@ impl Parser {
         let style = self.read_brace_string()?;
         let num = self.parse_arg()?;
         let den = self.parse_arg()?;
-        let kind = if thickness.trim().is_empty() { FracKind::NoBar } else { FracKind::Bar };
+        let kind = if thickness.trim().is_empty() {
+            FracKind::NoBar
+        } else {
+            FracKind::Bar
+        };
         let mut node = Node::Frac(Box::new(Frac { num, den, kind }));
         let open_delim = delim_from_str(&open);
         let close_delim = delim_from_str(&close);
         if open_delim != Delim::None || close_delim != Delim::None {
-            node = Node::Fence(Box::new(Fence { open: open_delim, close: close_delim, body: node }));
+            node = Node::Fence(Box::new(Fence {
+                open: open_delim,
+                close: close_delim,
+                body: node,
+            }));
         }
         if let Some(style) = genfrac_style(&style) {
             node = styled_style(style, node);
@@ -537,7 +621,11 @@ impl Parser {
         }
         self.read_control()?;
         let close = self.parse_delim()?;
-        Ok(Node::Fence(Box::new(Fence { open, close, body: group_node(body) })))
+        Ok(Node::Fence(Box::new(Fence {
+            open,
+            close,
+            body: group_node(body),
+        })))
     }
 
     fn parse_substack(&mut self) -> Result<Node, ParseError> {
@@ -575,15 +663,57 @@ impl Parser {
         let name = self.read_brace_string()?;
         let (kind, delims, align, columns, rules) = match name.as_str() {
             "matrix" | "smallmatrix" => (MatrixKind::Matrix, None, Side::Center, Vec::new(), false),
-            "pmatrix" => (MatrixKind::Matrix, Some((Delim::Paren, Delim::Paren)), Side::Center, Vec::new(), false),
-            "bmatrix" => (MatrixKind::Matrix, Some((Delim::Bracket, Delim::Bracket)), Side::Center, Vec::new(), false),
-            "Bmatrix" => (MatrixKind::Matrix, Some((Delim::Brace, Delim::Brace)), Side::Center, Vec::new(), false),
-            "vmatrix" => (MatrixKind::Matrix, Some((Delim::Abs, Delim::Abs)), Side::Center, Vec::new(), false),
-            "Vmatrix" => (MatrixKind::Matrix, Some((Delim::Norm, Delim::Norm)), Side::Center, Vec::new(), false),
-            "cases" => (MatrixKind::Cases, Some((Delim::Brace, Delim::None)), Side::Left, vec![Side::Left, Side::Left], false),
+            "pmatrix" => (
+                MatrixKind::Matrix,
+                Some((Delim::Paren, Delim::Paren)),
+                Side::Center,
+                Vec::new(),
+                false,
+            ),
+            "bmatrix" => (
+                MatrixKind::Matrix,
+                Some((Delim::Bracket, Delim::Bracket)),
+                Side::Center,
+                Vec::new(),
+                false,
+            ),
+            "Bmatrix" => (
+                MatrixKind::Matrix,
+                Some((Delim::Brace, Delim::Brace)),
+                Side::Center,
+                Vec::new(),
+                false,
+            ),
+            "vmatrix" => (
+                MatrixKind::Matrix,
+                Some((Delim::Abs, Delim::Abs)),
+                Side::Center,
+                Vec::new(),
+                false,
+            ),
+            "Vmatrix" => (
+                MatrixKind::Matrix,
+                Some((Delim::Norm, Delim::Norm)),
+                Side::Center,
+                Vec::new(),
+                false,
+            ),
+            "cases" => (
+                MatrixKind::Cases,
+                Some((Delim::Brace, Delim::None)),
+                Side::Left,
+                vec![Side::Left, Side::Left],
+                false,
+            ),
             "array" => {
                 let spec = self.read_brace_string()?;
-                (MatrixKind::Array, None, Side::Center, parse_column_spec(&spec, start)?, true)
+                (
+                    MatrixKind::Array,
+                    None,
+                    Side::Center,
+                    parse_column_spec(&spec, start)?,
+                    true,
+                )
             }
             "aligned" => (MatrixKind::Aligned, None, Side::Center, Vec::new(), false),
             "gathered" => (MatrixKind::Pile, None, Side::Center, Vec::new(), false),
@@ -595,11 +725,26 @@ impl Parser {
             }
         };
         let rows = self.parse_environment_body(&name, kind)?;
-        Ok(Node::Matrix(Box::new(Matrix { rows, delims, kind, align, columns, rules })))
+        Ok(Node::Matrix(Box::new(Matrix {
+            rows,
+            delims,
+            kind,
+            align,
+            columns,
+            rules,
+        })))
     }
 
-    fn parse_environment_body(&mut self, name: &str, kind: MatrixKind) -> Result<Vec<Vec<Node>>, ParseError> {
-        let mode = if kind == MatrixKind::Aligned { Mode::Aligned } else { Mode::Normal };
+    fn parse_environment_body(
+        &mut self,
+        name: &str,
+        kind: MatrixKind,
+    ) -> Result<Vec<Vec<Node>>, ParseError> {
+        let mode = if kind == MatrixKind::Aligned {
+            Mode::Aligned
+        } else {
+            Mode::Normal
+        };
         let mut rows = Vec::new();
         loop {
             self.skip_spaces();
@@ -648,7 +793,10 @@ impl Parser {
         let spec = self.read_brace_string()?;
         parse_length(&spec)
             .map(Node::Space)
-            .map_err(|message| ParseError { message, offset: self.offset() })
+            .map_err(|message| ParseError {
+                message,
+                offset: self.offset(),
+            })
     }
 
     // ---------------------------------------------------------- primitives
@@ -683,8 +831,13 @@ impl Parser {
                     "uparrow" => Ok(Delim::Custom('↑')),
                     "downarrow" => Ok(Delim::Custom('↓')),
                     "." => Ok(Delim::None),
-                    other if other.chars().count() == 1 => Ok(Delim::Custom(other.chars().next().unwrap())),
-                    _ => Err(ParseError { message: format!("`\\{name}` is not a delimiter"), offset: start }),
+                    other if other.chars().count() == 1 => {
+                        Ok(Delim::Custom(other.chars().next().unwrap()))
+                    }
+                    _ => Err(ParseError {
+                        message: format!("`\\{name}` is not a delimiter"),
+                        offset: start,
+                    }),
                 }
             }
             Some('(') | Some(')') => {
@@ -803,11 +956,21 @@ pub(crate) fn char_class(ch: char) -> Class {
 }
 
 fn styled_style(style: MathStyle, body: Node) -> Node {
-    Node::Styled(Box::new(Styled { body, style: Some(style), font: None, class: None }))
+    Node::Styled(Box::new(Styled {
+        body,
+        style: Some(style),
+        font: None,
+        class: None,
+    }))
 }
 
 fn styled_font(font: Font, body: Node) -> Node {
-    Node::Styled(Box::new(Styled { body, style: None, font: Some(font), class: None }))
+    Node::Styled(Box::new(Styled {
+        body,
+        style: None,
+        font: Some(font),
+        class: None,
+    }))
 }
 
 fn style_control(name: &str) -> Option<MathStyle> {
@@ -945,9 +1108,14 @@ fn parse_column_spec(spec: &str, start: usize) -> Result<Vec<Side>, ParseError> 
 /// Parse a TeX length and round it to the nearest representable [`Space`].
 fn parse_length(spec: &str) -> Result<Space, String> {
     let spec = spec.trim();
-    let split = spec.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(spec.len());
+    let split = spec
+        .find(|c: char| c.is_ascii_alphabetic())
+        .unwrap_or(spec.len());
     let (number, unit) = spec.split_at(split);
-    let value: f64 = number.trim().parse().map_err(|_| format!("`{spec}` is not a valid length"))?;
+    let value: f64 = number
+        .trim()
+        .parse()
+        .map_err(|_| format!("`{spec}` is not a valid length"))?;
     let em = match unit.trim() {
         "em" => value,
         "mu" => value / 18.0,

@@ -14,8 +14,8 @@ use std::path::Path;
 
 use windows::Win32::System::Com::StructuredStorage::{IStorage, StgOpenStorage};
 use windows::Win32::System::Com::{
-    IStream, STATSTG, STGC_DEFAULT, STGM_CREATE, STGM_READ, STGM_SHARE_DENY_WRITE, STGM_SHARE_EXCLUSIVE, STGM_WRITE,
-    STGTY_STORAGE, STGTY_STREAM,
+    IStream, STATSTG, STGC_DEFAULT, STGM_CREATE, STGM_READ, STGM_SHARE_DENY_WRITE,
+    STGM_SHARE_EXCLUSIVE, STGM_WRITE, STGTY_STORAGE, STGTY_STREAM,
 };
 use windows::core::PCWSTR;
 
@@ -39,7 +39,12 @@ pub fn write_stream(storage: &IStorage, name: &str, bytes: &[u8]) -> Result<(), 
     let wide = wide(name);
     unsafe {
         let stream: IStream = storage
-            .CreateStream(PCWSTR(wide.as_ptr()), STGM_CREATE | STGM_WRITE | STGM_SHARE_EXCLUSIVE, 0, 0)
+            .CreateStream(
+                PCWSTR(wide.as_ptr()),
+                STGM_CREATE | STGM_WRITE | STGM_SHARE_EXCLUSIVE,
+                0,
+                0,
+            )
             .map_err(|error| error_text(&error))?;
         if !bytes.is_empty() {
             stream
@@ -47,7 +52,9 @@ pub fn write_stream(storage: &IStorage, name: &str, bytes: &[u8]) -> Result<(), 
                 .ok()
                 .map_err(|error| error_text(&error))?;
         }
-        stream.Commit(STGC_DEFAULT).map_err(|error| error_text(&error))?;
+        stream
+            .Commit(STGC_DEFAULT)
+            .map_err(|error| error_text(&error))?;
     }
     Ok(())
 }
@@ -86,7 +93,11 @@ fn read_named_stream(storage: &IStorage, name: &str) -> Result<Option<Vec<u8>>, 
         loop {
             let mut read = 0u32;
             stream
-                .Read(buffer.as_mut_ptr().cast::<c_void>(), buffer.len() as u32, Some(&mut read))
+                .Read(
+                    buffer.as_mut_ptr().cast::<c_void>(),
+                    buffer.len() as u32,
+                    Some(&mut read),
+                )
                 .ok()
                 .map_err(|error| error_text(&error))?;
             if read == 0 {
@@ -101,11 +112,21 @@ fn read_named_stream(storage: &IStorage, name: &str) -> Result<Option<Vec<u8>>, 
 /// Open the storage at a `a/b/` path inside `storage`.
 fn open_sub_storage(storage: &IStorage, path: &str) -> Result<IStorage, String> {
     let mut current: IStorage = storage.clone();
-    for part in path.trim_end_matches('/').split('/').filter(|part| !part.is_empty()) {
+    for part in path
+        .trim_end_matches('/')
+        .split('/')
+        .filter(|part| !part.is_empty())
+    {
         let wide = wide(part);
         current = unsafe {
             current
-                .OpenStorage(PCWSTR(wide.as_ptr()), None, STGM_READ | STGM_SHARE_EXCLUSIVE, std::ptr::null(), 0)
+                .OpenStorage(
+                    PCWSTR(wide.as_ptr()),
+                    None,
+                    STGM_READ | STGM_SHARE_EXCLUSIVE,
+                    std::ptr::null(),
+                    0,
+                )
                 .map_err(|error| error_text(&error))?
         };
     }
@@ -126,11 +147,19 @@ pub fn commit(storage: &IStorage) -> Result<(), String> {
 
 /// Open a compound file on disk, for the offline checks the verification script runs.
 pub fn open_file(path: &Path) -> Result<IStorage, String> {
-    let text = path.to_str().ok_or_else(|| format!("not a usable path: {}", path.display()))?;
+    let text = path
+        .to_str()
+        .ok_or_else(|| format!("not a usable path: {}", path.display()))?;
     let wide = wide(text);
     unsafe {
-        StgOpenStorage(PCWSTR(wide.as_ptr()), None, STGM_READ | STGM_SHARE_DENY_WRITE, None, 0)
-            .map_err(|error| error_text(&error))
+        StgOpenStorage(
+            PCWSTR(wide.as_ptr()),
+            None,
+            STGM_READ | STGM_SHARE_DENY_WRITE,
+            None,
+            0,
+        )
+        .map_err(|error| error_text(&error))
     }
 }
 
@@ -150,7 +179,11 @@ pub fn find_stream(storage: &IStorage, name: &str) -> Result<Option<String>, Str
         .map(|(path, _)| path))
 }
 
-fn collect_streams(storage: &IStorage, prefix: &str, found: &mut Vec<(String, u64)>) -> Result<(), String> {
+fn collect_streams(
+    storage: &IStorage,
+    prefix: &str,
+    found: &mut Vec<(String, u64)>,
+) -> Result<(), String> {
     for (name, kind, size) in entries(storage)? {
         let path = format!("{prefix}{name}");
         if kind == STGTY_STREAM.0 as u32 {
@@ -158,7 +191,13 @@ fn collect_streams(storage: &IStorage, prefix: &str, found: &mut Vec<(String, u6
         } else if kind == STGTY_STORAGE.0 as u32 {
             let wide = wide(&name);
             let inner = unsafe {
-                storage.OpenStorage(PCWSTR(wide.as_ptr()), None, STGM_READ | STGM_SHARE_EXCLUSIVE, std::ptr::null(), 0)
+                storage.OpenStorage(
+                    PCWSTR(wide.as_ptr()),
+                    None,
+                    STGM_READ | STGM_SHARE_EXCLUSIVE,
+                    std::ptr::null(),
+                    0,
+                )
             };
             if let Ok(inner) = inner {
                 collect_streams(&inner, &format!("{path}/"), found)?;
@@ -171,7 +210,9 @@ fn collect_streams(storage: &IStorage, prefix: &str, found: &mut Vec<(String, u6
 /// The entries of one storage: name, type and size.
 fn entries(storage: &IStorage) -> Result<Vec<(String, u32, u64)>, String> {
     unsafe {
-        let enumerator = storage.EnumElements(None, None, None).map_err(|error| error_text(&error))?;
+        let enumerator = storage
+            .EnumElements(None, None, None)
+            .map_err(|error| error_text(&error))?;
         let mut entries = Vec::new();
         loop {
             let mut entry = [STATSTG::default()];

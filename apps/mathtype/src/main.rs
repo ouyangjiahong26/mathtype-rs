@@ -7,9 +7,9 @@
 //! - `--serve [port]`: the same conversions over loopback HTTP, for host add-ins that cannot
 //!   (WPS loads its add-ins as web pages).
 
+mod batch;
 mod clipboard;
 mod library;
-mod batch;
 mod numbering;
 mod serve;
 
@@ -475,7 +475,6 @@ fn check_render_pixels(width: u32, height: u32) -> Result<(), String> {
     }
 }
 
-
 /// Lay the equation out under the full preset `style` and produce one of the image formats.
 fn render_image_with_style(
     math: &mt_core::Math,
@@ -483,7 +482,8 @@ fn render_image_with_style(
     style: &LayoutStyle,
     scale: f64,
 ) -> Result<Vec<u8>, String> {
-    let metrics = FaceMetrics::parse(MATH_FONT, 0).ok_or("bundled math font could not be parsed")?;
+    let metrics =
+        FaceMetrics::parse(MATH_FONT, 0).ok_or("bundled math font could not be parsed")?;
     let boxes = layout(math, &metrics, style);
     match to {
         Format::Svg => Ok(to_svg(&boxes, style).into_bytes()),
@@ -499,8 +499,13 @@ fn render_image_with_style(
             mt_render::render_png(&boxes, style, metrics.face(), &options)
                 .map_err(|error| format!("cannot rasterise: {error}"))
         }
-        Format::Eps => Ok(mt_render::render_eps(&boxes, style, metrics.face(), &mt_render::RenderOptions::default())
-            .into_bytes()),
+        Format::Eps => Ok(mt_render::render_eps(
+            &boxes,
+            style,
+            metrics.face(),
+            &mt_render::RenderOptions::default(),
+        )
+        .into_bytes()),
         _ => Err(format!("{} is not an image format", to.name())),
     }
 }
@@ -533,7 +538,12 @@ pub(crate) fn write_emf(math: &mt_core::Math, style: &LayoutStyle) -> Vec<u8> {
         return Vec::new();
     };
     let boxes = layout(math, &metrics, style);
-    mt_render::render_emf(&boxes, style, metrics.face(), &mt_render::RenderOptions::default())
+    mt_render::render_emf(
+        &boxes,
+        style,
+        metrics.face(),
+        &mt_render::RenderOptions::default(),
+    )
 }
 
 /// The bytes a save writes for `math`: the format it came in, or a MathType object for an
@@ -544,9 +554,18 @@ fn equation_save_bytes(
     original_object: Option<&[u8]>,
 ) -> Vec<u8> {
     match shape {
-        SaveShape::File { format: Format::Latex, .. } => mt_tex::to_latex(math).into_bytes(),
-        SaveShape::File { format: Format::MathMl, .. } => mt_mathml::write(math).into_bytes(),
-        SaveShape::File { format: Format::Omml, .. } => mt_omml::write(math).into_bytes(),
+        SaveShape::File {
+            format: Format::Latex,
+            ..
+        } => mt_tex::to_latex(math).into_bytes(),
+        SaveShape::File {
+            format: Format::MathMl,
+            ..
+        } => mt_mathml::write(math).into_bytes(),
+        SaveShape::File {
+            format: Format::Omml,
+            ..
+        } => mt_omml::write(math).into_bytes(),
         SaveShape::File {
             format: Format::Mtef,
             compound,
@@ -554,7 +573,9 @@ fn equation_save_bytes(
         } => {
             let stream = mt_mtef::write_with_preferences(
                 math,
-                preferences.as_ref().unwrap_or(&mt_mtef::default_preferences()),
+                preferences
+                    .as_ref()
+                    .unwrap_or(&mt_mtef::default_preferences()),
             );
             if *compound {
                 match original_object {
@@ -567,7 +588,11 @@ fn equation_save_bytes(
             }
         }
         // Images are not loadable, so this shape never occurs; a save treats them as new.
-        SaveShape::File { format: Format::Svg | Format::Png | Format::Eps, .. } | SaveShape::New => {
+        SaveShape::File {
+            format: Format::Svg | Format::Png | Format::Eps,
+            ..
+        }
+        | SaveShape::New => {
             let stream = mt_mtef::write(math);
             mt_mtef::ole::create_ole(&stream).unwrap_or(stream)
         }
@@ -584,16 +609,24 @@ fn save_shape_of(bytes: &[u8], format: Format) -> SaveShape {
                 Ok(Some(stream)) => SaveShape::File {
                     format: Format::Mtef,
                     compound: true,
-                    preferences: mt_mtef::read(&stream).ok().map(|parsed| parsed.header.preferences),
+                    preferences: mt_mtef::read(&stream)
+                        .ok()
+                        .map(|parsed| parsed.header.preferences),
                 },
                 _ => SaveShape::File {
                     format: Format::Mtef,
                     compound: false,
-                    preferences: mt_mtef::read(bytes).ok().map(|parsed| parsed.header.preferences),
+                    preferences: mt_mtef::read(bytes)
+                        .ok()
+                        .map(|parsed| parsed.header.preferences),
                 },
             }
         }
-        format => SaveShape::File { format, compound: false, preferences: None },
+        format => SaveShape::File {
+            format,
+            compound: false,
+            preferences: None,
+        },
     }
 }
 
@@ -601,12 +634,31 @@ fn save_shape_of(bytes: &[u8], format: Format) -> SaveShape {
 fn save_shape_name(shape: &SaveShape) -> &'static str {
     match shape {
         SaveShape::New => "MathType 公式对象",
-        SaveShape::File { format: Format::Mtef, compound: true, .. } => "MathType 公式对象",
-        SaveShape::File { format: Format::Mtef, .. } => "MathType 公式流",
-        SaveShape::File { format: Format::Latex, .. } => "LaTeX",
-        SaveShape::File { format: Format::MathMl, .. } => "MathML",
-        SaveShape::File { format: Format::Omml, .. } => "OMML",
-        SaveShape::File { format: Format::Svg | Format::Png | Format::Eps, .. } => "图片",
+        SaveShape::File {
+            format: Format::Mtef,
+            compound: true,
+            ..
+        } => "MathType 公式对象",
+        SaveShape::File {
+            format: Format::Mtef,
+            ..
+        } => "MathType 公式流",
+        SaveShape::File {
+            format: Format::Latex,
+            ..
+        } => "LaTeX",
+        SaveShape::File {
+            format: Format::MathMl,
+            ..
+        } => "MathML",
+        SaveShape::File {
+            format: Format::Omml,
+            ..
+        } => "OMML",
+        SaveShape::File {
+            format: Format::Svg | Format::Png | Format::Eps,
+            ..
+        } => "图片",
     }
 }
 
@@ -759,8 +811,10 @@ impl App {
         let presets = mt_style_preset::builtins().to_vec();
         let style = presets[0].layout_style();
         let library = library::Library::load_default().unwrap_or_else(|error| {
-            let mut empty = library::Library::default();
-            empty.path = library::default_path();
+            let empty = library::Library {
+                path: library::default_path(),
+                ..Default::default()
+            };
             eprintln!("公式库无法读取：{error}");
             empty
         });
@@ -834,8 +888,11 @@ impl App {
         match std::fs::write(&path, &bytes) {
             Ok(()) => {
                 self.dirty = false;
-                self.status =
-                    format!("已保存到 {}（{}）", path.display(), save_shape_name(&self.save_shape));
+                self.status = format!(
+                    "已保存到 {}（{}）",
+                    path.display(),
+                    save_shape_name(&self.save_shape)
+                );
                 if matches!(self.save_shape, SaveShape::File { compound: true, .. })
                     && self.original_object.is_none()
                 {
@@ -849,7 +906,9 @@ impl App {
     /// Switch to `index`-th preset: the layout style is rebuilt, so canvas and exports re-typeset
     /// with the new sizes, spacing and font slots on the next frame.
     fn apply_preset(&mut self, index: usize) {
-        let Some(preset) = self.presets.get(index) else { return };
+        let Some(preset) = self.presets.get(index) else {
+            return;
+        };
         self.preset_index = index;
         self.style = preset.layout_style();
         self.editor.set_typing_font(preset.styles.variable);
@@ -893,7 +952,13 @@ impl App {
         self.library.add(&self.library_name, &latex);
         match self.library.save() {
             Ok(()) => {
-                let name = self.library.entries.last().expect("just added").name.clone();
+                let name = self
+                    .library
+                    .entries
+                    .last()
+                    .expect("just added")
+                    .name
+                    .clone();
                 self.status = format!("已保存到公式库：{name}");
                 self.library_name.clear();
             }
@@ -905,8 +970,11 @@ impl App {
     fn import_library(&mut self) {
         match library::Library::load(self.library_path.trim()) {
             Ok(loaded) => {
-                self.status =
-                    format!("已导入公式库（{} 条）：{}", loaded.entries.len(), loaded.path.display());
+                self.status = format!(
+                    "已导入公式库（{} 条）：{}",
+                    loaded.entries.len(),
+                    loaded.path.display()
+                );
                 self.library = loaded;
             }
             Err(error) => self.status = format!("导入公式库失败：{error}"),
@@ -1197,7 +1265,7 @@ impl App {
         color: Color32,
     ) {
         let cursor = self.editor.cursor();
-        let Some(anchor) = anchors.iter().find(|anchor| &anchor.path == &cursor.path) else {
+        let Some(anchor) = anchors.iter().find(|anchor| anchor.path == cursor.path) else {
             return;
         };
         let last = anchor.offsets.len().saturating_sub(1);
@@ -1224,7 +1292,7 @@ impl App {
             return;
         };
         let cursor = self.editor.cursor();
-        let Some(anchor) = anchors.iter().find(|anchor| &anchor.path == &cursor.path) else {
+        let Some(anchor) = anchors.iter().find(|anchor| anchor.path == cursor.path) else {
             return;
         };
         let last = anchor.offsets.len().saturating_sub(1);
@@ -1430,15 +1498,10 @@ impl eframe::App for App {
                 }
                 if ui.button("复制").clicked() {
                     match clipboard::payload(self.editor.math()) {
-                        Ok(payload) => {
-                            match clipboard::copy(self.editor.math()) {
-                                Ok(()) => self.status = format!(
-                                    "已复制（LaTeX：{}）",
-                                    payload.latex
-                                ),
-                                Err(message) => self.status = format!("复制失败：{message}"),
-                            }
-                        }
+                        Ok(payload) => match clipboard::copy(self.editor.math()) {
+                            Ok(()) => self.status = format!("已复制（LaTeX：{}）", payload.latex),
+                            Err(message) => self.status = format!("复制失败：{message}"),
+                        },
                         Err(message) => self.status = format!("复制失败：{message}"),
                     }
                 }
@@ -1482,9 +1545,11 @@ impl eframe::App for App {
                 }
             });
         });
-        egui::Panel::right("presets").resizable(true).show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| self.draw_side_panel(ui));
-        });
+        egui::Panel::right("presets")
+            .resizable(true)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.draw_side_panel(ui));
+            });
 
         egui::CentralPanel::default().show(ui, |ui| {
             // Bottom-up: the footer claims its natural height first, the canvas then takes whatever
@@ -1528,14 +1593,16 @@ impl eframe::App for App {
                 let (boxes, anchors) = self.geometry();
                 let origin = match self.presets[self.preset_index].alignment {
                     Side::Left => Pos2::new(rect.left() + 24.0, rect.center().y),
-                    Side::Center => {
-                        Pos2::new(rect.center().x - boxes.width() as f32 / 2.0, rect.center().y)
-                    }
+                    Side::Center => Pos2::new(
+                        rect.center().x - boxes.width() as f32 / 2.0,
+                        rect.center().y,
+                    ),
                     Side::Right => {
                         Pos2::new(rect.right() - 24.0 - boxes.width() as f32, rect.center().y)
                     }
                 };
-                let font_id = |size: f64| FontId::new(size as f32, FontFamily::Name(MATH_FAMILY.into()));
+                let font_id =
+                    |size: f64| FontId::new(size as f32, FontFamily::Name(MATH_FAMILY.into()));
                 self.draw_selection(&painter, origin, &anchors, ui.visuals().selection.bg_fill);
                 draw_boxes(&painter, &boxes, origin, &self.metrics, color, &font_id);
                 self.draw_caret(&painter, origin, &anchors, color);
@@ -1672,7 +1739,7 @@ fn node_font(node: &mt_core::Node) -> Option<Font> {
 fn current_font(editor: &Editor) -> Font {
     if let Some((start, _)) = editor.selection() {
         if let Some(mt_core::Node::Row(row)) = editor.math().node_at(&editor.cursor().path) {
-            if let Some(font) = row.iter().nth(start).and_then(node_font) {
+            if let Some(font) = row.get(start).and_then(node_font) {
                 return font;
             }
         }
@@ -1974,9 +2041,12 @@ mod tests {
         assert!(!bytes.is_empty());
     }
 
+    /// The tuple [`drag_fixture`] returns.
+    type DragFixture = (Editor, Vec<RowAnchor>, Box<dyn Fn(usize) -> Pos2>);
+
     /// A pointer fixture: an editor on `ab+cd`, its layout anchors, and a point in item `i`'s
     /// middle (strictly closer to insertion point `i + 1` than to `i`).
-    fn drag_fixture() -> (Editor, Vec<RowAnchor>, Box<dyn Fn(usize) -> Pos2>) {
+    fn drag_fixture() -> DragFixture {
         let editor = Editor::from_math(mt_tex::parse("ab+cd").expect("parses"));
         let metrics = FaceMetrics::parse(MATH_FONT, 0).expect("font parses");
         let style = LayoutStyle::display(18.0);
@@ -2200,8 +2270,14 @@ mod tests {
         let presets = mt_style_preset::builtins();
         let width = |index: usize| layout(&math, &metrics, &presets[index].layout_style()).width();
         let (default, compact, large) = (width(0), width(2), width(3));
-        assert!(compact < default, "the compact preset must tighten the same tree");
-        assert!(large > default * 1.05, "the large-print preset must enlarge the same tree");
+        assert!(
+            compact < default,
+            "the compact preset must tighten the same tree"
+        );
+        assert!(
+            large > default * 1.05,
+            "the large-print preset must enlarge the same tree"
+        );
     }
 
     #[test]
@@ -2221,7 +2297,10 @@ mod tests {
         let stream =
             mt_mtef::write_with_preferences(&math, &mt_style_preset::to_preferences(preset));
         let read = mt_mtef::read(&stream).expect("the stream reads back");
-        assert_eq!(read.header.preferences.sizes[0].value, "12", "compact preset full size");
+        assert_eq!(
+            read.header.preferences.sizes[0].value, "12",
+            "compact preset full size"
+        );
     }
 
     #[test]
@@ -2229,10 +2308,25 @@ mod tests {
         let math = mt_tex::parse("a+\\frac{b}{c}").unwrap();
         let payload = clipboard::payload(&math).expect("payload builds");
         assert_eq!(payload.latex, "a+\\frac{b}{c}");
-        assert!(payload.html.contains("<math"), "MathML is in the HTML: {}", payload.html);
-        assert!(payload.html.contains("oMath"), "OMML is in the HTML: {}", payload.html);
-        assert!(payload.html.contains("StartFragment"), "Word fragment markers are in");
-        assert_eq!(&payload.png[..4], b"\x89PNG", "the bitmap fallback is a PNG");
+        assert!(
+            payload.html.contains("<math"),
+            "MathML is in the HTML: {}",
+            payload.html
+        );
+        assert!(
+            payload.html.contains("oMath"),
+            "OMML is in the HTML: {}",
+            payload.html
+        );
+        assert!(
+            payload.html.contains("StartFragment"),
+            "Word fragment markers are in"
+        );
+        assert_eq!(
+            &payload.png[..4],
+            b"\x89PNG",
+            "the bitmap fallback is a PNG"
+        );
         let parsed = mt_mtef::read(&payload.mtef).expect("the own format re-parses");
         assert_eq!(mt_tex::to_latex(&parsed.math), "a+\\frac{b}{c}");
     }
@@ -2241,9 +2335,14 @@ mod tests {
     fn a_new_equation_saves_as_a_mathtype_object() {
         let math = mt_tex::parse("a+b").unwrap();
         let bytes = equation_save_bytes(&math, &SaveShape::New, None);
-        let stream =
-            mt_mtef::ole::read_from_ole(&bytes).ok().flatten().expect("a compound file");
-        assert_eq!(mt_tex::to_latex(&mt_mtef::read(&stream).unwrap().math), "a+b");
+        let stream = mt_mtef::ole::read_from_ole(&bytes)
+            .ok()
+            .flatten()
+            .expect("a compound file");
+        assert_eq!(
+            mt_tex::to_latex(&mt_mtef::read(&stream).unwrap().math),
+            "a+b"
+        );
     }
 
     #[test]
@@ -2254,9 +2353,14 @@ mod tests {
         assert!(matches!(shape, SaveShape::File { compound: true, .. }));
         let edited = mt_tex::parse("d^3").unwrap();
         let bytes = equation_save_bytes(&edited, &shape, Some(&ole));
-        let stream =
-            mt_mtef::ole::read_from_ole(&bytes).ok().flatten().expect("still a compound file");
-        assert_eq!(mt_tex::to_latex(&mt_mtef::read(&stream).unwrap().math), "d^3");
+        let stream = mt_mtef::ole::read_from_ole(&bytes)
+            .ok()
+            .flatten()
+            .expect("still a compound file");
+        assert_eq!(
+            mt_tex::to_latex(&mt_mtef::read(&stream).unwrap().math),
+            "d^3"
+        );
     }
 
     #[test]

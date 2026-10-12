@@ -13,6 +13,6 @@
 pub mod ast;
 
 pub use ast::{
-    Accent, AccentKind, BigOp, Char, Class, Delim, Frac, FracKind, Fence, Font, Limits, Math,
+    Accent, AccentKind, BigOp, Char, Class, Delim, Fence, Font, Frac, FracKind, Limits, Math,
     MathStyle, Matrix, MatrixKind, Node, Path, Row, Scripts, Side, Space, Sqrt, Styled, TextRun,
 };

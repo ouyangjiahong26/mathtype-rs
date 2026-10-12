@@ -99,7 +99,10 @@ impl Path {
 /// Point on a quadratic Bézier at `t`.
 fn quad(a: [f64; 2], c: [f64; 2], b: [f64; 2], t: f64) -> [f64; 2] {
     let u = 1.0 - t;
-    [u * u * a[0] + 2.0 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2.0 * u * t * c[1] + t * t * b[1]]
+    [
+        u * u * a[0] + 2.0 * u * t * c[0] + t * t * b[0],
+        u * u * a[1] + 2.0 * u * t * c[1] + t * t * b[1],
+    ]
 }
 
 /// Point on a cubic Bézier at `t`.
@@ -125,7 +128,10 @@ struct Builder {
 impl Builder {
     /// Map a font-unit point to layout point coordinates.
     fn map(&self, x: f32, y: f32) -> [f64; 2] {
-        [self.origin[0] + x as f64 * self.unit, self.origin[1] - y as f64 * self.unit * self.yscale]
+        [
+            self.origin[0] + x as f64 * self.unit,
+            self.origin[1] - y as f64 * self.unit * self.yscale,
+        ]
     }
 }
 
@@ -133,7 +139,10 @@ impl OutlineBuilder for Builder {
     fn move_to(&mut self, x: f32, y: f32) {
         let p = self.map(x, y);
         self.path.track(p);
-        self.path.contours.push(Contour { start: p, segs: Vec::new() });
+        self.path.contours.push(Contour {
+            start: p,
+            segs: Vec::new(),
+        });
     }
 
     fn line_to(&mut self, x: f32, y: f32) {

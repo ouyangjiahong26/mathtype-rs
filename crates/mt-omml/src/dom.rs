@@ -6,9 +6,9 @@
 //! accept MathML with or without the `m:` prefix.
 
 use crate::ParseError;
+use quick_xml::Reader;
 use quick_xml::escape::{resolve_predefined_entity, unescape};
 use quick_xml::events::{BytesStart, Event};
-use quick_xml::Reader;
 
 /// The deepest element nesting the reader accepts.
 ///
@@ -39,7 +39,11 @@ pub(crate) struct Elem {
 impl Elem {
     /// Attribute value by local name, last one winning.
     pub(crate) fn attr(&self, name: &str) -> Option<&str> {
-        self.attrs.iter().rev().find(|(key, _)| key == name).map(|(_, value)| value.as_str())
+        self.attrs
+            .iter()
+            .rev()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
     }
 
     /// Child elements in document order.
@@ -62,7 +66,9 @@ impl Elem {
 
     /// First child element with the given local name, if it is not switched off.
     pub(crate) fn child_on(&self, name: &str) -> Option<&Elem> {
-        self.child(name).filter(|element| !matches!(element.attr("val"), Some("0") | Some("false") | Some("off")))
+        self.child(name).filter(|element| {
+            !matches!(element.attr("val"), Some("0") | Some("false") | Some("off"))
+        })
     }
 
     /// All character data directly inside the element, concatenated.
@@ -90,7 +96,9 @@ pub(crate) fn document(xml: &str) -> Result<Elem, ParseError> {
     let mut open: Vec<Elem> = Vec::new();
     let mut root: Option<Elem> = None;
     loop {
-        let event = reader.read_event().map_err(|error| ParseError::Xml(error.to_string()))?;
+        let event = reader
+            .read_event()
+            .map_err(|error| ParseError::Xml(error.to_string()))?;
         match event {
             Event::Start(start) => {
                 if open.len() >= MAX_DEPTH {
@@ -100,22 +108,30 @@ pub(crate) fn document(xml: &str) -> Result<Elem, ParseError> {
             }
             Event::Empty(start) => attach(&mut open, &mut root, element(&start)?)?,
             Event::End(_) => {
-                let closed = open.pop().ok_or_else(|| ParseError::Xml("a closing tag has no opening tag".to_owned()))?;
+                let closed = open.pop().ok_or_else(|| {
+                    ParseError::Xml("a closing tag has no opening tag".to_owned())
+                })?;
                 attach(&mut open, &mut root, closed)?;
             }
             Event::Text(text) => {
                 let normalized = text.xml10_content();
-                let decoded = unescape(&normalized).map_err(|error| ParseError::Xml(error.to_string()))?;
+                let decoded =
+                    unescape(&normalized).map_err(|error| ParseError::Xml(error.to_string()))?;
                 characters(&mut open, decoded.into_owned())?;
             }
             Event::CData(data) => characters(&mut open, data.into_inner().into_owned())?,
-            Event::GeneralRef(reference) => characters(&mut open, referenced(&reference.into_inner())?)?,
+            Event::GeneralRef(reference) => {
+                characters(&mut open, referenced(&reference.into_inner())?)?
+            }
             Event::Eof => break,
             _ => {}
         }
     }
     if let Some(element) = open.last() {
-        return Err(ParseError::Xml(format!("element <{}> is never closed", element.name)));
+        return Err(ParseError::Xml(format!(
+            "element <{}> is never closed",
+            element.name
+        )));
     }
     root.ok_or_else(|| ParseError::Xml("the document has no root element".to_owned()))
 }
@@ -125,14 +141,22 @@ fn element(start: &BytesStart<'_>) -> Result<Elem, ParseError> {
     let mut attrs = Vec::new();
     for attribute in start.attributes() {
         let attribute = attribute.map_err(|error| ParseError::Xml(error.to_string()))?;
-        let value = unescape(&attribute.value).map_err(|error| ParseError::Xml(error.to_string()))?;
-        attrs.push((attribute.key.local_name().into_inner().to_owned(), value.into_owned()));
+        let value =
+            unescape(&attribute.value).map_err(|error| ParseError::Xml(error.to_string()))?;
+        attrs.push((
+            attribute.key.local_name().into_inner().to_owned(),
+            value.into_owned(),
+        ));
     }
-    Ok(Elem { name: start.local_name().into_inner().to_owned(), attrs, children: Vec::new() })
+    Ok(Elem {
+        name: start.local_name().into_inner().to_owned(),
+        attrs,
+        children: Vec::new(),
+    })
 }
 
 /// Appends a finished element to its parent, or makes it the root.
-fn attach(open: &mut Vec<Elem>, root: &mut Option<Elem>, element: Elem) -> Result<(), ParseError> {
+fn attach(open: &mut [Elem], root: &mut Option<Elem>, element: Elem) -> Result<(), ParseError> {
     match open.last_mut() {
         Some(parent) => {
             parent.children.push(Xml::Elem(element));
@@ -142,7 +166,9 @@ fn attach(open: &mut Vec<Elem>, root: &mut Option<Elem>, element: Elem) -> Resul
             *root = Some(element);
             Ok(())
         }
-        None => Err(ParseError::Xml("the document has more than one root element".to_owned())),
+        None => Err(ParseError::Xml(
+            "the document has more than one root element".to_owned(),
+        )),
     }
 }
 
@@ -158,7 +184,9 @@ fn characters(open: &mut [Elem], text: String) -> Result<(), ParseError> {
             if text.trim().is_empty() {
                 Ok(())
             } else {
-                Err(ParseError::Xml("character data outside of the root element".to_owned()))
+                Err(ParseError::Xml(
+                    "character data outside of the root element".to_owned(),
+                ))
             }
         }
     }

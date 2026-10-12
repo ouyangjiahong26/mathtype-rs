@@ -52,10 +52,12 @@ impl Session {
     /// Start the editor on `latex`.
     pub fn start(latex: &str) -> Result<Self, String> {
         let directory = trace::directory();
-        create_dir_all(&directory).map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+        create_dir_all(&directory)
+            .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
         let id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
         let path = directory.join(format!("equation-{}-{id}.tex", std::process::id()));
-        std::fs::write(&path, latex).map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+        std::fs::write(&path, latex)
+            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
         let pointer = directory.join(POINTER_FILE);
         std::fs::write(&pointer, path.display().to_string())
             .map_err(|error| format!("cannot write {}: {error}", pointer.display()))?;
@@ -66,9 +68,18 @@ impl Session {
             .arg(&path)
             .spawn()
             .map_err(|error| format!("cannot start {}: {error}", editor.display()))?;
-        let session = Self { id, path, editor_pid: child.id(), child: Some(child) };
+        let session = Self {
+            id,
+            path,
+            editor_pid: child.id(),
+            child: Some(child),
+        };
         session.record(&editor, "started");
-        trace::log(&format!("editor pid={} started on {}", session.editor_pid, session.path.display()));
+        trace::log(&format!(
+            "editor pid={} started on {}",
+            session.editor_pid,
+            session.path.display()
+        ));
         Ok(session)
     }
 
@@ -159,17 +170,26 @@ pub fn editor_path() -> Result<PathBuf, String> {
             return if path.is_file() {
                 Ok(path)
             } else {
-                Err(format!("{EDITOR_VARIABLE} names {}, which is not a file", path.display()))
+                Err(format!(
+                    "{EDITOR_VARIABLE} names {}, which is not a file",
+                    path.display()
+                ))
             };
         }
     }
-    let own = std::env::current_exe().map_err(|error| format!("cannot find this executable: {error}"))?;
-    let directory = own.parent().ok_or_else(|| format!("{} has no directory", own.display()))?;
+    let own =
+        std::env::current_exe().map_err(|error| format!("cannot find this executable: {error}"))?;
+    let directory = own
+        .parent()
+        .ok_or_else(|| format!("{} has no directory", own.display()))?;
     let editor = directory.join("mathtype.exe");
     if editor.is_file() {
         Ok(editor)
     } else {
-        Err(format!("no equation editor at {} (set {EDITOR_VARIABLE})", editor.display()))
+        Err(format!(
+            "no equation editor at {} (set {EDITOR_VARIABLE})",
+            editor.display()
+        ))
     }
 }
 

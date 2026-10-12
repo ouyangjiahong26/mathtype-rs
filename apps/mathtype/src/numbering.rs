@@ -42,8 +42,9 @@ pub fn run_number(args: &[String]) -> Result<i32, String> {
                 return Ok(0);
             }
             "--style" => {
-                style = NumberStyle::parse(&value("--style")?)
-                    .ok_or_else(|| "unknown --style: plain, chapter, section, or paragraph".to_owned())?;
+                style = NumberStyle::parse(&value("--style")?).ok_or_else(|| {
+                    "unknown --style: plain, chapter, section, or paragraph".to_owned()
+                })?;
             }
             "--side" => {
                 side = Side::parse(&value("--side")?)
@@ -73,7 +74,12 @@ pub fn run_number(args: &[String]) -> Result<i32, String> {
         .map_err(|error| format!("saving the numbering settings failed: {error}"))?;
     let out = out.unwrap_or_else(|| default_out(&input, "numbered"));
     write(document, &out)?;
-    println!("{count} equations numbered ({}, {} side); written to {}", style.as_str(), side.as_str(), out.display());
+    println!(
+        "{count} equations numbered ({}, {} side); written to {}",
+        style.as_str(),
+        side.as_str(),
+        out.display()
+    );
     Ok(0)
 }
 
@@ -119,21 +125,24 @@ pub fn run_crossref(args: &[String]) -> Result<i32, String> {
         .map_err(|error| format!("cannot read {}: {error}", input.display()))?;
     let mut document = mt_docx::Document::open(&bytes)
         .map_err(|error| format!("cannot open {}: {error}", input.display()))?;
-    let bookmark = mt_numbering::insert_reference(
-        &mut document,
-        mt_docx::Position::BodyEnd,
-        target,
-    )
-    .map_err(|error| format!("inserting the cross-reference failed: {error}"))?;
+    let bookmark =
+        mt_numbering::insert_reference(&mut document, mt_docx::Position::BodyEnd, target)
+            .map_err(|error| format!("inserting the cross-reference failed: {error}"))?;
     let out = out.unwrap_or_else(|| default_out(&input, "crossref"));
     write(document, &out)?;
-    println!("cross-reference to {bookmark} inserted; written to {}", out.display());
+    println!(
+        "cross-reference to {bookmark} inserted; written to {}",
+        out.display()
+    );
     Ok(0)
 }
 
 /// `<名>-<suffix>.docx` next to the input.
 fn default_out(input: &Path, suffix: &str) -> PathBuf {
-    let stem = input.file_stem().map_or_else(|| "document".to_owned(), |stem| stem.to_string_lossy().into_owned());
+    let stem = input.file_stem().map_or_else(
+        || "document".to_owned(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
     input.with_file_name(format!("{stem}-{suffix}.docx"))
 }
 

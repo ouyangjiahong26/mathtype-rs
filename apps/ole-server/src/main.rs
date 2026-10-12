@@ -67,7 +67,10 @@ environment variable MATHTYPE_RS_EDITOR.
 #[cfg(windows)]
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
-    if arguments.iter().any(|argument| is_embedding_switch(argument)) {
+    if arguments
+        .iter()
+        .any(|argument| is_embedding_switch(argument))
+    {
         return match server::run() {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
@@ -86,7 +89,10 @@ fn main() -> ExitCode {
         ["--read-stream", file, name, ..] => report(read_stream(file, name)),
         ["--read-native", file, ..] => report(read_native(file)),
         ["--log", rest @ ..] => {
-            let lines = rest.first().and_then(|count| count.parse().ok()).unwrap_or(40);
+            let lines = rest
+                .first()
+                .and_then(|count| count.parse().ok())
+                .unwrap_or(40);
             print!("{}", trace::tail(lines));
             ExitCode::SUCCESS
         }
@@ -132,7 +138,10 @@ fn report(result: Result<String, String>) -> ExitCode {
 
 /// Open the compound file a document embeds, with COM ready to read it.
 #[cfg(windows)]
-fn with_storage<T>(file: &str, read: impl FnOnce(&windows::Win32::System::Com::StructuredStorage::IStorage) -> Result<T, String>) -> Result<T, String> {
+fn with_storage<T>(
+    file: &str,
+    read: impl FnOnce(&windows::Win32::System::Com::StructuredStorage::IStorage) -> Result<T, String>,
+) -> Result<T, String> {
     let path = std::path::Path::new(file);
     if !path.is_file() {
         return Err(format!("no such file: {file}"));
@@ -168,7 +177,8 @@ fn read_native(file: &str) -> Result<String, String> {
     with_storage(file, |storage| {
         let bytes = storage::read_stream(storage, clsid::STREAM_NATIVE)?
             .ok_or_else(|| format!("{file} has no stream called {}", clsid::STREAM_NATIVE))?;
-        let math = mt_mtef::parse(&bytes).map_err(|error| format!("cannot read the equation stream: {error}"))?;
+        let math = mt_mtef::parse(&bytes)
+            .map_err(|error| format!("cannot read the equation stream: {error}"))?;
         Ok(mt_tex::to_latex(&math))
     })
 }

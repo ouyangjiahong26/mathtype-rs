@@ -81,7 +81,12 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { math: MathMode::MathMl, script: Script::None, embed: false, title: None }
+        Self {
+            math: MathMode::MathMl,
+            script: Script::None,
+            embed: false,
+            title: None,
+        }
     }
 }
 
@@ -120,7 +125,10 @@ pub fn export(doc: &Document, options: &Options) -> Output {
     html.push_str("</head>\n<body>\n");
     html.push_str(&body);
     html.push_str("</body>\n</html>\n");
-    Output { html, media: exporter.media }
+    Output {
+        html,
+        media: exporter.media,
+    }
 }
 
 /// Exports one document as a directory: `index.html` plus `media/` below `directory`, which is
@@ -199,9 +207,9 @@ impl<'a> Exporter<'a> {
                 Block::Paragraph(_) => {}
                 Block::Table(table) => {
                     // A nested table also appears in the block list, inside its parent's range.
-                    let nested = table_range
-                        .clone()
-                        .is_some_and(|range| table.range.start >= range.start && table.range.end <= range.end);
+                    let nested = table_range.clone().is_some_and(|range| {
+                        table.range.start >= range.start && table.range.end <= range.end
+                    });
                     if !nested {
                         out.push_str(&self.table(table));
                         table_range = Some(table.range.clone());
@@ -216,7 +224,7 @@ impl<'a> Exporter<'a> {
     /// its items but always maps to `p`, a heading being meaningless in a cell.
     fn paragraph(&mut self, paragraph: &Paragraph, standalone: bool) -> String {
         let level = standalone
-            .then(|| paragraph.style.as_deref())
+            .then_some(paragraph.style.as_deref())
             .flatten()
             .and_then(heading_level);
         let tag = match level {
@@ -270,7 +278,8 @@ impl<'a> Exporter<'a> {
             .blocks()
             .iter()
             .filter(|block| {
-                block_range(block).is_some_and(|range| range.start >= cell.start && range.end <= cell.end)
+                block_range(block)
+                    .is_some_and(|range| range.start >= cell.start && range.end <= cell.end)
             })
             .cloned()
             .collect();
@@ -286,9 +295,9 @@ impl<'a> Exporter<'a> {
         for block in &blocks {
             match block {
                 Block::Paragraph(paragraph) => {
-                    let inside_nested = nested
-                        .iter()
-                        .any(|range| paragraph.range.start >= range.start && paragraph.range.end <= range.end);
+                    let inside_nested = nested.iter().any(|range| {
+                        paragraph.range.start >= range.start && paragraph.range.end <= range.end
+                    });
                     if !inside_nested {
                         out.push_str(&self.paragraph(paragraph, false));
                     }
@@ -316,7 +325,11 @@ impl<'a> Exporter<'a> {
             Item::Image { rel_id, name, .. } => self.picture(rel_id.as_deref(), name.as_deref()),
             Item::Other { range } => {
                 let text = other_text(&self.doc.document_xml()[range.clone()]);
-                if text.is_empty() { String::new() } else { escape(&text) }
+                if text.is_empty() {
+                    String::new()
+                } else {
+                    escape(&text)
+                }
             }
         }
     }
@@ -346,7 +359,9 @@ impl<'a> Exporter<'a> {
 
     /// One formula, as MathML or as a picture.
     fn formula(&mut self, math: Option<&Math>, display: bool) -> String {
-        let Some(math) = math else { return String::new() };
+        let Some(math) = math else {
+            return String::new();
+        };
         match self.options.math {
             MathMode::MathMl => inline_mathml(math, display),
             MathMode::Image => {
@@ -368,10 +383,20 @@ impl<'a> Exporter<'a> {
 
     /// One picture item: the document part's bytes, as a file or a data URI.
     fn picture(&mut self, rel_id: Option<&str>, name: Option<&str>) -> String {
-        let Some(rel_id) = rel_id else { return String::new() };
-        let Some(part) = self.doc.relationship_part(rel_id) else { return String::new() };
-        let Some(Ok(bytes)) = self.doc.part(&part) else { return String::new() };
-        let extension = part.rsplit('.').next().unwrap_or("bin").to_ascii_lowercase();
+        let Some(rel_id) = rel_id else {
+            return String::new();
+        };
+        let Some(part) = self.doc.relationship_part(rel_id) else {
+            return String::new();
+        };
+        let Some(Ok(bytes)) = self.doc.part(&part) else {
+            return String::new();
+        };
+        let extension = part
+            .rsplit('.')
+            .next()
+            .unwrap_or("bin")
+            .to_ascii_lowercase();
         if self.options.embed {
             return format!("data:{};base64,{}", mime_of(&extension), base64(&bytes));
         }
@@ -379,7 +404,11 @@ impl<'a> Exporter<'a> {
             Some(path) => path.clone(),
             None => {
                 let stem = name
-                    .map(|name| name.chars().filter(|c| c.is_alphanumeric() || *c == '-').collect::<String>())
+                    .map(|name| {
+                        name.chars()
+                            .filter(|c| c.is_alphanumeric() || *c == '-')
+                            .collect::<String>()
+                    })
                     .filter(|stem| !stem.is_empty())
                     .unwrap_or_else(|| {
                         part.rsplit('/')
@@ -389,7 +418,10 @@ impl<'a> Exporter<'a> {
                             .to_owned()
                     });
                 let path = format!("media/{stem}.{extension}");
-                self.media.push(MediaFile { path: path.clone(), bytes });
+                self.media.push(MediaFile {
+                    path: path.clone(),
+                    bytes,
+                });
                 self.images.insert(part, path.clone());
                 path
             }
@@ -405,15 +437,22 @@ impl<'a> Exporter<'a> {
         let metrics = FaceMetrics::parse(MATH_FONT, 0).expect("the bundled math font parses");
         let style = LayoutStyle::display(18.0);
         let tree: LayoutBox = layout(math, &metrics, &style);
-        let options = RenderOptions { scale: 3.0, ..Default::default() };
-        let Ok(bytes) = render_png(&tree, &style, metrics.face(), &options) else { return String::new() };
+        let options = RenderOptions {
+            scale: 3.0,
+            ..Default::default()
+        };
+        let Ok(bytes) = render_png(&tree, &style, metrics.face(), &options) else {
+            return String::new();
+        };
         if self.options.embed {
             return format!("data:image/png;base64,{}", base64(&bytes));
         }
-        self.media.push(MediaFile { path: path.clone(), bytes });
+        self.media.push(MediaFile {
+            path: path.clone(),
+            bytes,
+        });
         path
     }
-
 }
 
 /// The `h1`–`h6` level of a paragraph style name, `Heading1` for instance.
@@ -463,13 +502,17 @@ fn other_text(xml: &str) -> String {
     let mut rest = xml;
     while let Some(start) = rest.find("<w:t") {
         rest = &rest[start..];
-        let Some(after_open) = rest.find('>') else { break };
+        let Some(after_open) = rest.find('>') else {
+            break;
+        };
         let self_closing = rest[..after_open].ends_with('/');
         rest = &rest[after_open + 1..];
         if self_closing {
             continue;
         }
-        let Some(end) = rest.find("</w:t>") else { break };
+        let Some(end) = rest.find("</w:t>") else {
+            break;
+        };
         out.push_str(&unescape(&rest[..end]));
         rest = &rest[end + "</w:t>".len()..];
     }
@@ -584,8 +627,10 @@ impl Tag {
     fn name<'x>(&self, xml: &'x str) -> &'x str {
         let name_start = self.range.start + if self.closes { 2 } else { 1 };
         let inner = &xml[name_start..self.range.end];
-        let name =
-            inner.split(|ch: char| ch.is_whitespace() || ch == '/' || ch == '>').next().unwrap_or(inner);
+        let name = inner
+            .split(|ch: char| ch.is_whitespace() || ch == '/' || ch == '>')
+            .next()
+            .unwrap_or(inner);
         name.rsplit(':').next().unwrap_or(name)
     }
 }
@@ -595,7 +640,10 @@ fn next_tag(xml: &str, start: usize, limit: usize) -> Option<Tag> {
     let open = xml[start..limit].find('<')? + start;
     let close = xml[open..limit].find('>')? + open;
     let closes = xml[open..].starts_with("</");
-    Some(Tag { range: open..close + 1, closes })
+    Some(Tag {
+        range: open..close + 1,
+        closes,
+    })
 }
 
 // ------------------------------------------------------------------ small encoders
@@ -668,7 +716,10 @@ mod tests {
 
     #[test]
     fn other_items_keep_their_text() {
-        assert_eq!(other_text("<w:fldSimple><w:r><w:t>a &amp; b</w:t></w:r></w:fldSimple>"), "a & b");
+        assert_eq!(
+            other_text("<w:fldSimple><w:r><w:t>a &amp; b</w:t></w:r></w:fldSimple>"),
+            "a & b"
+        );
     }
 
     #[test]
@@ -689,6 +740,10 @@ mod tests {
         let rows = rows_of(xml, 0..xml.len());
         assert_eq!(rows.len(), 2, "{rows:?}");
         assert_eq!(rows[0].len(), 2);
-        assert_eq!(rows[1].len(), 1, "the nested table's cell is not this table's cell");
+        assert_eq!(
+            rows[1].len(),
+            1,
+            "the nested table's cell is not this table's cell"
+        );
     }
 }

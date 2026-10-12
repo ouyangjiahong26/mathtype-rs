@@ -2,7 +2,7 @@
 
 use mt_core::{Class, Frac, FracKind, Math, Matrix, Node, Path, Scripts, Space, Sqrt};
 use mt_layout::{
-    constants as c, layout, layout_with_anchors, ApproxMetrics, Box as LBox, LayoutStyle, RowAnchor,
+    ApproxMetrics, Box as LBox, LayoutStyle, RowAnchor, constants as c, layout, layout_with_anchors,
 };
 
 fn style() -> LayoutStyle {
@@ -15,7 +15,10 @@ fn lay(body: Node) -> LBox {
 
 #[track_caller]
 fn close(actual: f64, expected: f64) {
-    assert!((actual - expected).abs() < 1e-9, "expected {expected}, got {actual}");
+    assert!(
+        (actual - expected).abs() < 1e-9,
+        "expected {expected}, got {actual}"
+    );
 }
 
 #[track_caller]
@@ -62,8 +65,15 @@ fn a_caret_inside_a_fraction_numerator_uses_the_numerator_origin() {
     let denominator = anchor(&anchors, &Path::root().child(1));
     close(numerator.origin.0, 0.0);
     close(numerator.origin.1, -2.5 - 0.2 - c::FRAC_RULE_GAP * 10.0);
-    assert_eq!(numerator.offsets, vec![0.0, 5.0], "the cell keeps the surrounding size");
-    close(denominator.origin.1, -2.5 + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 10.0);
+    assert_eq!(
+        numerator.offsets,
+        vec![0.0, 5.0],
+        "the cell keeps the surrounding size"
+    );
+    close(
+        denominator.origin.1,
+        -2.5 + 0.2 + c::FRAC_RULE_GAP * 10.0 + 0.45 * 10.0,
+    );
     assert_eq!(denominator.offsets, vec![0.0, 5.0]);
 }
 
@@ -74,11 +84,9 @@ fn every_row_of_the_tree_gets_exactly_one_anchor() {
             Node::row([Node::variable('a'), Node::variable('b')]),
             Node::variable('c'),
         ))),
-        Node::Sqrt(Box::new(Sqrt::square(Node::Scripts(Box::new(Scripts::attach(
-            Node::variable('x'),
-            None,
-            Some(Node::variable('2')),
-        )))))),
+        Node::Sqrt(Box::new(Sqrt::square(Node::Scripts(Box::new(
+            Scripts::attach(Node::variable('x'), None, Some(Node::variable('2'))),
+        ))))),
     ]));
     let (_, anchors) = layout_with_anchors(&math, &ApproxMetrics, &style());
 
@@ -93,7 +101,11 @@ fn every_row_of_the_tree_gets_exactly_one_anchor() {
     assert_eq!(anchors.len(), 2);
     assert_eq!(anchors[0].path, Path::root());
     assert_eq!(anchors[1].path, Path::root().child(0).child(0));
-    assert_eq!(anchors[1].offsets.len(), 3, "two items, three insertion points");
+    assert_eq!(
+        anchors[1].offsets.len(),
+        3,
+        "two items, three insertion points"
+    );
 }
 
 #[test]
@@ -164,10 +176,23 @@ fn anchors_stay_inside_the_root_box() {
     assert_eq!(anchors.len(), 3);
     for anchor in &anchors {
         let right = anchor.origin.0 + anchor.offsets.last().copied().unwrap_or(0.0);
-        assert!(anchor.origin.0 >= -1e-9, "left edge inside the box: {:?}", anchor.origin);
-        assert!(right <= boxes.width() + 1e-9, "right edge inside the box: {right}");
-        assert!(anchor.origin.1 >= -boxes.height() - 1e-9, "origin below the box top");
-        assert!(anchor.origin.1 <= boxes.depth() + 1e-9, "origin above the box bottom");
+        assert!(
+            anchor.origin.0 >= -1e-9,
+            "left edge inside the box: {:?}",
+            anchor.origin
+        );
+        assert!(
+            right <= boxes.width() + 1e-9,
+            "right edge inside the box: {right}"
+        );
+        assert!(
+            anchor.origin.1 >= -boxes.height() - 1e-9,
+            "origin below the box top"
+        );
+        assert!(
+            anchor.origin.1 <= boxes.depth() + 1e-9,
+            "origin above the box bottom"
+        );
     }
 }
 
@@ -176,13 +201,22 @@ fn a_slash_fraction_keeps_row_anchors_unshifted() {
     // Placing the slash through the fraction's own context used to run its `shift_rows` and
     // move every anchor under the fraction a second time, so the anchors must sit exactly
     // where their rows' glyphs landed.
-    let mut frac = Frac::new(Node::row([Node::variable('a')]), Node::row([Node::variable('b')]));
+    let mut frac = Frac::new(
+        Node::row([Node::variable('a')]),
+        Node::row([Node::variable('b')]),
+    );
     frac.kind = FracKind::Slash;
-    let (boxes, anchors) = layout_with_anchors(&Math::new(Node::Frac(Box::new(frac))), &ApproxMetrics, &style());
+    let (boxes, anchors) = layout_with_anchors(
+        &Math::new(Node::Frac(Box::new(frac))),
+        &ApproxMetrics,
+        &style(),
+    );
 
     fn glyph_at(node: &LBox, ch: char) -> Option<(f64, f64)> {
         match node {
-            LBox::Glyph { ch: found, x, y, .. } if *found == ch => Some((*x, *y)),
+            LBox::Glyph {
+                ch: found, x, y, ..
+            } if *found == ch => Some((*x, *y)),
             LBox::HBox { items, .. } | LBox::VBox { items, .. } => {
                 items.iter().find_map(|item| glyph_at(item, ch))
             }

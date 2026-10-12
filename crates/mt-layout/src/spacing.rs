@@ -90,7 +90,10 @@ mod tests {
         assert_eq!(spacing.thin_kern, crate::constants::THIN_KERN);
         assert_eq!(spacing.thick_kern, crate::constants::THICK_KERN);
         assert_eq!(spacing.frac_rule_gap, crate::constants::FRAC_RULE_GAP);
-        assert_eq!(spacing.matrix_col_separation, crate::constants::MATRIX_COL_SEPARATION);
+        assert_eq!(
+            spacing.matrix_col_separation,
+            crate::constants::MATRIX_COL_SEPARATION
+        );
     }
 
     #[test]

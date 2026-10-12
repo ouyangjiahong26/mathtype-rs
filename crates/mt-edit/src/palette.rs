@@ -20,17 +20,29 @@ pub enum PaletteItem {
 impl PaletteItem {
     /// A symbol drawn from the text face.
     pub const fn symbol(ch: char, class: Class) -> Self {
-        PaletteItem::Symbol { ch, class, font: Font::Upright }
+        PaletteItem::Symbol {
+            ch,
+            class,
+            font: Font::Upright,
+        }
     }
 
     /// A variable drawn in the italic math face.
     pub const fn variable(ch: char) -> Self {
-        PaletteItem::Symbol { ch, class: Class::Ord, font: Font::Italic }
+        PaletteItem::Symbol {
+            ch,
+            class: Class::Ord,
+            font: Font::Italic,
+        }
     }
 
     /// A symbol drawn from the Greek/symbol face.
     pub const fn greek(ch: char) -> Self {
-        PaletteItem::Symbol { ch, class: Class::Ord, font: Font::Symbol }
+        PaletteItem::Symbol {
+            ch,
+            class: Class::Ord,
+            font: Font::Symbol,
+        }
     }
 
     /// A short human-readable description, used as the tooltip.
@@ -456,7 +468,11 @@ mod tests {
         assert_eq!(palettes.len(), 11);
         for palette in palettes {
             assert!(!palette.name.is_empty());
-            assert!(palette.columns.len() >= 2, "{} has too few columns", palette.name);
+            assert!(
+                palette.columns.len() >= 2,
+                "{} has too few columns",
+                palette.name
+            );
             for column in palette.columns {
                 assert!(!column.is_empty(), "{} has an empty column", palette.name);
             }
@@ -470,7 +486,11 @@ mod tests {
                 for item in *column {
                     if let PaletteItem::Template(template) = item {
                         let (node, entry) = template.build();
-                        assert!(node.slot_count() > 0, "{} builds an empty node", template.name());
+                        assert!(
+                            node.slot_count() > 0,
+                            "{} builds an empty node",
+                            template.name()
+                        );
                         assert!(!entry.is_empty(), "{} has no entry slot", template.name());
                         for slot in &entry {
                             assert!(
@@ -487,7 +507,11 @@ mod tests {
 
     #[test]
     fn binary_and_relation_symbols_carry_the_right_class() {
-        let items: Vec<PaletteItem> = palettes()[0].columns.iter().flat_map(|column| column.iter().copied()).collect();
+        let items: Vec<PaletteItem> = palettes()[0]
+            .columns
+            .iter()
+            .flat_map(|column| column.iter().copied())
+            .collect();
         assert!(items.contains(&PaletteItem::symbol('\u{00D7}', Class::Bin)));
         assert!(items.contains(&PaletteItem::symbol('\u{2264}', Class::Rel)));
         assert!(items.contains(&PaletteItem::symbol('\u{2282}', Class::Rel)));
@@ -507,7 +531,11 @@ mod tests {
     #[test]
     fn spacing_commands_cover_the_negative_case() {
         let commands = spacing_commands();
-        assert!(commands.iter().any(|(_, space)| *space == Space::NegativeThin));
+        assert!(
+            commands
+                .iter()
+                .any(|(_, space)| *space == Space::NegativeThin)
+        );
         assert_eq!(commands.len(), 6);
     }
 

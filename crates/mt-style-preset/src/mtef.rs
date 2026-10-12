@@ -12,8 +12,8 @@
 //! reads back as the full size.
 
 use mt_core::Font;
+use mt_layout::StyleFonts;
 use mt_mtef::{Dimension, Preferences, StyleDef, Unit};
-use mt_layout::{Spacing, StyleFonts};
 
 use crate::{PresetSizes, StylePreset, number};
 
@@ -47,7 +47,10 @@ pub fn to_preferences(preset: &StylePreset) -> Preferences {
     ];
     for (index, font) in slots.iter().enumerate() {
         let (definition, style) = style_def(*font);
-        preferences.styles[index] = StyleDef { font: Some(definition), style };
+        preferences.styles[index] = StyleDef {
+            font: Some(definition),
+            style,
+        };
     }
     preferences
 }
@@ -58,29 +61,30 @@ pub fn to_preferences(preset: &StylePreset) -> Preferences {
 /// whatever unit they were written in, with percent entries read against the full size; style
 /// slots past the seven functional ones (user styles, MT Extra) are ignored.
 pub fn from_preferences(preferences: &Preferences) -> StylePreset {
-    let mut preset = StylePreset::default();
-    preset.name = "导入的预设".to_owned();
-    let full = dimension(&preferences.sizes.first(), None).unwrap_or(preset.sizes.full);
-    preset.sizes = PresetSizes {
-        full,
-        text: full,
-        script: dimension(&preferences.sizes.get(1), Some(full))
-            .unwrap_or_else(|| full * 7.0 / 12.0),
-        script_script: dimension(&preferences.sizes.get(2), Some(full))
-            .unwrap_or_else(|| full * 5.0 / 12.0),
-    };
+    let default = StylePreset::default();
+    let full = dimension(&preferences.sizes.first(), None).unwrap_or(default.sizes.full);
     let slot = |index: usize| preferences.styles.get(index).copied();
-    preset.styles = StyleFonts {
-        text: font_of(slot(0), Font::Upright),
-        function: font_of(slot(1), Font::Upright),
-        variable: font_of(slot(2), Font::Italic),
-        greek: font_of(slot(3), Font::Italic),
-        symbol: font_of(slot(5), Font::Upright),
-        vector: font_of(slot(6), Font::Bold),
-        number: font_of(slot(7), Font::Upright),
-    };
-    preset.spaces = Spacing::default();
-    preset
+    StylePreset {
+        name: "导入的预设".to_owned(),
+        sizes: PresetSizes {
+            full,
+            text: full,
+            script: dimension(&preferences.sizes.get(1), Some(full))
+                .unwrap_or_else(|| full * 7.0 / 12.0),
+            script_script: dimension(&preferences.sizes.get(2), Some(full))
+                .unwrap_or_else(|| full * 5.0 / 12.0),
+        },
+        styles: StyleFonts {
+            text: font_of(slot(0), Font::Upright),
+            function: font_of(slot(1), Font::Upright),
+            variable: font_of(slot(2), Font::Italic),
+            greek: font_of(slot(3), Font::Italic),
+            symbol: font_of(slot(5), Font::Upright),
+            vector: font_of(slot(6), Font::Bold),
+            number: font_of(slot(7), Font::Upright),
+        },
+        ..default
+    }
 }
 
 /// A stream style def as (1-based font definition index, character style bits).
@@ -94,7 +98,9 @@ fn style_def(font: Font) -> (usize, u8) {
         Font::Symbol => (2, bits(false, false)),
         Font::Monospace => (3, bits(false, false)),
         Font::Extra => (4, bits(false, false)),
-        Font::SansSerif | Font::Script | Font::Fraktur | Font::DoubleStruck => (1, bits(false, false)),
+        Font::SansSerif | Font::Script | Font::Fraktur | Font::DoubleStruck => {
+            (1, bits(false, false))
+        }
         Font::SansSerifItalic => (1, bits(false, true)),
         Font::SansSerifBold | Font::BoldScript | Font::BoldFraktur => (1, bits(true, false)),
         Font::SansSerifBoldItalic => (1, bits(true, true)),
@@ -163,11 +169,41 @@ mod tests {
         assert_eq!((value(0), value(1), value(2)), ("14", "9", "6"));
         assert_eq!(preferences.sizes[0].unit, Unit::Points);
         let def = |index: usize| preferences.styles[index];
-        assert_eq!(def(0), StyleDef { font: Some(1), style: 0 });
-        assert_eq!(def(2), StyleDef { font: Some(1), style: 3 });
-        assert_eq!(def(5), StyleDef { font: Some(2), style: 0 });
-        assert_eq!(def(6), StyleDef { font: Some(1), style: 1 });
-        assert_eq!(def(7), StyleDef { font: Some(3), style: 0 });
+        assert_eq!(
+            def(0),
+            StyleDef {
+                font: Some(1),
+                style: 0
+            }
+        );
+        assert_eq!(
+            def(2),
+            StyleDef {
+                font: Some(1),
+                style: 3
+            }
+        );
+        assert_eq!(
+            def(5),
+            StyleDef {
+                font: Some(2),
+                style: 0
+            }
+        );
+        assert_eq!(
+            def(6),
+            StyleDef {
+                font: Some(1),
+                style: 1
+            }
+        );
+        assert_eq!(
+            def(7),
+            StyleDef {
+                font: Some(3),
+                style: 0
+            }
+        );
         // Slots the preset has no say in keep the stream defaults.
         assert_eq!(def(8), mt_mtef::default_preferences().styles[8]);
     }
@@ -185,8 +221,20 @@ mod tests {
     fn exotic_faces_convert_to_the_times_slot_with_their_bold_bit() {
         let preset = parse("[styles]\nvariable = script\nvector = bold-fraktur\n").unwrap();
         let preferences = to_preferences(&preset);
-        assert_eq!(preferences.styles[2], StyleDef { font: Some(1), style: 0 });
-        assert_eq!(preferences.styles[6], StyleDef { font: Some(1), style: 1 });
+        assert_eq!(
+            preferences.styles[2],
+            StyleDef {
+                font: Some(1),
+                style: 0
+            }
+        );
+        assert_eq!(
+            preferences.styles[6],
+            StyleDef {
+                font: Some(1),
+                style: 1
+            }
+        );
         // Reading back yields the Times face, by design.
         let back = from_preferences(&preferences);
         assert_eq!(back.styles.variable, Font::Upright);
@@ -196,8 +244,14 @@ mod tests {
     #[test]
     fn dimensions_convert_from_any_unit() {
         let mut preferences = mt_mtef::default_preferences();
-        preferences.sizes[0] = Dimension { unit: Unit::Centimeters, value: "0.5".to_owned() };
-        preferences.sizes[1] = Dimension { unit: Unit::Percent, value: "50".to_owned() };
+        preferences.sizes[0] = Dimension {
+            unit: Unit::Centimeters,
+            value: "0.5".to_owned(),
+        };
+        preferences.sizes[1] = Dimension {
+            unit: Unit::Percent,
+            value: "50".to_owned(),
+        };
         let preset = from_preferences(&preferences);
         assert!((preset.sizes.full - 0.5 * 72.0 / 2.54).abs() < 1e-9);
         assert!((preset.sizes.script - preset.sizes.full * 0.5).abs() < 1e-9);

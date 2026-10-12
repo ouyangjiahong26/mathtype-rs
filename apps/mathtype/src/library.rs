@@ -62,7 +62,8 @@ pub fn default_path() -> PathBuf {
         std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("share"))
     });
     // No home directory at all: keep the library beside the working directory.
-    data.map(|data| path_under(&data)).unwrap_or_else(|| PathBuf::from("library.txt"))
+    data.map(|data| path_under(&data))
+        .unwrap_or_else(|| PathBuf::from("library.txt"))
 }
 
 impl Library {
@@ -78,14 +79,23 @@ impl Library {
         let bytes = match std::fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Self { entries: Vec::new(), path })
+                return Ok(Self {
+                    entries: Vec::new(),
+                    path,
+                });
             }
             Err(error) => {
-                return Err(LibraryError { line: 0, message: format!("{}: {error}", path.display()) })
+                return Err(LibraryError {
+                    line: 0,
+                    message: format!("{}: {error}", path.display()),
+                });
             }
         };
         let text = String::from_utf8_lossy(&bytes).into_owned();
-        Ok(Self { entries: parse(&text)?, path })
+        Ok(Self {
+            entries: parse(&text)?,
+            path,
+        })
     }
 
     /// Write the library back to its file, creating the directory when needed.
@@ -94,7 +104,8 @@ impl Library {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
         }
-        std::fs::write(&self.path, text).map_err(|error| format!("{}: {error}", self.path.display()))
+        std::fs::write(&self.path, text)
+            .map_err(|error| format!("{}: {error}", self.path.display()))
     }
 
     /// Write the library to `path` and remember it as the library's file.
@@ -111,12 +122,19 @@ impl Library {
     /// Append a formula, replacing the name when the library already has it.
     pub fn add(&mut self, name: &str, latex: &str) {
         let trimmed = name.trim();
-        let name = if trimmed.is_empty() { "未命名公式" } else { trimmed };
+        let name = if trimmed.is_empty() {
+            "未命名公式"
+        } else {
+            trimmed
+        };
         if let Some(existing) = self.entries.iter_mut().find(|entry| entry.name == name) {
             existing.latex = latex.to_owned();
             return;
         }
-        self.entries.push(LibraryEntry { name: name.to_owned(), latex: latex.to_owned() });
+        self.entries.push(LibraryEntry {
+            name: name.to_owned(),
+            latex: latex.to_owned(),
+        });
     }
 
     /// Drop the entry at `index`, reporting whether there was one.
@@ -162,36 +180,47 @@ pub fn parse(text: &str) -> Result<Vec<LibraryEntry>, LibraryError> {
         }
         if trimmed == "[formula]" {
             entries.extend(current.take());
-            current = Some(LibraryEntry { name: String::new(), latex: String::new() });
+            current = Some(LibraryEntry {
+                name: String::new(),
+                latex: String::new(),
+            });
             continue;
         }
-        let (key, value) = trimmed
-            .split_once('=')
-            .ok_or_else(|| LibraryError { line, message: format!("expected 'key = value' or '[formula]', found: {trimmed}") })?;
+        let (key, value) = trimmed.split_once('=').ok_or_else(|| LibraryError {
+            line,
+            message: format!("expected 'key = value' or '[formula]', found: {trimmed}"),
+        })?;
         let (key, value) = (key.trim(), value.trim());
-        let entry = current.as_mut().ok_or_else(|| {
-            LibraryError { line, message: format!("a key outside any [formula] block: {trimmed}") }
+        let entry = current.as_mut().ok_or_else(|| LibraryError {
+            line,
+            message: format!("a key outside any [formula] block: {trimmed}"),
         })?;
         match key {
             "name" => {
                 if entry.name.is_empty() {
                     entry.name = value.to_owned();
                 } else {
-                    return Err(LibraryError { line, message: "duplicate key 'name'".to_owned() });
+                    return Err(LibraryError {
+                        line,
+                        message: "duplicate key 'name'".to_owned(),
+                    });
                 }
             }
             "latex" => {
                 if entry.latex.is_empty() {
                     entry.latex = value.to_owned();
                 } else {
-                    return Err(LibraryError { line, message: "duplicate key 'latex'".to_owned() });
+                    return Err(LibraryError {
+                        line,
+                        message: "duplicate key 'latex'".to_owned(),
+                    });
                 }
             }
             _ => {
                 return Err(LibraryError {
                     line,
                     message: format!("unknown key '{key}' inside a [formula] block (name, latex)"),
-                })
+                });
             }
         }
     }
@@ -279,7 +308,10 @@ mod tests {
 
     #[test]
     fn search_matches_names_and_contents_case_insensitively() {
-        let library = Library { entries: parse(SAMPLE).unwrap(), path: PathBuf::new() };
+        let library = Library {
+            entries: parse(SAMPLE).unwrap(),
+            path: PathBuf::new(),
+        };
         assert_eq!(library.search(""), vec![0, 1]);
         assert_eq!(library.search("euler"), vec![1]);
         assert_eq!(library.search("EULER"), vec![1]);
@@ -289,7 +321,10 @@ mod tests {
 
     #[test]
     fn add_replaces_by_name_and_remove_bounds_check() {
-        let mut library = Library { entries: Vec::new(), path: PathBuf::new() };
+        let mut library = Library {
+            entries: Vec::new(),
+            path: PathBuf::new(),
+        };
         library.add("勾股定理", "a^2 + b^2 = c^2");
         library.add("临时", "x");
         library.add("临时", "y + 1");
@@ -305,14 +340,20 @@ mod tests {
 
     #[test]
     fn the_library_lives_in_the_xdg_data_dir() {
-        assert_eq!(path_under(Path::new("/data")), Path::new("/data/mathtype/library.txt"));
+        assert_eq!(
+            path_under(Path::new("/data")),
+            Path::new("/data/mathtype/library.txt")
+        );
     }
 
     #[test]
     fn saving_and_loading_round_trip_through_disk() {
         let dir = std::env::temp_dir().join(format!("mathtype-library-{}", std::process::id()));
         let path = dir.join("nested").join("library.txt");
-        let mut library = Library { entries: Vec::new(), path: path.clone() };
+        let mut library = Library {
+            entries: Vec::new(),
+            path: path.clone(),
+        };
         library.add("求和", "\\sum_{i=1}^{n} i");
         library.save().expect("saving creates the directories");
         let reloaded = Library::load(&path).expect("the saved file reads back");
@@ -331,20 +372,29 @@ mod tests {
     #[test]
     fn entries_insert_as_trees_at_the_caret() {
         let mut editor = mt_edit::Editor::new();
-        insert_entry(&mut editor, &LibraryEntry {
-            name: "分式".to_owned(),
-            latex: "\\frac{a}{b}".to_owned(),
-        })
+        insert_entry(
+            &mut editor,
+            &LibraryEntry {
+                name: "分式".to_owned(),
+                latex: "\\frac{a}{b}".to_owned(),
+            },
+        )
         .expect("the LaTeX parses");
         assert_eq!(editor.math().body.slot_count(), 1);
         let mut found = false;
-        editor.math().body.walk(&mut |node| found |= matches!(node, mt_core::Node::Frac(_)));
+        editor
+            .math()
+            .body
+            .walk(&mut |node| found |= matches!(node, mt_core::Node::Frac(_)));
         assert!(found, "the inserted formula tree must contain the fraction");
 
-        let error = insert_entry(&mut editor, &LibraryEntry {
-            name: "坏".to_owned(),
-            latex: "\\frac{a".to_owned(),
-        })
+        let error = insert_entry(
+            &mut editor,
+            &LibraryEntry {
+                name: "坏".to_owned(),
+                latex: "\\frac{a".to_owned(),
+            },
+        )
         .unwrap_err();
         assert!(error.contains("LaTeX error"));
     }

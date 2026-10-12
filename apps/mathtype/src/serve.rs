@@ -264,8 +264,7 @@ fn export_html(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, 
         options.math = mt_html::MathMode::parse(&value)
             .ok_or_else(|| format!("unknown ?math= {value}: mathml or image"))?;
     }
-    let result =
-        mt_docx::Document::open(body).and_then(|document| Ok(mt_html::export(&document, &options)));
+    let result = mt_docx::Document::open(body).map(|document| mt_html::export(&document, &options));
     match result {
         Ok(output) => respond(stream, 200, "text/html; charset=utf-8", &output.html),
         Err(error) => respond(
@@ -422,7 +421,11 @@ fn number(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Strin
         Err(error) => return bad(stream, format!("writing the document failed: {error}")),
     };
     // The bridge's own log is where a host watches the work go by.
-    println!("number {count} equations, {} style, {} side", style.as_str(), side.as_str());
+    println!(
+        "number {count} equations, {} style, {} side",
+        style.as_str(),
+        side.as_str()
+    );
     respond(
         stream,
         200,
@@ -446,21 +449,28 @@ fn crossref(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
         }
         Some(value) => match value.parse() {
             Ok(number) => mt_numbering::ReferenceTarget::Number(number),
-            Err(_) => return bad(stream, "?to= must be an equation number or latest".to_owned()),
+            Err(_) => {
+                return bad(
+                    stream,
+                    "?to= must be an equation number or latest".to_owned(),
+                );
+            }
         },
     };
     let mut document = match mt_docx::Document::open(body) {
         Ok(document) => document,
         Err(error) => return bad(stream, format!("cannot open the document: {error}")),
     };
-    let bookmark = match mt_numbering::insert_reference(
-        &mut document,
-        mt_docx::Position::BodyEnd,
-        target,
-    ) {
-        Ok(bookmark) => bookmark,
-        Err(error) => return bad(stream, format!("inserting the cross-reference failed: {error}")),
-    };
+    let bookmark =
+        match mt_numbering::insert_reference(&mut document, mt_docx::Position::BodyEnd, target) {
+            Ok(bookmark) => bookmark,
+            Err(error) => {
+                return bad(
+                    stream,
+                    format!("inserting the cross-reference failed: {error}"),
+                );
+            }
+        };
     let bytes = match document.into_bytes() {
         Ok(bytes) => bytes,
         Err(error) => return bad(stream, format!("writing the document failed: {error}")),
@@ -470,7 +480,10 @@ fn crossref(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
         stream,
         200,
         "application/json",
-        &format!("{{\"bookmark\":\"{bookmark}\",\"docx\":\"{}\"}}", base64(&bytes)),
+        &format!(
+            "{{\"bookmark\":\"{bookmark}\",\"docx\":\"{}\"}}",
+            base64(&bytes)
+        ),
     )
 }
 
@@ -487,7 +500,12 @@ fn activate(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
     }
     let index = match parameter(query, "index").map(|value| value.parse::<usize>()) {
         Some(Ok(n)) if n >= 1 => n,
-        _ => return bad(stream, "?index= must give the 1-based number of the object".to_owned()),
+        _ => {
+            return bad(
+                stream,
+                "?index= must give the 1-based number of the object".to_owned(),
+            );
+        }
     };
     // Which object kinds count as editable equations: ours, and MathType's own
     // (`Equation.DSMT4`), whose streams this bridge reads and writes natively.
@@ -523,10 +541,18 @@ fn activate(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
         })
         .nth(index - 1);
     let Some(target) = target else {
-        return bad(stream, format!("no equation object {index} with a {} ProgID", filters.join(" or ")));
+        return bad(
+            stream,
+            format!(
+                "no equation object {index} with a {} ProgID",
+                filters.join(" or ")
+            ),
+        );
     };
     let part = match &target.kind {
-        mt_docx::EquationKind::Ole { part: Some(part), .. } => part.clone(),
+        mt_docx::EquationKind::Ole {
+            part: Some(part), ..
+        } => part.clone(),
         _ => return bad(stream, "the object has no data part".to_owned()),
     };
     let object_bytes = match document.part(&part) {
@@ -541,7 +567,12 @@ fn activate(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
     };
     let parsed = match mt_mtef::read(&equation_bytes) {
         Ok(parsed) => parsed,
-        Err(error) => return bad(stream, format!("the object's equation stream is unreadable: {error}")),
+        Err(error) => {
+            return bad(
+                stream,
+                format!("the object's equation stream is unreadable: {error}"),
+            );
+        }
     };
 
     let edited = match edit_equation_session("activate", index, &mt_tex::to_latex(&parsed.math)) {
@@ -551,7 +582,13 @@ fn activate(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
     let math = match mt_tex::parse(&edited) {
         Ok(math) => math,
         Err(error) => {
-            return bad(stream, format!("the edited equation does not parse at byte {}: {}", error.offset, error.message))
+            return bad(
+                stream,
+                format!(
+                    "the edited equation does not parse at byte {}: {}",
+                    error.offset, error.message
+                ),
+            );
         }
     };
 
@@ -560,7 +597,12 @@ fn activate(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
         match mt_mtef::ole::write_into_ole(&object_bytes, &equation) {
             Ok(ole) => ole,
             Err(error) => {
-                return respond(stream, 500, "text/plain", &format!("writing the object stream failed: {error}"));
+                return respond(
+                    stream,
+                    500,
+                    "text/plain",
+                    &format!("writing the object stream failed: {error}"),
+                );
             }
         }
     } else {
@@ -591,16 +633,31 @@ fn activate(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, Str
     }
     let bytes = match document.into_bytes() {
         Ok(bytes) => bytes,
-        Err(error) => return respond(stream, 500, "text/plain", &format!("writing the document failed: {error}")),
+        Err(error) => {
+            return respond(
+                stream,
+                500,
+                "text/plain",
+                &format!("writing the document failed: {error}"),
+            );
+        }
     };
-    println!("activate object {index} -> {} bytes after editing", bytes.len());
+    println!(
+        "activate object {index} -> {} bytes after editing",
+        bytes.len()
+    );
     let out_parameter = parameter(query, "out");
     if let Some(path) = &path_parameter {
         // File mode: write the edited document where the caller wants it (in place by default)
         // and answer with a small receipt instead of the bytes.
         let destination = out_parameter.as_deref().unwrap_or(path.as_str());
         if let Err(error) = std::fs::write(destination, &bytes) {
-            return respond(stream, 500, "text/plain", &format!("cannot write {destination}: {error}"));
+            return respond(
+                stream,
+                500,
+                "text/plain",
+                &format!("cannot write {destination}: {error}"),
+            );
         }
         return respond(
             stream,
@@ -633,12 +690,21 @@ fn objectize(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, St
     let prog_id = parameter(query, "progid").unwrap_or_else(|| "Equation.DSMT4".to_owned());
     let form = parameter(query, "form").unwrap_or_else(|| "inline".to_owned());
     let Some(para) = parameter(query, "para").and_then(|value| value.parse::<usize>().ok()) else {
-        return bad(stream, "?para= must give the 1-based number of the caret's paragraph".to_owned());
+        return bad(
+            stream,
+            "?para= must give the 1-based number of the caret's paragraph".to_owned(),
+        );
     };
     let math = match mt_tex::parse(&latex) {
         Ok(math) => math,
         Err(error) => {
-            return bad(stream, format!("the equation does not parse at byte {}: {}", error.offset, error.message))
+            return bad(
+                stream,
+                format!(
+                    "the equation does not parse at byte {}: {}",
+                    error.offset, error.message
+                ),
+            );
         }
     };
 
@@ -664,7 +730,14 @@ fn objectize(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, St
     let style = mt_layout::LayoutStyle::display(18.0);
     let picture = match crate::write_math_with_style(&math, crate::Format::Png, &style, 3.0) {
         Ok(bytes) => bytes,
-        Err(error) => return respond(stream, 500, "text/plain", &format!("rendering the preview failed: {error}")),
+        Err(error) => {
+            return respond(
+                stream,
+                500,
+                "text/plain",
+                &format!("rendering the preview failed: {error}"),
+            );
+        }
     };
     let (pixel_width, pixel_height) = match png_size(&picture) {
         Some(size) => size,
@@ -680,7 +753,14 @@ fn objectize(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, St
     };
     let runs = match document.new_equation_object_runs(&math, &prog_id, Some(&preview)) {
         Ok(runs) => runs,
-        Err(error) => return respond(stream, 500, "text/plain", &format!("building the object failed: {error}")),
+        Err(error) => {
+            return respond(
+                stream,
+                500,
+                "text/plain",
+                &format!("building the object failed: {error}"),
+            );
+        }
     };
 
     let insert = match form.as_str() {
@@ -692,7 +772,11 @@ fn objectize(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, St
             let number_style = parameter(query, "style")
                 .and_then(|name| mt_numbering::NumberStyle::parse(&name))
                 .unwrap_or(mt_numbering::NumberStyle::Plain);
-            let side = if form == "numbered-left" { mt_numbering::Side::Left } else { mt_numbering::Side::Right };
+            let side = if form == "numbered-left" {
+                mt_numbering::Side::Left
+            } else {
+                mt_numbering::Side::Right
+            };
             let tab_run = "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:tab/></w:r>";
             let field = mt_numbering::numbering_field_runs(number_style);
             // Display: the equation alone, centered. Numbered: the equation centered with the
@@ -700,9 +784,15 @@ fn objectize(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, St
             let (tabs, body_runs) = if form == "display" {
                 (String::new(), runs)
             } else if form == "numbered-right" {
-                (mt_numbering::tabs_runs(side), format!("{runs}{tab_run}{field}"))
+                (
+                    mt_numbering::tabs_runs(side),
+                    format!("{runs}{tab_run}{field}"),
+                )
             } else {
-                (mt_numbering::tabs_runs(side), format!("{field}{tab_run}{runs}"))
+                (
+                    mt_numbering::tabs_runs(side),
+                    format!("{field}{tab_run}{runs}"),
+                )
             };
             let paragraph = format!(
                 "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
@@ -711,25 +801,59 @@ fn objectize(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u16, St
             let position = mt_docx::Position::AfterParagraph { block };
             (position, paragraph)
         }
-        other => return bad(stream, format!("unknown ?form= {other}: inline, display, numbered-right, numbered-left")),
+        other => {
+            return bad(
+                stream,
+                format!("unknown ?form= {other}: inline, display, numbered-right, numbered-left"),
+            );
+        }
     };
     if let Err(error) = document.insert_fragment(insert.0, &insert.1) {
-        return respond(stream, 500, "text/plain", &format!("placing the object failed: {error}"));
+        return respond(
+            stream,
+            500,
+            "text/plain",
+            &format!("placing the object failed: {error}"),
+        );
     }
     println!("objectize -> {prog_id} {form} after paragraph {para}");
 
     let bytes = match document.into_bytes() {
         Ok(bytes) => bytes,
-        Err(error) => return respond(stream, 500, "text/plain", &format!("writing the document failed: {error}")),
+        Err(error) => {
+            return respond(
+                stream,
+                500,
+                "text/plain",
+                &format!("writing the document failed: {error}"),
+            );
+        }
     };
     if path_parameter.is_some() {
-        let out = parameter(query, "out").or(path_parameter.clone()).expect("path present");
+        let out = parameter(query, "out")
+            .or(path_parameter.clone())
+            .expect("path present");
         if let Err(error) = std::fs::write(&out, &bytes) {
-            return respond(stream, 500, "text/plain", &format!("cannot write {out}: {error}"));
+            return respond(
+                stream,
+                500,
+                "text/plain",
+                &format!("cannot write {out}: {error}"),
+            );
         }
-        return respond(stream, 200, "application/json", &format!("{{\"ok\":true,\"path\":\"{}\"}}", json_escape(&out)));
+        return respond(
+            stream,
+            200,
+            "application/json",
+            &format!("{{\"ok\":true,\"path\":\"{}\"}}", json_escape(&out)),
+        );
     }
-    respond(stream, 200, "application/json", &format!("{{\"docx\":\"{}\"}}", base64(&bytes)))
+    respond(
+        stream,
+        200,
+        "application/json",
+        &format!("{{\"docx\":\"{}\"}}", base64(&bytes)),
+    )
 }
 
 /// Width and height of a PNG, from its IHDR chunk.
@@ -750,10 +874,14 @@ fn clipboard_write(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u
         respond(stream, 400, "text/plain", &message)
     }
     let math = if let Some(path) = parameter(query, "path") {
-        let index = match parameter(query, "index").and_then(|value| value.parse::<usize>().ok())
-        {
+        let index = match parameter(query, "index").and_then(|value| value.parse::<usize>().ok()) {
             Some(index) if index >= 1 => index,
-            _ => return bad(stream, "?index= must give the 1-based number of the object".to_owned()),
+            _ => {
+                return bad(
+                    stream,
+                    "?index= must give the 1-based number of the object".to_owned(),
+                );
+            }
         };
         let filters: Vec<String> = parameter(query, "progid")
             .unwrap_or_else(|| "MathTypeRs,Equation.DSMT4".to_owned())
@@ -786,12 +914,21 @@ fn clipboard_write(stream: &mut TcpStream, query: &str, body: &[u8]) -> Result<u
     } else {
         let latex = String::from_utf8_lossy(body).trim().to_owned();
         if latex.is_empty() {
-            return bad(stream, "the body must carry LaTeX, or give ?path=&index=".to_owned());
+            return bad(
+                stream,
+                "the body must carry LaTeX, or give ?path=&index=".to_owned(),
+            );
         }
         match mt_tex::parse(&latex) {
             Ok(math) => math,
             Err(error) => {
-                return bad(stream, format!("the equation does not parse at byte {}: {}", error.offset, error.message))
+                return bad(
+                    stream,
+                    format!(
+                        "the equation does not parse at byte {}: {}",
+                        error.offset, error.message
+                    ),
+                );
             }
         }
     };
@@ -829,12 +966,20 @@ fn compose(stream: &mut TcpStream, query: &str, _body: &[u8]) -> Result<u16, Str
                 stream,
                 400,
                 "text/plain",
-                &format!("the composed equation does not parse at byte {}: {}", error.offset, error.message),
-            )
+                &format!(
+                    "the composed equation does not parse at byte {}: {}",
+                    error.offset, error.message
+                ),
+            );
         }
     };
     println!("compose -> {} bytes of LaTeX", latex.len());
-    respond(stream, 200, "application/json", &format!("{{\"latex\":\"{}\"}}", json_escape(&latex)))
+    respond(
+        stream,
+        200,
+        "application/json",
+        &format!("{{\"latex\":\"{}\"}}", json_escape(&latex)),
+    )
 }
 
 /// Escape the characters a JSON string must not carry raw.
@@ -861,7 +1006,10 @@ fn preview_part(document: &mt_docx::Document, block: usize, item: usize) -> Opti
         mt_docx::Block::Table(_) => return None,
     };
     let rel = match &paragraph.items[item] {
-        mt_docx::Item::Object { preview_rel_id: Some(rel), .. } => rel,
+        mt_docx::Item::Object {
+            preview_rel_id: Some(rel),
+            ..
+        } => rel,
         _ => return None,
     };
     document.relationship_part(rel)
@@ -883,14 +1031,14 @@ fn edit_equation_session(kind: &str, serial: usize, seed: &str) -> Result<String
         Some(editor) => run_configured_editor(&editor, &equation_file),
         None => run_builtin_editor(&equation_file),
     };
-    let finished = match editor.and_then(|mut child| child.wait().map_err(|error| error.to_string()))
-    {
-        Ok(status) => status,
-        Err(error) => {
-            let _ = std::fs::remove_file(&equation_file);
-            return Err((500, format!("the editor could not be started: {error}")));
-        }
-    };
+    let finished =
+        match editor.and_then(|mut child| child.wait().map_err(|error| error.to_string())) {
+            Ok(status) => status,
+            Err(error) => {
+                let _ = std::fs::remove_file(&equation_file);
+                return Err((500, format!("the editor could not be started: {error}")));
+            }
+        };
     let edited = match std::fs::read_to_string(&equation_file) {
         Ok(text) => text,
         Err(error) => {
@@ -900,14 +1048,19 @@ fn edit_equation_session(kind: &str, serial: usize, seed: &str) -> Result<String
     };
     let _ = std::fs::remove_file(&equation_file);
     if !finished.success() {
-        return Err((500, format!("the editor exited with {finished}; nothing was changed")));
+        return Err((
+            500,
+            format!("the editor exited with {finished}; nothing was changed"),
+        ));
     }
     Ok(edited)
 }
 
 /// Start `$MATHTYPE_RS_EDITOR`, which takes the equation file as its only argument.
-fn run_configured_editor(editor: &std::ffi::OsStr, equation: &std::path::PathBuf)
-    -> Result<std::process::Child, String> {
+fn run_configured_editor(
+    editor: &std::ffi::OsStr,
+    equation: &std::path::PathBuf,
+) -> Result<std::process::Child, String> {
     std::process::Command::new(editor)
         .arg(equation)
         .spawn()
@@ -1308,19 +1461,30 @@ mod tests {
         assert_eq!(status(&response), "HTTP/1.1 200 OK");
         let json = body(&response);
         assert!(json.contains("\"count\":1"), "{json}");
-        let encoded = json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap();
-        let document = mt_docx::Document::open(&base64_decode(encoded)).expect("the container opens");
+        let encoded = json
+            .rsplit_once("\"docx\":\"")
+            .unwrap()
+            .1
+            .split('"')
+            .next()
+            .unwrap();
+        let document =
+            mt_docx::Document::open(&base64_decode(encoded)).expect("the container opens");
         assert_eq!(mt_numbering::enumerate(&document).len(), 1);
         assert_eq!(
             mt_numbering::read_settings(&document),
-            (mt_numbering::NumberStyle::Chapter, mt_numbering::Side::Right)
+            (
+                mt_numbering::NumberStyle::Chapter,
+                mt_numbering::Side::Right
+            )
         );
     }
 
     #[test]
     fn number_rejects_an_unknown_style() {
-        let response =
-            request(b"POST /number?style=roman HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n");
+        let response = request(
+            b"POST /number?style=roman HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n",
+        );
         assert_eq!(status(&response), "HTTP/1.1 400 Bad Request");
     }
 
@@ -1335,7 +1499,14 @@ mod tests {
         .into_bytes();
         raw.extend_from_slice(&bytes);
         let json = body(&request(&raw));
-        let numbered = base64_decode(json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap());
+        let numbered = base64_decode(
+            json.rsplit_once("\"docx\":\"")
+                .unwrap()
+                .1
+                .split('"')
+                .next()
+                .unwrap(),
+        );
 
         let mut raw = format!(
             "POST /crossref?to=1 HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\n\r\n",
@@ -1347,8 +1518,15 @@ mod tests {
         assert_eq!(status(&response), "HTTP/1.1 200 OK");
         let json = body(&response);
         assert!(json.contains("\"bookmark\":\"_RefMTEq1\""), "{json}");
-        let encoded = json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap();
-        let document = mt_docx::Document::open(&base64_decode(encoded)).expect("the container opens");
+        let encoded = json
+            .rsplit_once("\"docx\":\"")
+            .unwrap()
+            .1
+            .split('"')
+            .next()
+            .unwrap();
+        let document =
+            mt_docx::Document::open(&base64_decode(encoded)).expect("the container opens");
         assert!(document.document_xml().contains(" REF _RefMTEq1 \\h "));
     }
 
@@ -1441,13 +1619,15 @@ mod tests {
     }
 
     /// A document whose one paragraph embeds a MathTypeRs equation object with a PNG preview.
+    ///
+    /// Only the editor hand-off tests build it, and those stand in a shell script for the editor.
+    #[cfg(unix)]
     fn ole_docx() -> Vec<u8> {
         use std::io::Write;
         let math = mt_tex::parse("\\frac{a+b}{c}").expect("the object equation parses");
         let stream = mt_mtef::write(&math);
         let bin = mt_mtef::ole::create_ole(&stream).expect("the compound file is written");
-        let document = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        let document = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
              <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" \
              xmlns:v=\"urn:schemas-microsoft-com:vml\" \
              xmlns:o=\"urn:schemas-microsoft-com:office:office\" \
@@ -1457,8 +1637,7 @@ mod tests {
              <v:imagedata r:id=\"rIdImg1\" o:title=\"\"/></v:shape>\
              <o:OLEObject Type=\"Embed\" ProgID=\"MathTypeRs.Equation.1\" ShapeID=\"eqobj1\" \
              DrawAspect=\"Content\" ObjectID=\"_1700000001\" r:id=\"rIdObj1\"/>\
-             </w:object></w:r></w:p></w:body></w:document>"
-        );
+             </w:object></w:r></w:p></w:body></w:document>".to_string();
         let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default();
         let text_parts: [(&str, String); 4] = [
@@ -1494,20 +1673,29 @@ mod tests {
             writer.start_file(name, options).expect("start part");
             writer.write_all(data.as_bytes()).expect("write part");
         }
-        writer.start_file("word/embeddings/oleObject1.bin", options).expect("start bin");
+        writer
+            .start_file("word/embeddings/oleObject1.bin", options)
+            .expect("start bin");
         writer.write_all(&bin).expect("write bin");
-        writer.start_file("word/media/image1.png", options).expect("start preview");
-        writer.write_all(b"not a picture yet").expect("write preview");
+        writer
+            .start_file("word/media/image1.png", options)
+            .expect("start preview");
+        writer
+            .write_all(b"not a picture yet")
+            .expect("write preview");
         writer.finish().expect("close container").into_inner()
     }
 
     /// Tests that point `MATHTYPE_RS_EDITOR` at a script must not race each other.
+    #[cfg(unix)]
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// A shell script standing in for the desktop editor: `fake_editor("a+b")` overwrites the
     /// equation file with that text; `fake_editor("")` makes the editor fail.
+    #[cfg(unix)]
     fn fake_editor(replacement: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("mathtype-fake-editor-{}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("mathtype-fake-editor-{}", std::process::id()));
         let script = if replacement.is_empty() {
             "#!/bin/sh\nexit 3\n".to_owned()
         } else {
@@ -1521,20 +1709,25 @@ mod tests {
     #[cfg(unix)]
     fn make_executable(path: &std::path::Path) {
         use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(path).expect("stat the editor").permissions();
+        let mut permissions = std::fs::metadata(path)
+            .expect("stat the editor")
+            .permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(path, permissions).expect("chmod the editor");
     }
 
-    #[cfg(not(unix))]
-    fn make_executable(_path: &std::path::Path) {}
-
     /// An editor that leaves the equation file alone and exits successfully.
+    #[cfg(unix)]
     fn fake_blank_editor() -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("mathtype-blank-editor-{}", std::process::id()));
-        std::fs::write(&path, "#!/bin/sh
+        let path =
+            std::env::temp_dir().join(format!("mathtype-blank-editor-{}", std::process::id()));
+        std::fs::write(
+            &path,
+            "#!/bin/sh
 exit 0
-").expect("write the blank editor");
+",
+        )
+        .expect("write the blank editor");
         make_executable(&path);
         path
     }
@@ -1542,7 +1735,9 @@ exit 0
     #[cfg(unix)]
     #[test]
     fn activate_round_trips_and_reports_editor_failures() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe { std::env::set_var("MATHTYPE_RS_EDITOR", fake_editor("a+b")) };
         let bytes = ole_docx();
         let mut raw = format!(
@@ -1559,23 +1754,43 @@ exit 0
             body(&response)
         );
         let json = body(&response);
-        let encoded = json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap();
+        let encoded = json
+            .rsplit_once("\"docx\":\"")
+            .unwrap()
+            .1
+            .split('"')
+            .next()
+            .unwrap();
         let decoded = base64_decode(encoded);
         let document = mt_docx::Document::open(&decoded).expect("the returned container opens");
         let equations = document.equations();
         assert_eq!(equations.len(), 1, "the object survived editing");
-        assert_eq!(mt_tex::to_latex(equations[0].math.as_ref().expect("the object parses")), "a+b");
+        assert_eq!(
+            mt_tex::to_latex(equations[0].math.as_ref().expect("the object parses")),
+            "a+b"
+        );
         // The stream is still inside its compound file, and the preview became a real picture.
         let part = match &equations[0].kind {
-            mt_docx::EquationKind::Ole { part: Some(part), .. } => part.clone(),
+            mt_docx::EquationKind::Ole {
+                part: Some(part), ..
+            } => part.clone(),
             kind => panic!("expected an object, got {kind:?}"),
         };
-        let bin = document.part(&part).expect("part present").expect("part reads");
+        let bin = document
+            .part(&part)
+            .expect("part present")
+            .expect("part reads");
         let stream = mt_mtef::ole::read_from_ole(&bin)
             .expect("the compound file reads")
             .expect("the object stayed a compound file");
-        assert_eq!(mt_tex::to_latex(&mt_mtef::read(&stream).expect("stream reads").math), "a+b");
-        let preview = document.part("word/media/image1.png").expect("preview present").expect("preview reads");
+        assert_eq!(
+            mt_tex::to_latex(&mt_mtef::read(&stream).expect("stream reads").math),
+            "a+b"
+        );
+        let preview = document
+            .part("word/media/image1.png")
+            .expect("preview present")
+            .expect("preview reads");
         assert_eq!(&preview[..4], b"\x89PNG", "the preview was re-rendered");
 
         // An editor that fails leaves the document alone and says so.
@@ -1594,25 +1809,34 @@ exit 0
     #[cfg(unix)]
     #[test]
     fn compose_returns_the_edited_latex() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe { std::env::set_var("MATHTYPE_RS_EDITOR", fake_editor("a+b")) };
-        let response = request(b"POST /compose HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n");
+        let response =
+            request(b"POST /compose HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n");
         assert!(
             status(&response).contains("200"),
             "{} — {}",
             status(&response),
             body(&response)
         );
-        assert!(body(&response).contains("\"latex\":\"a+b\""), "{}", body(&response));
+        assert!(
+            body(&response).contains("\"latex\":\"a+b\""),
+            "{}",
+            body(&response)
+        );
 
         // An editor session that produces nothing is a user-level error.
         unsafe { std::env::set_var("MATHTYPE_RS_EDITOR", fake_blank_editor()) };
-        let response = request(b"POST /compose HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n");
+        let response =
+            request(b"POST /compose HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n");
         assert!(status(&response).contains("400"), "{}", status(&response));
 
         // A broken editor is a server-side failure.
         unsafe { std::env::set_var("MATHTYPE_RS_EDITOR", fake_editor("")) };
-        let response = request(b"POST /compose HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n");
+        let response =
+            request(b"POST /compose HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n");
         assert!(status(&response).contains("500"), "{}", status(&response));
         unsafe { std::env::remove_var("MATHTYPE_RS_EDITOR") };
     }
@@ -1620,11 +1844,14 @@ exit 0
     #[cfg(unix)]
     #[test]
     fn activate_path_mode_rewrites_the_file_and_accepts_mathetype_objects() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe { std::env::set_var("MATHTYPE_RS_EDITOR", fake_editor("u+v")) };
         // A MathType (`Equation.DSMT4`) object is editable too, not only our own ProgID.
         let bytes = ole_docx();
-        let path = std::env::temp_dir().join(format!("mathtype-path-mode-{}.docx", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("mathtype-path-mode-{}.docx", std::process::id()));
         std::fs::write(&path, &bytes).expect("stage the document");
         let response = request(
             format!(
@@ -1639,7 +1866,11 @@ exit 0
             status(&response),
             body(&response)
         );
-        assert!(body(&response).contains("\"ok\":true"), "{}", body(&response));
+        assert!(
+            body(&response).contains("\"ok\":true"),
+            "{}",
+            body(&response)
+        );
         let rewritten = std::fs::read(&path).expect("the file was rewritten");
         let document = mt_docx::Document::open(&rewritten).expect("rewritten container opens");
         let equations = document.equations();
@@ -1717,33 +1948,44 @@ exit 0
                 body(&response)
             );
             let json = body(&response);
-            let encoded = json.rsplit_once("\"docx\":\"").unwrap().1.split('"').next().unwrap();
+            let encoded = json
+                .rsplit_once("\"docx\":\"")
+                .unwrap()
+                .1
+                .split('"')
+                .next()
+                .unwrap();
             let decoded = base64_decode(encoded);
             let document = mt_docx::Document::open(&decoded).expect("the returned container opens");
             let equations = document.equations();
             assert_eq!(equations.len(), 1, "{form}: one equation object");
             match &equations[0].kind {
-                mt_docx::EquationKind::Ole { prog_id: Some(prog_id), .. } => {
+                mt_docx::EquationKind::Ole {
+                    prog_id: Some(prog_id),
+                    ..
+                } => {
                     assert_eq!(prog_id, "Equation.DSMT4", "{form}: MathType's ProgID");
                 }
                 kind => panic!("{form}: expected an object, got {kind:?}"),
             }
             let xml = document.document_xml();
             match form {
-                "inline" => assert_eq!(xml.matches("<w:p>").count() + xml.matches("<w:p ").count(), 1, "no new paragraph for inline"),
+                "inline" => assert_eq!(
+                    xml.matches("<w:p>").count() + xml.matches("<w:p ").count(),
+                    1,
+                    "no new paragraph for inline"
+                ),
                 "numbered-right" | "numbered-left" => {
                     assert!(xml.contains("SEQ MTEqn"), "{form}: the SEQ field is in");
                 }
                 _ => {}
             }
             assert!(
-                document.part_names().any(|name| name.starts_with("word/media/") && name.ends_with(".png")),
+                document
+                    .part_names()
+                    .any(|name| name.starts_with("word/media/") && name.ends_with(".png")),
                 "{form}: a preview picture part exists"
             );
         }
     }
-
-
-
-
 }

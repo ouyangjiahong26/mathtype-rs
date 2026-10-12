@@ -48,14 +48,21 @@ impl Default for StyleFonts {
 impl StyleFonts {
     /// The face a character with `class` and tree font `font` is drawn in.
     pub fn resolve(&self, ch: char, class: Class, font: Font) -> Font {
-        if !matches!(font, Font::Italic | Font::Upright | Font::Bold | Font::BoldItalic) {
+        if !matches!(
+            font,
+            Font::Italic | Font::Upright | Font::Bold | Font::BoldItalic
+        ) {
             return font;
         }
         if ch.is_ascii_digit() {
             return self.number;
         }
         if is_greek(ch) {
-            return if font.is_bold() { self.vector } else { self.greek };
+            return if font.is_bold() {
+                self.vector
+            } else {
+                self.greek
+            };
         }
         if ch.is_ascii_alphabetic() {
             if font.is_bold() {
@@ -114,7 +121,10 @@ pub struct LayoutStyle {
 impl LayoutStyle {
     /// A full-size style of `size` points, starting at nesting level zero.
     pub fn display(size: f64) -> Self {
-        Self { size, ..Self::default() }
+        Self {
+            size,
+            ..Self::default()
+        }
     }
 
     /// Size factor applied at `level`: full at 0, `script_scale` at 1, `script_script_scale`
@@ -131,7 +141,6 @@ impl LayoutStyle {
     pub fn size_at(&self, level: u8) -> f64 {
         self.size * self.scale(level)
     }
-
 }
 
 impl Default for LayoutStyle {
@@ -167,7 +176,11 @@ mod tests {
 
     #[test]
     fn cramped_and_level_survive_the_struct_update_syntax() {
-        let style = LayoutStyle { cramped: true, level: 2, ..LayoutStyle::display(8.0) };
+        let style = LayoutStyle {
+            cramped: true,
+            level: 2,
+            ..LayoutStyle::display(8.0)
+        };
         assert!(style.cramped);
         assert_eq!(style.level, 2);
         assert_eq!(style.size, 8.0);
@@ -188,23 +201,34 @@ mod tests {
 
     #[test]
     fn slots_restyle_the_roles_of_the_tree() {
-        let mut slots = StyleFonts::default();
-        slots.variable = Font::Script;
-        slots.number = Font::Bold;
-        slots.greek = Font::Upright;
-        slots.symbol = Font::BoldItalic;
-        slots.vector = Font::BoldItalic;
-        slots.function = Font::SansSerif;
+        let mut slots = StyleFonts {
+            variable: Font::Script,
+            number: Font::Bold,
+            greek: Font::Upright,
+            symbol: Font::BoldItalic,
+            vector: Font::BoldItalic,
+            function: Font::SansSerif,
+            ..StyleFonts::default()
+        };
         assert_eq!(slots.resolve('x', Class::Ord, Font::Italic), Font::Script);
         assert_eq!(slots.resolve('x', Class::Ord, Font::Upright), Font::Script);
         assert_eq!(slots.resolve('7', Class::Ord, Font::Upright), Font::Bold);
         assert_eq!(slots.resolve('α', Class::Ord, Font::Italic), Font::Upright);
-        assert_eq!(slots.resolve('+', Class::Bin, Font::Upright), Font::BoldItalic);
+        assert_eq!(
+            slots.resolve('+', Class::Bin, Font::Upright),
+            Font::BoldItalic
+        );
         assert_eq!(slots.resolve('v', Class::Ord, Font::Bold), Font::BoldItalic);
-        assert_eq!(slots.resolve('d', Class::Op, Font::Upright), Font::SansSerif);
+        assert_eq!(
+            slots.resolve('d', Class::Op, Font::Upright),
+            Font::SansSerif
+        );
         // Explicit faces always pass through.
         assert_eq!(slots.resolve('x', Class::Ord, Font::Fraktur), Font::Fraktur);
-        assert_eq!(slots.resolve('x', Class::Ord, Font::SansSerif), Font::SansSerif);
+        assert_eq!(
+            slots.resolve('x', Class::Ord, Font::SansSerif),
+            Font::SansSerif
+        );
         // Text runs follow the text slot, never the variable rules.
         assert_eq!(slots.text_font(Font::Upright), slots.text);
         slots.text = Font::Bold;

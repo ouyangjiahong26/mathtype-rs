@@ -4,7 +4,7 @@
 //! installs carries. When it is not on this machine the test says so and stops.
 
 use mt_core::{MathStyle, Node};
-use mt_mtef::{parse, read, write, Stream};
+use mt_mtef::{Stream, parse, read, write};
 
 /// The path the sample is read from: `MTEF_SAMPLE` when set, nothing otherwise.
 fn sample_path() -> Option<String> {
@@ -31,11 +31,27 @@ fn reads_a_blank_equation_object() {
     assert_eq!(parsed.header.product, 0);
     assert_eq!(parsed.header.creator, "DSMT6");
     assert_eq!(parsed.header.options, 0);
-    assert_eq!(parsed.header.encodings, vec!["WinAllBasicCodePages".to_owned()]);
-    let names: Vec<&str> = parsed.header.fonts.iter().map(|font| font.name.as_str()).collect();
-    assert_eq!(names, vec!["Times New Roman", "Symbol", "Courier New", "MT Extra"]);
     assert_eq!(
-        parsed.header.fonts.iter().map(|font| font.encoding).collect::<Vec<_>>(),
+        parsed.header.encodings,
+        vec!["WinAllBasicCodePages".to_owned()]
+    );
+    let names: Vec<&str> = parsed
+        .header
+        .fonts
+        .iter()
+        .map(|font| font.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["Times New Roman", "Symbol", "Courier New", "MT Extra"]
+    );
+    assert_eq!(
+        parsed
+            .header
+            .fonts
+            .iter()
+            .map(|font| font.encoding)
+            .collect::<Vec<_>>(),
         vec![5, 3, 5, 4],
         "the fonts name the encodings the stream defines"
     );
@@ -45,13 +61,22 @@ fn reads_a_blank_equation_object() {
     assert_eq!(preferences.sizes.len(), 8);
     assert_eq!(preferences.spaces.len(), 30);
     assert_eq!(preferences.styles.len(), 12);
-    assert_eq!(preferences.sizes[0].value, "12", "the full size is twelve points");
-    assert_eq!(preferences.styles[2].style, 2, "the variable style is italic");
+    assert_eq!(
+        preferences.sizes[0].value, "12",
+        "the full size is twelve points"
+    );
+    assert_eq!(
+        preferences.styles[2].style, 2,
+        "the variable style is italic"
+    );
 
     // A blank equation carries no content, only its size.
     assert_eq!(parsed.math.body, Node::Row(Vec::new()));
     assert_eq!(parsed.math.style, MathStyle::Full);
-    assert_eq!(parsed.report.records, 8, "the object holds only definition records");
+    assert_eq!(
+        parsed.report.records, 8,
+        "the object holds only definition records"
+    );
     assert_eq!(parsed.report.skipped, 0);
 
     // The tree survives a write followed by a read.

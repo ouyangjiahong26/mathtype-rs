@@ -51,7 +51,11 @@ pub fn selected_equation(selection: &Object) -> Result<Option<Object>> {
     let paragraph = item(&paragraphs, 1)?;
     let range = paragraph.get_object("Range")?;
     let nearby = equations(&range)?;
-    if count(&nearby)? > 0 { Ok(Some(item(&nearby, 1)?)) } else { Ok(None) }
+    if count(&nearby)? > 0 {
+        Ok(Some(item(&nearby, 1)?))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Replaces an equation with plain text.
@@ -98,12 +102,16 @@ mod tests {
     #[test]
     fn an_inline_equation_is_taken_with_its_closing_tag() {
         let xml = "<w:body><w:p><m:oMath><m:r><m:t>a</m:t></m:r></m:oMath></w:p></w:body>";
-        assert_eq!(extract_math(xml), Some("<m:oMath><m:r><m:t>a</m:t></m:r></m:oMath>"));
+        assert_eq!(
+            extract_math(xml),
+            Some("<m:oMath><m:r><m:t>a</m:t></m:r></m:oMath>")
+        );
     }
 
     #[test]
     fn a_displayed_equation_is_taken_whole() {
-        let xml = "<w:p><m:oMathPara><m:oMath><m:r><m:t>a</m:t></m:r></m:oMath></m:oMathPara></w:p>";
+        let xml =
+            "<w:p><m:oMathPara><m:oMath><m:r><m:t>a</m:t></m:r></m:oMath></m:oMathPara></w:p>";
         assert_eq!(
             extract_math(xml),
             Some("<m:oMathPara><m:oMath><m:r><m:t>a</m:t></m:r></m:oMath></m:oMathPara>")
@@ -125,6 +133,9 @@ mod tests {
     #[test]
     fn an_equation_that_opens_with_attributes_is_found() {
         let xml = r#"<m:oMath xmlns:m="urn:x" m:foo="1">a</m:oMath>"#;
-        assert_eq!(extract_math(xml), Some(r#"<m:oMath xmlns:m="urn:x" m:foo="1">a</m:oMath>"#));
+        assert_eq!(
+            extract_math(xml),
+            Some(r#"<m:oMath xmlns:m="urn:x" m:foo="1">a</m:oMath>"#)
+        );
     }
 }

@@ -73,7 +73,9 @@ fn equation_stream<F>(compound: &CompoundFile<F>) -> Option<PathBuf> {
             path.file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| {
-                    STREAM_NAMES.iter().any(|candidate| name.eq_ignore_ascii_case(candidate))
+                    STREAM_NAMES
+                        .iter()
+                        .any(|candidate| name.eq_ignore_ascii_case(candidate))
                 })
         })
 }
@@ -95,6 +97,9 @@ mod tests {
         assert_eq!(read_from_ole(&ole).expect("readable"), Some(stream.clone()));
 
         let rewritten = write_into_ole(&ole, &[9, 9, 9]).expect("a rewritten file");
-        assert_eq!(read_from_ole(&rewritten).expect("readable"), Some(vec![9, 9, 9]));
+        assert_eq!(
+            read_from_ole(&rewritten).expect("readable"),
+            Some(vec![9, 9, 9])
+        );
     }
 }

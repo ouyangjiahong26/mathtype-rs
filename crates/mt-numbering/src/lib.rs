@@ -36,7 +36,7 @@
 mod tests;
 
 use mt_core::Math;
-use mt_docx::{DocxError, Document, Position};
+use mt_docx::{Document, DocxError, Position};
 
 /// The SEQ counter that numbers equations.
 const EQN_COUNTER: &str = "MTEqn";
@@ -169,12 +169,18 @@ pub enum ReferenceTarget {
 
 /// Escapes the characters that cannot appear in XML character data.
 fn escaped(text: &str) -> String {
-    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// A run of text, hidden when asked.
 fn text_run(text: &str, hidden: bool) -> String {
-    let properties = hidden.then(|| "<w:rPr><w:vanish/></w:rPr>".to_owned()).unwrap_or_default();
+    let properties = if hidden {
+        "<w:rPr><w:vanish/></w:rPr>".to_owned()
+    } else {
+        Default::default()
+    };
     format!(
         "<w:r>{properties}<w:t xml:space=\"preserve\">{}</w:t></w:r>",
         escaped(text)
@@ -188,7 +194,10 @@ fn tab_run() -> String {
 
 /// A run holding one piece of field instruction text.
 fn instr_run(instr: &str) -> String {
-    format!("<w:r><w:instrText xml:space=\"preserve\">{}</w:instrText></w:r>", escaped(instr))
+    format!(
+        "<w:r><w:instrText xml:space=\"preserve\">{}</w:instrText></w:r>",
+        escaped(instr)
+    )
 }
 
 /// A run holding one field character.
@@ -291,7 +300,7 @@ pub fn bookmark_runs(name: &str, id: i32, inner: &str) -> String {
 fn tabs_properties(side: Side) -> String {
     let tab = match side {
         Side::Right => format!("<w:tab w:val=\"right\" w:pos=\"{MARGIN_TAB}\"/>"),
-        Side::Left => format!("<w:tab w:val=\"left\" w:pos=\"0\"/>"),
+        Side::Left => "<w:tab w:val=\"left\" w:pos=\"0\"/>".to_string(),
     };
     format!("<w:tabs>{tab}</w:tabs>")
 }
@@ -309,7 +318,13 @@ pub fn tabs_paragraph_properties(side: Side) -> String {
 /// Equation, tab, and number as run-level markup, the number wrapped in its bookmark.
 ///
 /// `math_xml` is a whole `m:oMath` element, as `mt_omml::write` produces.
-pub fn numbered_inline(math_xml: &str, style: NumberStyle, side: Side, bookmark: &str, id: i32) -> String {
+pub fn numbered_inline(
+    math_xml: &str,
+    style: NumberStyle,
+    side: Side,
+    bookmark: &str,
+    id: i32,
+) -> String {
     let number = bookmark_runs(bookmark, id, &numbering_field_runs(style));
     match side {
         Side::Right => format!("{math_xml}{}{number}", tab_run()),
@@ -319,7 +334,13 @@ pub fn numbered_inline(math_xml: &str, style: NumberStyle, side: Side, bookmark:
 
 /// The paragraph of a numbered equation, tab stop included, ready to insert at
 /// [`Position::BodyEnd`].
-pub fn numbered_paragraph(math_xml: &str, style: NumberStyle, side: Side, bookmark: &str, id: i32) -> String {
+pub fn numbered_paragraph(
+    math_xml: &str,
+    style: NumberStyle,
+    side: Side,
+    bookmark: &str,
+    id: i32,
+) -> String {
     format!(
         "<w:p>{}{}</w:p>",
         tabs_paragraph_properties(side),
@@ -363,13 +384,19 @@ pub fn break_paragraph(kind: BreakKind, index: usize) -> String {
 pub fn break_paragraph_standalone(kind: BreakKind, index: usize) -> String {
     format!(
         "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{}</w:p>",
-        break_paragraph(kind, index).trim_start_matches("<w:p>").trim_end_matches("</w:p>")
+        break_paragraph(kind, index)
+            .trim_start_matches("<w:p>")
+            .trim_end_matches("</w:p>")
     )
 }
 
 /// A cross-reference field as runs: ` REF <bookmark> \h ` with the target's number cached.
 pub fn reference_runs(bookmark: &str, number: usize) -> String {
-    field_runs(&format!(" REF {bookmark} \\h "), &format!("({number})"), false)
+    field_runs(
+        &format!(" REF {bookmark} \\h "),
+        &format!("({number})"),
+        false,
+    )
 }
 
 // ------------------------------------------------------------------ scanning
@@ -388,13 +415,16 @@ fn is_numbering_instr(instr: &str) -> bool {
     if instr.contains(PLACE_MACRO) {
         return true;
     }
-    instr.contains("SEQ") && instr.contains(EQN_COUNTER) && !instr.contains("\\h") && !instr.contains("\\r")
+    instr.contains("SEQ")
+        && instr.contains(EQN_COUNTER)
+        && !instr.contains("\\h")
+        && !instr.contains("\\r")
 }
 
 /// Scans document XML for the numbering fields, in document order.
 fn scan_numbered(xml: &str) -> Vec<Found> {
-    use quick_xml::events::Event;
     use quick_xml::Reader;
+    use quick_xml::events::Event;
 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().check_end_names = false;
@@ -463,7 +493,10 @@ fn scan_numbered(xml: &str) -> Vec<Found> {
                         .map(|attribute| attribute.value.clone().into_owned())
                         .unwrap_or_default();
                     if is_numbering_instr(&instr) {
-                        found.push(Found { offset, bookmark: open.last().map(|(name, _)| name.clone()) });
+                        found.push(Found {
+                            offset,
+                            bookmark: open.last().map(|(name, _)| name.clone()),
+                        });
                     }
                 }
                 _ => {}
@@ -473,17 +506,21 @@ fn scan_numbered(xml: &str) -> Vec<Found> {
                     instr.push_str(&text.xml10_content());
                 }
             }
-            Event::End(end) => {
-                if end.local_name().as_ref() == "instrText" {
-                    if let Some(text) = instr.take() {
-                        if text.contains(PLACE_MACRO) {
-                            if let Some(current) = fields.last_mut() {
-                                *current = true;
-                            }
-                            found.push(Found { offset, bookmark: open.last().map(|(name, _)| name.clone()) });
-                        } else if is_numbering_instr(&text) && !fields.iter().any(|place| *place) {
-                            found.push(Found { offset, bookmark: open.last().map(|(name, _)| name.clone()) });
+            Event::End(end) if end.local_name().as_ref() == "instrText" => {
+                if let Some(text) = instr.take() {
+                    if text.contains(PLACE_MACRO) {
+                        if let Some(current) = fields.last_mut() {
+                            *current = true;
                         }
+                        found.push(Found {
+                            offset,
+                            bookmark: open.last().map(|(name, _)| name.clone()),
+                        });
+                    } else if is_numbering_instr(&text) && !fields.iter().any(|place| *place) {
+                        found.push(Found {
+                            offset,
+                            bookmark: open.last().map(|(name, _)| name.clone()),
+                        });
                     }
                 }
             }
@@ -532,8 +569,8 @@ pub fn unique_bookmark(document: &Document) -> (String, i32) {
 
 /// The same against raw document XML, for hosts that hand the markup over as a string.
 pub fn unique_bookmark_in_xml(xml: &str) -> (String, i32) {
-    use quick_xml::events::Event;
     use quick_xml::Reader;
+    use quick_xml::events::Event;
 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().check_end_names = false;
@@ -577,7 +614,8 @@ fn break_count(xml: &str, kind: BreakKind) -> usize {
 
 /// The same against raw document XML, for hosts that hand the markup over as a string.
 pub fn break_count_in_xml(xml: &str, kind: BreakKind) -> usize {
-    xml.matches(&format!(" SEQ {} \\r ", kind.counter())).count()
+    xml.matches(&format!(" SEQ {} \\r ", kind.counter()))
+        .count()
 }
 
 /// The numbered equations of raw document XML: each with its document-order number and the
@@ -600,12 +638,20 @@ fn has_tabs(paragraph: &str) -> bool {
 
 /// The settings marker's text: `MTNumberStyle=<style>;MTNumberSide=<side>`.
 fn settings_text(style: NumberStyle, side: Side) -> String {
-    format!("MTNumberStyle={};MTNumberSide={}", style.as_str(), side.as_str())
+    format!(
+        "MTNumberStyle={};MTNumberSide={}",
+        style.as_str(),
+        side.as_str()
+    )
 }
 
 /// The settings marker as run-level markup, hidden inside its bookmark.
 fn settings_runs(style: NumberStyle, side: Side, id: i32) -> String {
-    bookmark_runs(SETTINGS_BOOKMARK, id, &text_run(&settings_text(style, side), true))
+    bookmark_runs(
+        SETTINGS_BOOKMARK,
+        id,
+        &text_run(&settings_text(style, side), true),
+    )
 }
 
 /// The style and side a document's settings marker records; plain on the right when absent.
@@ -619,19 +665,30 @@ pub fn read_settings(document: &Document) -> (NumberStyle, Side) {
 
 /// The same against raw document XML, for hosts that hand the markup over as a string.
 pub fn parse_settings(xml: &str) -> (NumberStyle, Side) {
-    let Some(start) = xml.find("MTNumberStyle=") else { return (NumberStyle::Plain, Side::Right) };
+    let Some(start) = xml.find("MTNumberStyle=") else {
+        return (NumberStyle::Plain, Side::Right);
+    };
     let value = xml[start..].split(['<', ';']).next().unwrap_or_default();
-    let style = value.strip_prefix("MTNumberStyle=").and_then(NumberStyle::parse);
+    let style = value
+        .strip_prefix("MTNumberStyle=")
+        .and_then(NumberStyle::parse);
     let side = xml[start..]
         .find("MTNumberSide=")
         .and_then(|side_at| xml[start + side_at..].split(['<', ';']).next())
         .and_then(|text| text.strip_prefix("MTNumberSide="))
         .and_then(Side::parse);
-    (style.unwrap_or(NumberStyle::Plain), side.unwrap_or(Side::Right))
+    (
+        style.unwrap_or(NumberStyle::Plain),
+        side.unwrap_or(Side::Right),
+    )
 }
 
 /// Writes the settings marker, replacing an existing one.
-pub fn write_settings(document: &mut Document, style: NumberStyle, side: Side) -> Result<(), DocxError> {
+pub fn write_settings(
+    document: &mut Document,
+    style: NumberStyle,
+    side: Side,
+) -> Result<(), DocxError> {
     let marker = settings_runs(style, side, 0);
     let xml = document.document_xml().to_owned();
     // An existing marker spans its bookmarkStart to its bookmarkEnd; find both by name.
@@ -643,7 +700,10 @@ pub fn write_settings(document: &mut Document, style: NumberStyle, side: Side) -
             .unwrap_or_else(|| "0".to_owned());
         let end_marker = format!("w:bookmarkEnd w:id=\"{id}\"");
         if let Some(end_tag) = xml.find(&end_marker) {
-            let end = xml[end_tag..].find('/').map(|slash| end_tag + slash + 2).unwrap_or(xml.len());
+            let end = xml[end_tag..]
+                .find('/')
+                .map(|slash| end_tag + slash + 2)
+                .unwrap_or(xml.len());
             let replacement = settings_runs(style, side, id.parse().unwrap_or(0));
             return document.splice_range(start..end, &replacement);
         }
@@ -664,7 +724,6 @@ pub fn write_settings(document: &mut Document, style: NumberStyle, side: Side) -
     }
     document.insert_fragment(Position::BodyEnd, &format!("<w:p>{marker}</w:p>"))
 }
-
 
 // ------------------------------------------------------------------ high level
 
@@ -713,16 +772,22 @@ pub fn insert_numbered(
 pub fn ensure_tab_stop(document: &mut Document, block: usize, side: Side) -> Result<(), DocxError> {
     let paragraph = document.paragraphs().find(|(index, _)| *index == block);
     let Some((_, paragraph)) = paragraph else {
-        return Err(DocxError::Xml(format!("the document has no paragraph block {block}")));
+        return Err(DocxError::Xml(format!(
+            "the document has no paragraph block {block}"
+        )));
     };
     if has_tabs(&document.document_xml()[paragraph.range.clone()]) {
         return Ok(());
     }
     match paragraph.properties_open_end {
-        Some(_) => document.insert_fragment(Position::ParagraphPropertiesStart { block }, &tabs_runs(side)),
-        None => {
-            document.insert_fragment(Position::ParagraphPropertiesStart { block }, &tabs_paragraph_properties(side))
-        }
+        Some(_) => document.insert_fragment(
+            Position::ParagraphPropertiesStart { block },
+            &tabs_runs(side),
+        ),
+        None => document.insert_fragment(
+            Position::ParagraphPropertiesStart { block },
+            &tabs_paragraph_properties(side),
+        ),
     }
 }
 
@@ -783,7 +848,9 @@ pub fn insert_reference(
         ReferenceTarget::Number(number) => numbered.iter().find(|found| found.number == number),
     };
     let Some(target) = target else {
-        return Err(DocxError::Xml("the document has no numbered equation to reference".to_owned()));
+        return Err(DocxError::Xml(
+            "the document has no numbered equation to reference".to_owned(),
+        ));
     };
     let fragment = reference_runs(&target.bookmark, target.number);
     let fragment = match position {

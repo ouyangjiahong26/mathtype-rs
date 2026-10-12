@@ -87,7 +87,9 @@ pub mod dispid {
 
     /// The member id of the ribbon or connection member `name`, if it is one.
     pub fn fixed(name: &str) -> Option<i32> {
-        let (name, dispid) = FIXED.iter().find(|(member, _)| name.eq_ignore_ascii_case(member))?;
+        let (name, dispid) = FIXED
+            .iter()
+            .find(|(member, _)| name.eq_ignore_ascii_case(member))?;
         let _ = name;
         Some(*dispid)
     }
@@ -135,7 +137,9 @@ mod tests {
     #[test]
     fn the_tab_is_labelled_in_chinese() {
         assert!(CUSTOM_UI.contains("label=\"公式\""));
-        assert!(CUSTOM_UI.contains(r#"xmlns="http://schemas.microsoft.com/office/2006/01/customui""#));
+        assert!(
+            CUSTOM_UI.contains(r#"xmlns="http://schemas.microsoft.com/office/2006/01/customui""#)
+        );
     }
 
     #[test]
@@ -151,7 +155,11 @@ mod tests {
                 continue;
             }
             if let Some(name) = tag.strip_prefix('/') {
-                assert_eq!(stack.pop(), Some(name), "a closing tag matches the last opening one");
+                assert_eq!(
+                    stack.pop(),
+                    Some(name),
+                    "a closing tag matches the last opening one"
+                );
             } else if !tag.ends_with('/') {
                 stack.push(tag.split_whitespace().next().expect("a tag has a name"));
             }

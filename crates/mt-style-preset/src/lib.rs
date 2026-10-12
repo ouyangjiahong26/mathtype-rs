@@ -55,7 +55,12 @@ pub struct PresetSizes {
 
 impl Default for PresetSizes {
     fn default() -> Self {
-        Self { full: 12.0, text: 12.0, script: 7.0, script_script: 5.0 }
+        Self {
+            full: 12.0,
+            text: 12.0,
+            script: 7.0,
+            script_script: 5.0,
+        }
     }
 }
 
@@ -113,14 +118,20 @@ impl StylePreset {
         out.push_str("[meta]\n");
         out.push_str(&format!("name = {}\n\n", self.name));
         out.push_str("[sizes]\n");
-        for (key, value) in
-            [("full", self.sizes.full), ("text", self.sizes.text), ("script", self.sizes.script), ("script-script", self.sizes.script_script)]
-        {
+        for (key, value) in [
+            ("full", self.sizes.full),
+            ("text", self.sizes.text),
+            ("script", self.sizes.script),
+            ("script-script", self.sizes.script_script),
+        ] {
             out.push_str(&format!("{key} = {}\n", number(value)));
         }
         out.push_str("\n[spaces]\n");
         for key in Spacing::KEYS {
-            out.push_str(&format!("{key} = {}\n", number(self.spaces.get(key).unwrap_or(0.0))));
+            out.push_str(&format!(
+                "{key} = {}\n",
+                number(self.spaces.get(key).unwrap_or(0.0))
+            ));
         }
         out.push_str("\n[styles]\n");
         for (key, font) in style_slots(&self.styles) {
@@ -232,7 +243,10 @@ impl fmt::Display for PresetError {
 impl std::error::Error for PresetError {}
 
 fn error(line: usize, message: impl Into<String>) -> PresetError {
-    PresetError { line, message: message.into() }
+    PresetError {
+        line,
+        message: message.into(),
+    }
 }
 
 // ----------------------------------------------------------------------------- parse
@@ -292,10 +306,18 @@ pub fn parse(text: &str) -> Result<StylePreset, PresetError> {
                 error(line, format!("a section header must end in ']': {trimmed}"))
             })?;
             let parsed = Section::from_header(name).ok_or_else(|| {
-                error(line, format!("unknown section [{name}] (expected meta, sizes, spaces, styles or layout)"))
+                error(
+                    line,
+                    format!(
+                        "unknown section [{name}] (expected meta, sizes, spaces, styles or layout)"
+                    ),
+                )
             })?;
             if seen_sections.contains(&parsed) {
-                return Err(error(line, format!("section [{}] appears twice", parsed.name())));
+                return Err(error(
+                    line,
+                    format!("section [{}] appears twice", parsed.name()),
+                ));
             }
             seen_sections.push(parsed);
             section = Some(parsed);
@@ -304,9 +326,12 @@ pub fn parse(text: &str) -> Result<StylePreset, PresetError> {
         let Some(section) = section else {
             return Err(error(line, format!("a key before any section: {trimmed}")));
         };
-        let (key, value) = trimmed
-            .split_once('=')
-            .ok_or_else(|| error(line, format!("expected 'key = value', found no '=': {trimmed}")))?;
+        let (key, value) = trimmed.split_once('=').ok_or_else(|| {
+            error(
+                line,
+                format!("expected 'key = value', found no '=': {trimmed}"),
+            )
+        })?;
         let (key, value) = (key.trim(), value.trim());
         if key.is_empty() {
             return Err(error(line, "the key before '=' is empty"));
@@ -315,7 +340,10 @@ pub fn parse(text: &str) -> Result<StylePreset, PresetError> {
             return Err(error(line, format!("the value of '{key}' is empty")));
         }
         if seen.contains(&(section, key.to_owned())) {
-            return Err(error(line, format!("duplicate key '{key}' in section [{}]", section.name())));
+            return Err(error(
+                line,
+                format!("duplicate key '{key}' in section [{}]", section.name()),
+            ));
         }
         seen.push((section, key.to_owned()));
         match section {
@@ -323,7 +351,10 @@ pub fn parse(text: &str) -> Result<StylePreset, PresetError> {
                 if key == "name" {
                     preset.name = value.to_owned();
                 } else {
-                    return Err(error(line, format!("unknown key '{key}' in section [meta] (only name)")));
+                    return Err(error(
+                        line,
+                        format!("unknown key '{key}' in section [meta] (only name)"),
+                    ));
                 }
             }
             Section::Sizes => {
@@ -336,25 +367,33 @@ pub fn parse(text: &str) -> Result<StylePreset, PresetError> {
                     _ => {
                         return Err(error(
                             line,
-                            format!("unknown key '{key}' in section [sizes] (full, text, script, script-script)"),
-                        ))
+                            format!(
+                                "unknown key '{key}' in section [sizes] (full, text, script, script-script)"
+                            ),
+                        ));
                     }
                 }
             }
             Section::Spaces => {
                 let value = non_negative(line, key, value)?;
                 if !preset.spaces.set(key, value) {
-                    return Err(error(line, format!("unknown spacing '{key}' in section [spaces]")));
+                    return Err(error(
+                        line,
+                        format!("unknown spacing '{key}' in section [spaces]"),
+                    ));
                 }
             }
             Section::Styles => {
-                let font = font_of_name(value)
-                    .ok_or_else(|| error(line, format!("unknown font '{value}' for style '{key}'")))?;
+                let font = font_of_name(value).ok_or_else(|| {
+                    error(line, format!("unknown font '{value}' for style '{key}'"))
+                })?;
                 let slots = style_slots(&preset.styles);
                 if !slots.iter().any(|(slot, _)| *slot == key) {
                     return Err(error(
                         line,
-                        format!("unknown style '{key}' in section [styles] (text, function, variable, greek, symbol, vector, number)"),
+                        format!(
+                            "unknown style '{key}' in section [styles] (text, function, variable, greek, symbol, vector, number)"
+                        ),
                     ));
                 }
                 let target = &mut preset.styles;
@@ -371,10 +410,16 @@ pub fn parse(text: &str) -> Result<StylePreset, PresetError> {
             Section::Layout => {
                 if key == "alignment" {
                     preset.alignment = side_of_name(value).ok_or_else(|| {
-                        error(line, format!("alignment must be left, center or right, not '{value}'"))
+                        error(
+                            line,
+                            format!("alignment must be left, center or right, not '{value}'"),
+                        )
                     })?;
                 } else {
-                    return Err(error(line, format!("unknown key '{key}' in section [layout] (only alignment)")));
+                    return Err(error(
+                        line,
+                        format!("unknown key '{key}' in section [layout] (only alignment)"),
+                    ));
                 }
             }
         }
@@ -384,9 +429,12 @@ pub fn parse(text: &str) -> Result<StylePreset, PresetError> {
 
 /// A strictly positive finite number.
 fn positive(line: usize, key: &str, value: &str) -> Result<f64, PresetError> {
-    let parsed = value
-        .parse::<f64>()
-        .map_err(|_| error(line, format!("'{key}' needs a number of points, found '{value}'")))?;
+    let parsed = value.parse::<f64>().map_err(|_| {
+        error(
+            line,
+            format!("'{key}' needs a number of points, found '{value}'"),
+        )
+    })?;
     if parsed.is_finite() && parsed > 0.0 {
         Ok(parsed)
     } else {
@@ -396,9 +444,12 @@ fn positive(line: usize, key: &str, value: &str) -> Result<f64, PresetError> {
 
 /// A finite number that is at least zero.
 fn non_negative(line: usize, key: &str, value: &str) -> Result<f64, PresetError> {
-    let parsed = value
-        .parse::<f64>()
-        .map_err(|_| error(line, format!("'{key}' needs a number of em, found '{value}'")))?;
+    let parsed = value.parse::<f64>().map_err(|_| {
+        error(
+            line,
+            format!("'{key}' needs a number of em, found '{value}'"),
+        )
+    })?;
     if parsed.is_finite() && parsed >= 0.0 {
         Ok(parsed)
     } else {
@@ -415,14 +466,30 @@ struct Builtin {
 }
 
 const BUILTINS: [Builtin; 4] = [
-    Builtin { id: "default", text: include_str!("../presets/default.ini") },
-    Builtin { id: "classic", text: include_str!("../presets/classic.ini") },
-    Builtin { id: "compact", text: include_str!("../presets/compact.ini") },
-    Builtin { id: "large-print", text: include_str!("../presets/large-print.ini") },
+    Builtin {
+        id: "default",
+        text: include_str!("../presets/default.ini"),
+    },
+    Builtin {
+        id: "classic",
+        text: include_str!("../presets/classic.ini"),
+    },
+    Builtin {
+        id: "compact",
+        text: include_str!("../presets/compact.ini"),
+    },
+    Builtin {
+        id: "large-print",
+        text: include_str!("../presets/large-print.ini"),
+    },
 ];
 
-static PARSED_BUILTINS: LazyLock<Vec<StylePreset>> =
-    LazyLock::new(|| BUILTINS.iter().map(|builtin| parse(builtin.text).expect("builtin presets parse")).collect());
+static PARSED_BUILTINS: LazyLock<Vec<StylePreset>> = LazyLock::new(|| {
+    BUILTINS
+        .iter()
+        .map(|builtin| parse(builtin.text).expect("builtin presets parse"))
+        .collect()
+});
 
 /// The built-in presets in menu order: 默认, 经典 MathType, 紧凑, 大字号.
 pub fn builtins() -> &'static [StylePreset] {
@@ -448,7 +515,11 @@ mod tests {
         for preset in builtins() {
             let text = preset.to_text();
             let back = parse(&text).unwrap_or_else(|error| panic!("{}: {error}", preset.name));
-            assert_eq!(&back, preset, "{} must survive its own text form", preset.name);
+            assert_eq!(
+                &back, preset,
+                "{} must survive its own text form",
+                preset.name
+            );
         }
     }
 

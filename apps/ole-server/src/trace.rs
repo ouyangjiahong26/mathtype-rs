@@ -40,7 +40,10 @@ pub fn tail(max_lines: usize) -> String {
 fn append(line: &str) -> std::io::Result<()> {
     let directory = directory();
     std::fs::create_dir_all(&directory)?;
-    let mut file = OpenOptions::new().create(true).append(true).open(directory.join("server.log"))?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(directory.join("server.log"))?;
     writeln!(file, "{line}")
 }
 
@@ -48,7 +51,13 @@ fn timestamp() -> String {
     let time: SYSTEMTIME = unsafe { GetLocalTime() };
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
-        time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond, time.wMilliseconds
+        time.wYear,
+        time.wMonth,
+        time.wDay,
+        time.wHour,
+        time.wMinute,
+        time.wSecond,
+        time.wMilliseconds
     )
 }
 

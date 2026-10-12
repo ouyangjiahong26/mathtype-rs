@@ -4,7 +4,7 @@ use std::ffi::c_void;
 use std::mem::ManuallyDrop;
 
 use windows::Win32::System::Ole::{SafeArrayCreateVector, SafeArrayPutElement};
-use windows::Win32::System::Variant::{VARIANT, VARENUM, VT_ARRAY, VT_BSTR, VT_R8};
+use windows::Win32::System::Variant::{VARENUM, VARIANT, VT_ARRAY, VT_BSTR, VT_R8};
 
 /// An empty value, which is what a call that only has a side effect returns.
 pub fn empty() -> VARIANT {
@@ -31,7 +31,8 @@ pub fn numbers(values: &[f64]) -> VARIANT {
         }
         for (index, value) in values.iter().enumerate() {
             let at = index as i32;
-            if SafeArrayPutElement(array, &at, std::ptr::addr_of!(*value).cast::<c_void>()).is_err() {
+            if SafeArrayPutElement(array, &at, std::ptr::addr_of!(*value).cast::<c_void>()).is_err()
+            {
                 return empty();
             }
         }
@@ -62,7 +63,10 @@ pub fn as_text(value: *const VARIANT) -> Option<String> {
 ///
 /// `DISPPARAMS` stores arguments right to left, which is the one surprising thing about it. A
 /// null pointer means the caller did not pass that argument.
-pub fn argument(params: *const windows::Win32::System::Com::DISPPARAMS, index: usize) -> *const VARIANT {
+pub fn argument(
+    params: *const windows::Win32::System::Com::DISPPARAMS,
+    index: usize,
+) -> *const VARIANT {
     if params.is_null() {
         return std::ptr::null();
     }
@@ -77,7 +81,7 @@ pub fn argument(params: *const windows::Win32::System::Com::DISPPARAMS, index: u
 
 #[cfg(test)]
 mod tests {
-    use super::{as_text, argument, numbers, text};
+    use super::{argument, as_text, numbers, text};
     use windows::Win32::System::Com::DISPPARAMS;
     use windows::Win32::System::Ole::SafeArrayGetElement;
     use windows::Win32::System::Variant::{VT_BSTR, VariantClear};

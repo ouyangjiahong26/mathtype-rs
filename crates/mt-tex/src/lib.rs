@@ -15,7 +15,7 @@ mod symbols;
 #[cfg(test)]
 mod tests;
 
-pub use parse::{parse, ParseError};
+pub use parse::{ParseError, parse};
 
 use mt_core::{Math, MathStyle, Node};
 

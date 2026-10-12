@@ -17,7 +17,7 @@
 pub mod palette;
 
 use mt_core::{
-    Accent, AccentKind, BigOp, Char, Class, Delim, Font, Frac, FracKind, Fence, Math, MathStyle,
+    Accent, AccentKind, BigOp, Char, Class, Delim, Fence, Font, Frac, FracKind, Math, MathStyle,
     Matrix, MatrixKind, Node, Path, Row, Scripts, Side, Space, Sqrt, Styled, TextRun,
 };
 
@@ -38,17 +38,26 @@ pub struct Cursor {
 impl Cursor {
     /// Caret at the start of the equation body.
     pub fn start() -> Self {
-        Self { path: Path::root(), index: 0 }
+        Self {
+            path: Path::root(),
+            index: 0,
+        }
     }
 
     /// Caret inside the slot `slot` of the node at `path`, at the start of that slot's row.
     pub fn in_slot(path: &Path, slot: usize) -> Self {
-        Self { path: path.child(slot), index: 0 }
+        Self {
+            path: path.child(slot),
+            index: 0,
+        }
     }
 
     /// Caret in the current row, moved to `index`.
     pub fn at(&self, index: usize) -> Self {
-        Self { path: self.path.clone(), index }
+        Self {
+            path: self.path.clone(),
+            index,
+        }
     }
 }
 
@@ -108,15 +117,27 @@ impl Template {
     pub fn build(self) -> (Node, Vec<usize>) {
         match self {
             Template::Fraction => (
-                Node::Frac(Box::new(Frac { num: Node::empty(), den: Node::empty(), kind: FracKind::Bar })),
+                Node::Frac(Box::new(Frac {
+                    num: Node::empty(),
+                    den: Node::empty(),
+                    kind: FracKind::Bar,
+                })),
                 vec![0],
             ),
             Template::SlashFraction => (
-                Node::Frac(Box::new(Frac { num: Node::empty(), den: Node::empty(), kind: FracKind::Slash })),
+                Node::Frac(Box::new(Frac {
+                    num: Node::empty(),
+                    den: Node::empty(),
+                    kind: FracKind::Slash,
+                })),
                 vec![0],
             ),
             Template::Binomial => (
-                Node::Frac(Box::new(Frac { num: Node::empty(), den: Node::empty(), kind: FracKind::NoBar })),
+                Node::Frac(Box::new(Frac {
+                    num: Node::empty(),
+                    den: Node::empty(),
+                    kind: FracKind::NoBar,
+                })),
                 vec![0],
             ),
             Template::SquareRoot => (Node::Sqrt(Box::new(Sqrt::square(Node::empty()))), vec![0]),
@@ -125,11 +146,19 @@ impl Template {
                 vec![1],
             ),
             Template::Superscript => (
-                Node::Scripts(Box::new(Scripts { base: Node::empty(), sub: None, sup: Some(Node::empty()) })),
+                Node::Scripts(Box::new(Scripts {
+                    base: Node::empty(),
+                    sub: None,
+                    sup: Some(Node::empty()),
+                })),
                 vec![2],
             ),
             Template::Subscript => (
-                Node::Scripts(Box::new(Scripts { base: Node::empty(), sub: Some(Node::empty()), sup: None })),
+                Node::Scripts(Box::new(Scripts {
+                    base: Node::empty(),
+                    sub: Some(Node::empty()),
+                    sup: None,
+                })),
                 vec![1],
             ),
             Template::SubSuperscript => (
@@ -172,7 +201,12 @@ impl Template {
             Template::OverArrow => (accent(AccentKind::ArrowRight, false), vec![0]),
             Template::UnderArrow => (accent(AccentKind::ArrowRight, true), vec![0]),
             Template::Fence(open, close) => (fence(open, close), vec![0]),
-            Template::Matrix { rows, cols, kind, delims } => (
+            Template::Matrix {
+                rows,
+                cols,
+                kind,
+                delims,
+            } => (
                 Node::Matrix(Box::new(Matrix {
                     rows: vec![vec![Node::empty(); cols.max(1)]; rows.max(1)],
                     delims,
@@ -186,8 +220,15 @@ impl Template {
             Template::Accent(kind) => (accent(kind, false), vec![0]),
             Template::Function(name) => (
                 Node::row([
-                    Node::Text(Box::new(TextRun { text: name.to_owned(), font: Font::Upright })),
-                    Node::Fence(Box::new(Fence { open: Delim::None, close: Delim::None, body: Node::empty() })),
+                    Node::Text(Box::new(TextRun {
+                        text: name.to_owned(),
+                        font: Font::Upright,
+                    })),
+                    Node::Fence(Box::new(Fence {
+                        open: Delim::None,
+                        close: Delim::None,
+                        body: Node::empty(),
+                    })),
                 ]),
                 vec![1, 0],
             ),
@@ -250,11 +291,19 @@ fn big_op(op: char, limits: bool) -> Node {
 }
 
 fn accent(kind: AccentKind, under: bool) -> Node {
-    Node::Accent(Box::new(Accent { kind, base: Node::empty(), under }))
+    Node::Accent(Box::new(Accent {
+        kind,
+        base: Node::empty(),
+        under,
+    }))
 }
 
 fn fence(open: Delim, close: Delim) -> Node {
-    Node::Fence(Box::new(Fence { open, close, body: Node::empty() }))
+    Node::Fence(Box::new(Fence {
+        open,
+        close,
+        body: Node::empty(),
+    }))
 }
 
 fn default_alignment(kind: MatrixKind) -> Side {
@@ -311,7 +360,10 @@ impl Editor {
             math.body = Node::row([math.body]);
         }
         math.body.normalize();
-        Self { math, ..Self::new() }
+        Self {
+            math,
+            ..Self::new()
+        }
     }
 
     pub fn math(&self) -> &Math {
@@ -350,7 +402,10 @@ impl Editor {
         if anchor.path != self.cursor.path {
             return None;
         }
-        let (start, end) = (anchor.index.min(self.cursor.index), anchor.index.max(self.cursor.index));
+        let (start, end) = (
+            anchor.index.min(self.cursor.index),
+            anchor.index.max(self.cursor.index),
+        );
         (start != end).then_some((start, end))
     }
 
@@ -403,7 +458,10 @@ impl Editor {
 
     /// Insert literal upright text, e.g. a function name.
     pub fn insert_text(&mut self, text: &str) {
-        let node = Node::Text(Box::new(TextRun { text: text.to_owned(), font: Font::Upright }));
+        let node = Node::Text(Box::new(TextRun {
+            text: text.to_owned(),
+            font: Font::Upright,
+        }));
         self.insert_node(node);
     }
 
@@ -456,7 +514,10 @@ impl Editor {
                     }
                 }
             }
-            self.cursor = Cursor { path: target, index: 0 };
+            self.cursor = Cursor {
+                path: target,
+                index: 0,
+            };
             self.anchor = None;
         }
     }
@@ -546,7 +607,9 @@ impl Editor {
         // own slot interface keeps this in step with any template added to `mt-core` later; the
         // owner cannot be a plain row, which is not a template and is left in place.
         let removable = self.math.node_at(&owner_path).is_some_and(|owner| {
-            !owner.is_row() && !owner.slots().is_empty() && owner.slots().iter().all(|slot| slot.is_empty_slot())
+            !owner.is_row()
+                && !owner.slots().is_empty()
+                && owner.slots().iter().all(|slot| slot.is_empty_slot())
         });
         if !removable {
             return false;
@@ -555,7 +618,10 @@ impl Editor {
         if let Some(Node::Row(row)) = self.math.node_at_mut(&row_path) {
             if owner_index < row.len() {
                 row.remove(owner_index);
-                self.cursor = Cursor { path: row_path, index: owner_index };
+                self.cursor = Cursor {
+                    path: row_path,
+                    index: owner_index,
+                };
                 self.anchor = None;
                 return true;
             }
@@ -571,7 +637,10 @@ impl Editor {
         self.anchor = None;
         if self.cursor.index > 0 {
             let previous = self.cursor.index - 1;
-            if self.node_at_index(previous).is_some_and(|node| node.slot_count() > 0) {
+            if self
+                .node_at_index(previous)
+                .is_some_and(|node| node.slot_count() > 0)
+            {
                 let path = self.deepest_last_slot(&self.cursor.path.child(previous));
                 // The deepest slot may end on a template node itself, not a row we can enter.
                 if self.math.node_at(&path).is_some_and(Node::is_row) {
@@ -587,7 +656,10 @@ impl Editor {
             return;
         }
         if let Some((parent_path, slot)) = self.cursor.path.split_last() {
-            self.cursor = Cursor { path: parent_path, index: slot };
+            self.cursor = Cursor {
+                path: parent_path,
+                index: slot,
+            };
         }
     }
 
@@ -597,7 +669,10 @@ impl Editor {
         let len = self.row().map_or(0, Row::len);
         if self.cursor.index < len {
             let next = self.cursor.index;
-            if self.node_at_index(next).is_some_and(|node| node.slot_count() > 0) {
+            if self
+                .node_at_index(next)
+                .is_some_and(|node| node.slot_count() > 0)
+            {
                 let path = self.deepest_first_slot(&self.cursor.path.child(next));
                 // The deepest slot may end on a template node itself, not a row we can enter.
                 if self.math.node_at(&path).is_some_and(Node::is_row) {
@@ -611,7 +686,10 @@ impl Editor {
             return;
         }
         if let Some((parent_path, slot)) = self.cursor.path.split_last() {
-            self.cursor = Cursor { path: parent_path, index: slot + 1 };
+            self.cursor = Cursor {
+                path: parent_path,
+                index: slot + 1,
+            };
         }
     }
 
@@ -632,7 +710,9 @@ impl Editor {
     fn deepest_last_slot(&self, path: &Path) -> Path {
         let mut current = path.clone();
         while let Some(node) = self.math.node_at(&current) {
-            let Some(last) = node.slot_count().checked_sub(1) else { break };
+            let Some(last) = node.slot_count().checked_sub(1) else {
+                break;
+            };
             match node.slot(last) {
                 Some(Node::Row(_)) => current = current.child(last),
                 _ => break,
@@ -676,7 +756,10 @@ impl Editor {
             return;
         }
         let index = self.cursor.index.min(self.row_len(&target_path));
-        self.cursor = Cursor { path: target_path, index };
+        self.cursor = Cursor {
+            path: target_path,
+            index,
+        };
     }
 
     fn row_len(&self, path: &Path) -> usize {
@@ -700,7 +783,10 @@ impl Editor {
             Some(position) => (position + rows.len() - 1) % rows.len(),
             None => 0,
         };
-        self.cursor = Cursor { path: rows[next].clone(), index: 0 };
+        self.cursor = Cursor {
+            path: rows[next].clone(),
+            index: 0,
+        };
     }
 
     // ---- styling -----------------------------------------------------------------------
@@ -834,19 +920,31 @@ fn collect_rows(math: &Math, path: &Path, rows: &mut Vec<Path>) {
 
 fn restyle(node: &mut Node, font: Option<Font>, style: Option<MathStyle>) {
     match node {
-        Node::Char(Char { font: node_font, .. }) => {
+        Node::Char(Char {
+            font: node_font, ..
+        }) => {
             if let Some(font) = font {
                 *node_font = font;
             }
             if let Some(style) = style {
                 let body = std::mem::replace(node, Node::empty());
-                *node = Node::Styled(Box::new(Styled { body, style: Some(style), font, class: None }));
+                *node = Node::Styled(Box::new(Styled {
+                    body,
+                    style: Some(style),
+                    font,
+                    class: None,
+                }));
             }
         }
         other => {
             if font.is_some() || style.is_some() {
                 let body = std::mem::replace(other, Node::empty());
-                *other = Node::Styled(Box::new(Styled { body, style, font, class: None }));
+                *other = Node::Styled(Box::new(Styled {
+                    body,
+                    style,
+                    font,
+                    class: None,
+                }));
             }
         }
     }
@@ -858,10 +956,11 @@ pub fn classify(ch: char, current_font: Font) -> Option<Node> {
         return Some(Node::Space(Space::Medium));
     }
     let class = match ch {
-        '+' | '-' | '\u{2212}' | '\u{00B1}' | '\u{2213}' | '*' | '\u{00D7}' | '\u{00F7}' | '\u{22C5}' | '\u{2217}'
-        | '\u{2229}' | '\u{222A}' => Class::Bin,
-        '=' | '<' | '>' | '\u{2264}' | '\u{2265}' | '\u{2260}' | '\u{2248}' | '\u{2261}' | '\u{223C}' | '\u{221D}'
-        | '\u{2282}' | '\u{2283}' | '\u{2286}' | '\u{2287}' | '\u{2208}' | '\u{2209}' => Class::Rel,
+        '+' | '-' | '\u{2212}' | '\u{00B1}' | '\u{2213}' | '*' | '\u{00D7}' | '\u{00F7}'
+        | '\u{22C5}' | '\u{2217}' | '\u{2229}' | '\u{222A}' => Class::Bin,
+        '=' | '<' | '>' | '\u{2264}' | '\u{2265}' | '\u{2260}' | '\u{2248}' | '\u{2261}'
+        | '\u{223C}' | '\u{221D}' | '\u{2282}' | '\u{2283}' | '\u{2286}' | '\u{2287}'
+        | '\u{2208}' | '\u{2209}' => Class::Rel,
         '(' | '[' | '{' | '\u{2308}' | '\u{230A}' | '\u{27E8}' => Class::Open,
         ')' | ']' | '}' | '\u{2309}' | '\u{230B}' | '\u{27E9}' => Class::Close,
         ',' | ';' | ':' => Class::Punct,
@@ -901,7 +1000,9 @@ mod tests {
             assert!(editor.insert_char(ch));
         }
         assert_eq!(flat(&editor), ["a", "+", "b", "=", "1"]);
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
         assert_eq!(row[1], Node::symbol('+', Class::Bin));
         assert_eq!(row[0], Node::variable('a'));
         assert_eq!(row[3], Node::symbol('=', Class::Rel));
@@ -912,7 +1013,9 @@ mod tests {
         let mut editor = Editor::new();
         editor.insert_char('a');
         editor.insert_char(' ');
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
         assert_eq!(row[1], Node::Space(Space::Medium));
     }
 
@@ -925,9 +1028,13 @@ mod tests {
         editor.move_vertical(false);
         assert_eq!(editor.cursor().path.to_string(), "0.1");
         editor.insert_char('y');
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
         assert_eq!(row.len(), 1);
-        let Node::Frac(frac) = &row[0] else { panic!("expected a fraction, got {:?}", row[0]) };
+        let Node::Frac(frac) = &row[0] else {
+            panic!("expected a fraction, got {:?}", row[0])
+        };
         assert_eq!(frac.num, Node::row([Node::variable('x')]));
         assert_eq!(frac.den, Node::row([Node::variable('y')]));
     }
@@ -941,10 +1048,17 @@ mod tests {
         editor.move_vertical(true);
         assert_eq!(editor.cursor().path.to_string(), "0.0");
         editor.insert_char('3');
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
-        let Node::Sqrt(sqrt) = &row[0] else { panic!("expected a radical") };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
+        let Node::Sqrt(sqrt) = &row[0] else {
+            panic!("expected a radical")
+        };
         assert_eq!(sqrt.radicand, Node::row([Node::variable('x')]));
-        assert_eq!(sqrt.index.as_ref(), Some(&Node::row([Node::symbol('3', Class::Ord)])));
+        assert_eq!(
+            sqrt.index.as_ref(),
+            Some(&Node::row([Node::symbol('3', Class::Ord)]))
+        );
     }
 
     #[test]
@@ -960,11 +1074,18 @@ mod tests {
         editor.move_vertical(true);
         assert_eq!(editor.cursor().path.to_string(), "0.2");
         editor.insert_char('2');
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
-        let Node::Scripts(scripts) = &row[0] else { panic!("expected scripts") };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
+        let Node::Scripts(scripts) = &row[0] else {
+            panic!("expected scripts")
+        };
         assert_eq!(scripts.base, Node::row([Node::variable('n')]));
         assert_eq!(scripts.sub, Some(Node::row([Node::variable('i')])));
-        assert_eq!(scripts.sup, Some(Node::row([Node::symbol('2', Class::Ord)])));
+        assert_eq!(
+            scripts.sup,
+            Some(Node::row([Node::symbol('2', Class::Ord)]))
+        );
     }
 
     #[test]
@@ -982,9 +1103,13 @@ mod tests {
         let mut editor = Editor::new();
         editor.apply_style(MathStyle::Script);
         editor.insert_char('x');
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
         assert_eq!(row.len(), 1);
-        let Node::Styled(styled) = &row[0] else { panic!("expected a styled node, got {:?}", row[0]) };
+        let Node::Styled(styled) = &row[0] else {
+            panic!("expected a styled node, got {:?}", row[0])
+        };
         assert_eq!(styled.style, Some(MathStyle::Script));
         assert_eq!(styled.body, Node::variable('x'));
     }
@@ -1000,11 +1125,21 @@ mod tests {
         });
         editor.insert_char('a');
         // Park the caret in a still-empty cell and try to leave the template.
-        editor.cursor = Cursor { path: Path::root().child(0).child(1), index: 0 };
-        assert!(!editor.backspace(), "a matrix with a filled cell must not be deleted");
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        editor.cursor = Cursor {
+            path: Path::root().child(0).child(1),
+            index: 0,
+        };
+        assert!(
+            !editor.backspace(),
+            "a matrix with a filled cell must not be deleted"
+        );
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
         assert_eq!(row.len(), 1);
-        let Node::Matrix(matrix) = &row[0] else { panic!("expected a matrix, got {:?}", row[0]) };
+        let Node::Matrix(matrix) = &row[0] else {
+            panic!("expected a matrix, got {:?}", row[0])
+        };
         assert_eq!(matrix.rows[0][0], Node::row([Node::variable('a')]));
     }
 
@@ -1025,16 +1160,29 @@ mod tests {
         for ch in "ab".chars() {
             editor.insert_char(ch);
         }
-        let start = Cursor { path: Path::root(), index: 0 };
+        let start = Cursor {
+            path: Path::root(),
+            index: 0,
+        };
         editor.cursor = start.clone();
         editor.anchor = Some(start);
-        editor.cursor = Cursor { path: Path::root(), index: 2 };
+        editor.cursor = Cursor {
+            path: Path::root(),
+            index: 2,
+        };
         assert_eq!(editor.selection(), Some((0, 2)));
         editor.wrap_with(Template::SquareRoot);
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
         assert_eq!(row.len(), 1);
-        let Node::Sqrt(sqrt) = &row[0] else { panic!("expected a radical") };
-        assert_eq!(sqrt.radicand, Node::row([Node::variable('a'), Node::variable('b')]));
+        let Node::Sqrt(sqrt) = &row[0] else {
+            panic!("expected a radical")
+        };
+        assert_eq!(
+            sqrt.radicand,
+            Node::row([Node::variable('a'), Node::variable('b')])
+        );
     }
 
     #[test]
@@ -1043,8 +1191,14 @@ mod tests {
         for ch in "abc".chars() {
             editor.insert_char(ch);
         }
-        editor.cursor = Cursor { path: Path::root(), index: 1 };
-        editor.anchor = Some(Cursor { path: Path::root(), index: 0 });
+        editor.cursor = Cursor {
+            path: Path::root(),
+            index: 1,
+        };
+        editor.anchor = Some(Cursor {
+            path: Path::root(),
+            index: 0,
+        });
         editor.insert_char('z');
         assert_eq!(flat(&editor), ["z", "b", "c"]);
     }
@@ -1109,10 +1263,18 @@ mod tests {
         for ch in "ab".chars() {
             editor.insert_char(ch);
         }
-        editor.cursor = Cursor { path: Path::root(), index: 2 };
-        editor.anchor = Some(Cursor { path: Path::root(), index: 0 });
+        editor.cursor = Cursor {
+            path: Path::root(),
+            index: 2,
+        };
+        editor.anchor = Some(Cursor {
+            path: Path::root(),
+            index: 0,
+        });
         editor.apply_font(Font::BoldItalic);
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
         assert_eq!(row[0], Node::char_with('a', Class::Ord, Font::BoldItalic));
         assert_eq!(row[1], Node::char_with('b', Class::Ord, Font::BoldItalic));
         assert_eq!(editor.typing_font(), Font::BoldItalic);
@@ -1141,12 +1303,19 @@ mod tests {
         let mut editor = Editor::new();
         editor.insert_template(Template::Superscript);
         // Park the caret in the base and try to move down into the missing subscript.
-        editor.cursor = Cursor { path: Path::root().child(0).child(0), index: 0 };
+        editor.cursor = Cursor {
+            path: Path::root().child(0).child(0),
+            index: 0,
+        };
         editor.move_vertical(false);
         assert_eq!(editor.cursor().path.to_string(), "0.0");
         editor.insert_char('x');
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
-        let Node::Scripts(scripts) = &row[0] else { panic!("expected scripts") };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
+        let Node::Scripts(scripts) = &row[0] else {
+            panic!("expected scripts")
+        };
         assert_eq!(scripts.base, Node::row([Node::variable('x')]));
         assert_eq!(scripts.sub, None);
     }
@@ -1177,7 +1346,10 @@ mod tests {
         editor.insert_char('a');
         editor.apply_style(MathStyle::Script);
         editor.insert_char('x');
-        editor.cursor = Cursor { path: Path::root(), index: 0 };
+        editor.cursor = Cursor {
+            path: Path::root(),
+            index: 0,
+        };
         // Moving right onto the styled character must not park the caret on the Styled node.
         editor.move_right();
         assert_eq!(editor.cursor().path.to_string(), ".");
@@ -1196,13 +1368,26 @@ mod tests {
         for ch in "ab".chars() {
             editor.insert_char(ch);
         }
-        editor.cursor = Cursor { path: Path::root(), index: 2 };
-        editor.anchor = Some(Cursor { path: Path::root(), index: 0 });
+        editor.cursor = Cursor {
+            path: Path::root(),
+            index: 2,
+        };
+        editor.anchor = Some(Cursor {
+            path: Path::root(),
+            index: 0,
+        });
         editor.wrap_with(Template::Function("sin"));
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
         assert_eq!(row.len(), 1);
-        let Node::Fence(fence) = row[0].slot(1).unwrap() else { panic!("expected a fence, got {:?}", row[0]) };
-        assert_eq!(fence.body, Node::row([Node::variable('a'), Node::variable('b')]));
+        let Node::Fence(fence) = row[0].slot(1).unwrap() else {
+            panic!("expected a fence, got {:?}", row[0])
+        };
+        assert_eq!(
+            fence.body,
+            Node::row([Node::variable('a'), Node::variable('b')])
+        );
         assert_eq!(editor.cursor().path.to_string(), "0.1.0");
     }
 
@@ -1210,11 +1395,21 @@ mod tests {
     fn applying_a_style_wraps_plain_characters() {
         let mut editor = Editor::new();
         editor.insert_char('x');
-        editor.cursor = Cursor { path: Path::root(), index: 1 };
-        editor.anchor = Some(Cursor { path: Path::root(), index: 0 });
+        editor.cursor = Cursor {
+            path: Path::root(),
+            index: 1,
+        };
+        editor.anchor = Some(Cursor {
+            path: Path::root(),
+            index: 0,
+        });
         editor.apply_style(MathStyle::Script);
-        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else { unreachable!() };
-        let Node::Styled(styled) = &row[0] else { panic!("expected a styled node, got {:?}", row[0]) };
+        let Node::Row(row) = editor.math().node_at(&Path::root()).unwrap() else {
+            unreachable!()
+        };
+        let Node::Styled(styled) = &row[0] else {
+            panic!("expected a styled node, got {:?}", row[0])
+        };
         assert_eq!(styled.style, Some(MathStyle::Script));
         assert_eq!(styled.body, Node::variable('x'));
     }

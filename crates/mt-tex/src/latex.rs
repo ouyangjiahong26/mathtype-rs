@@ -164,7 +164,9 @@ fn render_char(ch: char, out: &mut String) {
 
 /// The class the parser gives the bare character before any explicit class macro.
 fn natural_class(ch: char) -> Class {
-    symbols::lookup_by_char(ch).map(|(_, class)| class).unwrap_or_else(|| char_class(ch))
+    symbols::lookup_by_char(ch)
+        .map(|(_, class)| class)
+        .unwrap_or_else(|| char_class(ch))
 }
 
 /// Control word forcing an atom class; `Op` and `Inner` have none (see the module docs).

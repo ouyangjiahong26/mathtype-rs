@@ -40,7 +40,10 @@ fn the_index_reads_the_document() {
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("block 1 is not a paragraph"),
     };
-    assert_eq!(kinds(&document, 1), vec!["text", "other", "omath", "other", "text"]);
+    assert_eq!(
+        kinds(&document, 1),
+        vec!["text", "other", "omath", "other", "text"]
+    );
     match &second.items[0] {
         Item::Text { text, style, .. } => {
             assert_eq!(text, "bold text & more ");
@@ -56,8 +59,8 @@ fn the_index_reads_the_document() {
     };
     assert_eq!((table.rows, table.columns), (2, 2));
     // Cell paragraphs follow their table, one depth in.
-    for index in 4..8 {
-        match &blocks[index] {
+    for (index, block) in blocks.iter().enumerate().take(8).skip(4) {
+        match block {
             Block::Paragraph(paragraph) => assert_eq!(paragraph.table_depth, 1),
             _ => panic!("block {index} is not a cell paragraph"),
         }
@@ -91,17 +94,32 @@ fn every_formula_is_located_with_its_tree() {
     let document = open(&realistic_docx());
     let equations = document.equations();
     assert_eq!(equations.len(), 5, "three OMML and two OLE formulas");
-    assert!(same_tree(equations[0].math.as_ref().unwrap(), &parse_tex("a^2+b_2").unwrap()));
-    assert!(same_tree(equations[1].math.as_ref().unwrap(), &parse_tex("\\int_0^1 x\\,dx").unwrap()));
-    assert!(matches!(equations[1].kind, EquationKind::Omath { display: true }));
-    assert!(same_tree(equations[2].math.as_ref().unwrap(), &parse_tex("\\sqrt{2}").unwrap()));
+    assert!(same_tree(
+        equations[0].math.as_ref().unwrap(),
+        &parse_tex("a^2+b_2").unwrap()
+    ));
+    assert!(same_tree(
+        equations[1].math.as_ref().unwrap(),
+        &parse_tex("\\int_0^1 x\\,dx").unwrap()
+    ));
+    assert!(matches!(
+        equations[1].kind,
+        EquationKind::Omath { display: true }
+    ));
+    assert!(same_tree(
+        equations[2].math.as_ref().unwrap(),
+        &parse_tex("\\sqrt{2}").unwrap()
+    ));
     for equation in &equations[3..] {
         let EquationKind::Ole { prog_id, part } = &equation.kind else {
             panic!("expected an object formula");
         };
         assert_eq!(prog_id.as_deref(), Some("Equation.3"));
         assert_eq!(part.as_deref(), Some("word/embeddings/oleObject1.bin"));
-        assert!(same_tree(equation.math.as_ref().unwrap(), &parse_tex("\\frac{a}{b}").unwrap()));
+        assert!(same_tree(
+            equation.math.as_ref().unwrap(),
+            &parse_tex("\\frac{a}{b}").unwrap()
+        ));
     }
 }
 
@@ -112,19 +130,43 @@ fn an_omath_formula_is_replaced_by_a_tree() {
     let equation = document.equations().into_iter().next().expect("a formula");
     let replacement = parse_tex("\\frac{p}{q}+r").unwrap();
     document
-        .replace(equation.block, equation.item, Replacement::OMath { math: replacement, display: false })
+        .replace(
+            equation.block,
+            equation.item,
+            Replacement::OMath {
+                math: replacement,
+                display: false,
+            },
+        )
         .expect("replaced");
 
     // The neighbouring text runs are untouched; the slot still holds a formula.
-    assert_eq!(kinds(&document, equation.block), vec!["text", "other", "omath", "other", "text"]);
-    let after = document.equations().into_iter().next().expect("still a formula");
-    assert!(same_tree(after.math.as_ref().unwrap(), &parse_tex("\\frac{p}{q}+r").unwrap()));
+    assert_eq!(
+        kinds(&document, equation.block),
+        vec!["text", "other", "omath", "other", "text"]
+    );
+    let after = document
+        .equations()
+        .into_iter()
+        .next()
+        .expect("still a formula");
+    assert!(same_tree(
+        after.math.as_ref().unwrap(),
+        &parse_tex("\\frac{p}{q}+r").unwrap()
+    ));
 
     // And it survives a write and a reopen.
     let written = document.into_bytes().expect("written");
     let reopened = open(&written);
-    let again = reopened.equations().into_iter().next().expect("still a formula");
-    assert!(same_tree(again.math.as_ref().unwrap(), &parse_tex("\\frac{p}{q}+r").unwrap()));
+    let again = reopened
+        .equations()
+        .into_iter()
+        .next()
+        .expect("still a formula");
+    assert!(same_tree(
+        again.math.as_ref().unwrap(),
+        &parse_tex("\\frac{p}{q}+r").unwrap()
+    ));
 }
 
 /// Replacing a formula with text: a styled run takes the formula's place.
@@ -138,11 +180,18 @@ fn a_formula_is_replaced_by_text() {
             equation.item,
             Replacement::Text {
                 text: "x < y".to_owned(),
-                style: RunStyle { bold: Some(true), italic: Some(false), ..RunStyle::default() },
+                style: RunStyle {
+                    bold: Some(true),
+                    italic: Some(false),
+                    ..RunStyle::default()
+                },
             },
         )
         .expect("replaced");
-    assert_eq!(kinds(&document, equation.block), vec!["text", "other", "text", "other", "text"]);
+    assert_eq!(
+        kinds(&document, equation.block),
+        vec!["text", "other", "text", "other", "text"]
+    );
     match &document.blocks()[equation.block] {
         Block::Paragraph(paragraph) => match &paragraph.items[2] {
             Item::Text { text, style, .. } => {
@@ -156,7 +205,11 @@ fn a_formula_is_replaced_by_text() {
     }
     let written = document.into_bytes().expect("written");
     let document_xml = String::from_utf8_lossy(
-        &parts_of(&written).into_iter().find(|(name, _)| name == "word/document.xml").unwrap().1,
+        &parts_of(&written)
+            .into_iter()
+            .find(|(name, _)| name == "word/document.xml")
+            .unwrap()
+            .1,
     )
     .into_owned();
     assert!(document_xml.contains("x &lt; y"));
@@ -181,15 +234,24 @@ fn a_formula_is_replaced_by_an_image() {
             }),
         )
         .expect("replaced");
-    assert_eq!(kinds(&document, equation.block), vec!["text", "other", "image", "other", "text"]);
+    assert_eq!(
+        kinds(&document, equation.block),
+        vec!["text", "other", "image", "other", "text"]
+    );
     let written = document.into_bytes().expect("written");
     let parts = parts_of(&written);
-    let media = parts.iter().find(|(name, _)| name == "word/media/image2.png");
+    let media = parts
+        .iter()
+        .find(|(name, _)| name == "word/media/image2.png");
     assert!(media.is_some(), "a new media part appears");
     assert_eq!(media.unwrap().1, util::PNG);
     assert_eq!(parts.len(), before + 1, "exactly one part was added");
     let rels = String::from_utf8_lossy(
-        &parts.iter().find(|(name, _)| name == "word/_rels/document.xml.rels").unwrap().1,
+        &parts
+            .iter()
+            .find(|(name, _)| name == "word/_rels/document.xml.rels")
+            .unwrap()
+            .1,
     )
     .into_owned();
     assert!(rels.contains("Target=\"media/image2.png\""));
@@ -201,23 +263,45 @@ fn a_formula_is_replaced_by_an_ole_object() {
     let mut document = open(&realistic_docx());
     let equation = document.equations().into_iter().next().expect("a formula");
     let math = parse_tex("\\sum_i i^2").unwrap();
-    document.replace(equation.block, equation.item, Replacement::Ole { math, prog_id: None, preview: None }).expect("replaced");
-    assert_eq!(kinds(&document, equation.block), vec!["text", "other", "object", "other", "text"]);
+    document
+        .replace(
+            equation.block,
+            equation.item,
+            Replacement::Ole {
+                math,
+                prog_id: None,
+                preview: None,
+            },
+        )
+        .expect("replaced");
+    assert_eq!(
+        kinds(&document, equation.block),
+        vec!["text", "other", "object", "other", "text"]
+    );
 
     let written = document.into_bytes().expect("written");
     let parts = parts_of(&written);
     assert!(
-        parts.iter().any(|(name, _)| name == "word/embeddings/oleObject2.bin"),
+        parts
+            .iter()
+            .any(|(name, _)| name == "word/embeddings/oleObject2.bin"),
         "a new embedding part appears"
     );
 
     let reopened = open(&written);
-    let after = reopened.equations().into_iter().next().expect("still a formula");
+    let after = reopened
+        .equations()
+        .into_iter()
+        .next()
+        .expect("still a formula");
     let EquationKind::Ole { part, .. } = &after.kind else {
         panic!("the slot now holds an object");
     };
     assert_eq!(part.as_deref(), Some("word/embeddings/oleObject2.bin"));
-    assert!(same_tree(after.math.as_ref().unwrap(), &parse_tex("\\sum_i i^2").unwrap()));
+    assert!(same_tree(
+        after.math.as_ref().unwrap(),
+        &parse_tex("\\sum_i i^2").unwrap()
+    ));
 }
 
 /// Rewriting an object's equation: the stream inside the existing compound file changes, the part
@@ -232,16 +316,40 @@ fn an_ole_equation_is_rewritten_in_place() {
         .find(|equation| matches!(equation.kind, EquationKind::Ole { .. }))
         .expect("an object formula");
     let math = parse_tex("\\sqrt[n]{x}").unwrap();
-    document.replace(object.block, object.item, Replacement::Ole { math, prog_id: None, preview: None }).expect("rewritten");
+    document
+        .replace(
+            object.block,
+            object.item,
+            Replacement::Ole {
+                math,
+                prog_id: None,
+                preview: None,
+            },
+        )
+        .expect("rewritten");
 
     // No new part: the existing one was rewritten.
-    assert_eq!(document.part_names().filter(|name| name.contains("embeddings")).count(), 1);
+    assert_eq!(
+        document
+            .part_names()
+            .filter(|name| name.contains("embeddings"))
+            .count(),
+        1
+    );
     let written = document.into_bytes().expect("written");
     let parts = parts_of(&written);
-    assert!(parts.iter().any(|(name, _)| name == "word/embeddings/oleObject1.bin"));
+    assert!(
+        parts
+            .iter()
+            .any(|(name, _)| name == "word/embeddings/oleObject1.bin")
+    );
     // The preview markup is still there, pointing at the same picture.
     let document_xml = String::from_utf8_lossy(
-        &parts.iter().find(|(name, _)| name == "word/document.xml").unwrap().1,
+        &parts
+            .iter()
+            .find(|(name, _)| name == "word/document.xml")
+            .unwrap()
+            .1,
     )
     .into_owned();
     assert!(document_xml.contains("v:shapetype"));
@@ -253,7 +361,10 @@ fn an_ole_equation_is_rewritten_in_place() {
         .into_iter()
         .find(|equation| matches!(equation.kind, EquationKind::Ole { .. }))
         .expect("an object formula");
-    assert!(same_tree(after.math.as_ref().unwrap(), &parse_tex("\\sqrt[n]{x}").unwrap()));
+    assert!(same_tree(
+        after.math.as_ref().unwrap(),
+        &parse_tex("\\sqrt[n]{x}").unwrap()
+    ));
 }
 
 /// Replacing every object with a formula retires the objects' relationship once nothing uses it,
@@ -261,17 +372,21 @@ fn an_ole_equation_is_rewritten_in_place() {
 #[test]
 fn ole_formulas_are_replaced_by_omath() {
     let mut document = open(&realistic_docx());
-    loop {
-        let Some(object) = document
-            .equations()
-            .into_iter()
-            .find(|equation| matches!(equation.kind, EquationKind::Ole { .. }))
-        else {
-            break;
-        };
+    while let Some(object) = document
+        .equations()
+        .into_iter()
+        .find(|equation| matches!(equation.kind, EquationKind::Ole { .. }))
+    {
         let math = parse_tex("e^{i\\pi}").unwrap();
         document
-            .replace(object.block, object.item, Replacement::OMath { math, display: false })
+            .replace(
+                object.block,
+                object.item,
+                Replacement::OMath {
+                    math,
+                    display: false,
+                },
+            )
             .expect("replaced");
     }
     assert!(
@@ -284,19 +399,30 @@ fn ole_formulas_are_replaced_by_omath() {
     let written = document.into_bytes().expect("written");
     let parts = parts_of(&written);
     let rels = String::from_utf8_lossy(
-        &parts.iter().find(|(name, _)| name == "word/_rels/document.xml.rels").unwrap().1,
+        &parts
+            .iter()
+            .find(|(name, _)| name == "word/_rels/document.xml.rels")
+            .unwrap()
+            .1,
     )
     .into_owned();
-    assert!(!rels.contains("oleObject1.bin"), "the object's relationship is retired");
     assert!(
-        parts.iter().any(|(name, _)| name == "word/embeddings/oleObject1.bin"),
+        !rels.contains("oleObject1.bin"),
+        "the object's relationship is retired"
+    );
+    assert!(
+        parts
+            .iter()
+            .any(|(name, _)| name == "word/embeddings/oleObject1.bin"),
         "the part itself stays"
     );
     let reopened = open(&written);
-    assert!(reopened
-        .equations()
-        .iter()
-        .all(|equation| matches!(equation.kind, EquationKind::Omath { .. })));
+    assert!(
+        reopened
+            .equations()
+            .iter()
+            .all(|equation| matches!(equation.kind, EquationKind::Omath { .. }))
+    );
 }
 
 /// Insertion: a formula after a display formula, a field at a paragraph's end, raw XML before an
@@ -320,13 +446,17 @@ fn formulas_and_fields_are_inserted() {
 
     // An inline formula at the end of the second paragraph.
     let math = parse_tex("a+b").unwrap();
-    document.insert_omath(Position::ParagraphEnd { block: 1 }, &math, false).expect("inserted");
+    document
+        .insert_omath(Position::ParagraphEnd { block: 1 }, &math, false)
+        .expect("inserted");
     assert_eq!(kinds(&document, 1), vec!["text", "omath"]);
     assert_eq!(document.equations().len(), 2);
 
     // A new display paragraph at the end of the body.
     let math = parse_tex("c").unwrap();
-    document.insert_omath(Position::BodyEnd, &math, true).expect("inserted");
+    document
+        .insert_omath(Position::BodyEnd, &math, true)
+        .expect("inserted");
     assert_eq!(document.blocks().len(), 3);
     assert_eq!(document.equations().len(), 3);
 
@@ -353,25 +483,39 @@ fn a_whole_document_of_formulas_is_rewritten_in_turn() {
         .equations()
         .into_iter()
         .filter(|equation| matches!(equation.kind, EquationKind::Omath { .. }))
-        .map(|equation| (equation.block, equation.item, equation.math.expect("a tree")))
+        .map(|equation| {
+            (
+                equation.block,
+                equation.item,
+                equation.math.expect("a tree"),
+            )
+        })
         .collect();
     assert_eq!(targets.len(), 3);
     for (block, item, math) in targets.into_iter().rev() {
         // Whatever the tree says, square it.
         let rewritten = parse_tex(&format!("({})^2", to_latex(&math))).expect("parses");
         document
-            .replace(block, item, Replacement::OMath { math: rewritten, display: false })
+            .replace(
+                block,
+                item,
+                Replacement::OMath {
+                    math: rewritten,
+                    display: false,
+                },
+            )
             .expect("replaced");
     }
     let equations = document.equations();
     assert_eq!(equations.len(), 5);
     assert!(equations.iter().all(|equation| equation.math.is_some()));
-    assert!(equations
-        .iter()
-        .filter(|equation| matches!(equation.kind, EquationKind::Omath { .. }))
-        .all(|equation| to_latex(equation.math.as_ref().unwrap()).contains("^2")));
+    assert!(
+        equations
+            .iter()
+            .filter(|equation| matches!(equation.kind, EquationKind::Omath { .. }))
+            .all(|equation| to_latex(equation.math.as_ref().unwrap()).contains("^2"))
+    );
 }
-
 
 #[test]
 fn resizing_an_object_preview_rewrites_shape_and_extent() {
@@ -382,7 +526,16 @@ fn resizing_an_object_preview_rewrites_shape_and_extent() {
         .resize_object_preview(equation.block, equation.item, 90.0, 40.0)
         .expect("the shape resizes");
     let xml = document.document_xml();
-    assert!(xml.contains("width:90.0pt;height:40.0pt"), "the shape style carries the natural size");
-    assert!(xml.contains("dxaOrig=\"1800\""), "dxaOrig is 20 twips per point");
-    assert!(xml.contains("dyaOrig=\"800\""), "dyaOrig is 20 twips per point");
+    assert!(
+        xml.contains("width:90.0pt;height:40.0pt"),
+        "the shape style carries the natural size"
+    );
+    assert!(
+        xml.contains("dxaOrig=\"1800\""),
+        "dxaOrig is 20 twips per point"
+    );
+    assert!(
+        xml.contains("dyaOrig=\"800\""),
+        "dyaOrig is 20 twips per point"
+    );
 }

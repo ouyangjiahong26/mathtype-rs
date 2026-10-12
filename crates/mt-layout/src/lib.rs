@@ -24,8 +24,8 @@
 
 #![forbid(unsafe_code)]
 
-pub mod constants;
 mod boxed;
+pub mod constants;
 mod layout;
 mod metrics;
 mod spacing;
@@ -40,4 +40,3 @@ pub use spacing::Spacing;
 pub use style::{LayoutStyle, StyleFonts};
 pub use svg::{to_svg, view_box};
 pub use variants::{math_base, math_variant};
-

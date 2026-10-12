@@ -11,8 +11,7 @@ use crate::model::{RunStyle, VertAlign};
 /// The WordprocessingML namespace.
 pub(crate) const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 /// The office-document relationship namespace, the one `r:id` lives in.
-pub(crate) const R: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+pub(crate) const R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 /// The Microsoft Office namespace `o:OLEObject` lives in.
 pub(crate) const O: &str = "urn:schemas-microsoft-com:office:office";
 /// The VML namespace the cached view of an embedded object lives in.
@@ -92,12 +91,7 @@ pub(crate) fn o_math(math: &Math, display: bool) -> String {
 
 /// An inline picture. `extent` is the size in English Metric Units (914400 per inch); `doc_pr_id`
 /// must be unique among the drawings of the document.
-pub(crate) fn image_run(
-    rel_id: &str,
-    name: &str,
-    extent: (u32, u32),
-    doc_pr_id: u32,
-) -> String {
+pub(crate) fn image_run(rel_id: &str, name: &str, extent: (u32, u32), doc_pr_id: u32) -> String {
     let (cx, cy) = extent;
     let mut out = String::from("<w:r xmlns:w=\"");
     out.push_str(W);
@@ -120,7 +114,9 @@ pub(crate) fn image_run(
     out.push_str("\" noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>");
     out.push_str("<a:graphic xmlns:a=\"");
     out.push_str(A);
-    out.push_str("\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">");
+    out.push_str(
+        "\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">",
+    );
     out.push_str("<pic:pic xmlns:pic=\"");
     out.push_str(PIC);
     out.push_str("\"><pic:nvPicPr><pic:cNvPr id=\"");
@@ -208,7 +204,7 @@ mod tests {
 
     #[test]
     fn text_runs_carry_their_style() {
-        assert_eq!(text_run("a<b", &RunStyle::default()).contains("a&lt;b"), true);
+        assert!(text_run("a<b", &RunStyle::default()).contains("a&lt;b"));
         let styled = RunStyle {
             bold: Some(true),
             italic: None,
