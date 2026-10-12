@@ -281,21 +281,23 @@ Step '6. read the equation back through automation'
 $observed = $null
 $route = $null
 if ($null -ne $shape) {
+    # The object reads the hand-off file on its own timer, which runs every 200 ms, so the value is
+    # asked for again on every turn rather than once: the first answer can still be the old
+    # equation.
     $deadline = (Get-Date).AddSeconds($ObjectTimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if ($null -eq $route) {
+        $observed = $null
+        try {
+            $observed = $shape.OLEFormat.Object.GetLatex()
+            $route = '$shape.OLEFormat.Object.GetLatex()'
+        } catch {
+            if ($null -eq $route) { Note "OLEFormat.Object is not reachable: $($_.Exception.Message)" }
             try {
-                $observed = $shape.OLEFormat.Object.GetLatex()
-                $route = '$shape.OLEFormat.Object.GetLatex()'
+                $active = [Runtime.InteropServices.Marshal]::GetActiveObject($progId)
+                $observed = $active.GetLatex()
+                $route = "GetActiveObject('$progId').GetLatex()"
             } catch {
-                Note "OLEFormat.Object is not reachable: $($_.Exception.Message)"
-                try {
-                    $active = [Runtime.InteropServices.Marshal]::GetActiveObject($progId)
-                    $observed = $active.GetLatex()
-                    $route = "GetActiveObject('$progId').GetLatex()"
-                } catch {
-                    Note "GetActiveObject('$progId') is not reachable either: $($_.Exception.Message)"
-                }
+                if ($null -eq $route) { Note "GetActiveObject('$progId') is not reachable either: $($_.Exception.Message)" }
             }
         }
         if ($null -ne $route -and (Normalize $observed) -eq (Normalize $targetLatex)) { break }
@@ -391,17 +393,25 @@ try {
     if ($count -ge 1) {
         $shape2 = $doc2.InlineShapes.Item(1)
         Write-Host "    ClassType : $($shape2.OLEFormat.ClassType)"
+        # As in step 6: keep asking, because the reopened object reads its streams on its own and
+        # the first answer can still be the one it had before the document was written.
         $reopened = $null
         $reopenRoute = $null
         $deadline = (Get-Date).AddSeconds($ObjectTimeoutSeconds)
-        while ((Get-Date) -lt $deadline -and $null -eq $reopenRoute) {
-            try { $reopened = $shape2.OLEFormat.Object.GetLatex(); $reopenRoute = 'OLEFormat.Object.GetLatex()' }
-            catch {
+        while ((Get-Date) -lt $deadline) {
+            try {
+                $reopened = $shape2.OLEFormat.Object.GetLatex()
+                $reopenRoute = 'OLEFormat.Object.GetLatex()'
+            } catch {
                 try {
                     $reopened = [Runtime.InteropServices.Marshal]::GetActiveObject($progId).GetLatex()
                     $reopenRoute = "GetActiveObject('$progId').GetLatex()"
-                } catch { Start-Sleep -Milliseconds 300 }
+                } catch {
+                    if ($null -eq $reopenRoute) { Note "the reopened object is not reachable yet: $($_.Exception.Message)" }
+                }
             }
+            if ($null -ne $reopenRoute -and (Normalize $reopened) -eq (Normalize $targetLatex)) { break }
+            Start-Sleep -Milliseconds 300
         }
         if ($null -eq $reopenRoute) {
             Note 'the reopened object was not reachable through automation; the streams read above stand as the evidence'
