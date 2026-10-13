@@ -329,7 +329,12 @@ Step '7. save, close, reopen'
 if ($null -ne $doc) {
     try {
         if (Test-Path -LiteralPath $docx) { Remove-Item -LiteralPath $docx -Force }
-        $doc.SaveAs2($docx, 16)
+        # SaveAs2's FileName and FileFormat are by-reference optional parameters; passing them
+        # positionally makes PowerShell's COM binder block forever (a plain document hangs the
+        # same way), so they go in through [ref] on raw typed variables.
+        [string] $savePath = $docx
+        [int] $saveFormat = 16
+        $doc.SaveAs2([ref] $savePath, [ref] $saveFormat)
         $doc.Close(0)
         $doc = $null
         Ok "the document was saved to $docx"

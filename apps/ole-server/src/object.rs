@@ -340,6 +340,8 @@ impl EquationObject {
                     session.path.display()
                 ));
                 inner.session = Some(session);
+                drop(inner);
+                announce_visibility(&self.inner, true);
                 Ok(())
             }
             Err(message) => {
@@ -348,6 +350,22 @@ impl EquationObject {
                 trace::log(&format!("cannot start the editor: {message}"));
                 Err(Error::new(E_FAIL, message))
             }
+        }
+    }
+}
+
+/// Tell the host's site whether the object's window is showing.
+///
+/// An out-of-place server reports its editor opening and closing this way. A host that is never
+/// told the editor is gone keeps believing the object is still being edited, and a document
+/// whose object is "being edited" never finishes saving.
+fn announce_visibility(inner: &RefCell<Inner>, visible: bool) {
+    let site = inner.borrow().client_site.clone();
+    if let Some(site) = site {
+        trace::log(&format!("announce OnShowWindow({visible})"));
+        match unsafe { site.OnShowWindow(visible.into()) } {
+            Ok(()) => {}
+            Err(error) => trace::log(&format!("OnShowWindow({visible}) failed: {error}")),
         }
     }
 }
@@ -402,11 +420,14 @@ fn tick(inner: &RefCell<Inner>) {
         }
     }
     trace::log(&message);
+    // The editor window is gone now, whatever the session wrote: the host may stop waiting for
+    // the object it believes is being edited and save the document.
+    announce_visibility(inner, false);
     if !changed {
         return;
     }
 
-    match write_streams(inner) {
+    match write_streams(inner, true) {
         Ok(note) => {
             trace::log(&note);
             // The streams are in the host's storage, but the host has not saved the document that
@@ -437,8 +458,14 @@ fn opens_editor(iverb: i32) -> bool {
     iverb == OLEIVERB_PRIMARY.0 || iverb == OLEIVERB_SHOW.0 || iverb == OLEIVERB_OPEN.0 || iverb > 0
 }
 
-/// Write both streams into the host's storage and commit them.
-fn write_streams(inner: &RefCell<Inner>) -> Result<String, String> {
+/// Write both streams into the host's storage, and commit when `commit` is true.
+///
+/// `IPersistStorage::Save` MUST pass `commit = false`: during a Save call the host owns the
+/// storage and will commit it after `SaveCompleted` returns. Calling `IStorage::Commit` from
+/// inside Save violates the OLE spec and deadlocks against Word, which waits for SaveCompleted
+/// while the server blocks on Commit. Every other caller (tick, Close, InitNew, save_now) passes
+/// `commit = true` to flush the streams into the compound file immediately.
+fn write_streams(inner: &RefCell<Inner>, commit: bool) -> Result<String, String> {
     let (storage, native, latex) = {
         let state = inner.borrow();
         let Some(storage) = state.storage.clone() else {
@@ -464,7 +491,9 @@ fn write_streams(inner: &RefCell<Inner>) -> Result<String, String> {
     storage::write_stream(&storage, STREAM_COMPOBJ, &clsid::compobj())?;
     storage::write_stream(&storage, STREAM_NATIVE, &native)?;
     storage::write_stream(&storage, STREAM_LATEX, latex.as_bytes())?;
-    storage::commit(&storage)?;
+    if commit {
+        storage::commit(&storage)?;
+    }
     Ok(format!(
         "wrote {STREAM_COMPOBJ}, {STREAM_NATIVE} ({} bytes) and {STREAM_LATEX} ({} bytes)",
         native.len(),
@@ -567,14 +596,11 @@ impl EquationObject {
             "the text was kept but does not parse as LaTeX".to_owned()
         }
     }
-
-    /// Write the streams on demand, the way the automation `Save` member does.
-    ///
     /// The object stays dirty afterwards: its streams are in the host's storage, but the host has
     /// not saved the document that holds them, and `IsDirty` is what asks it to.
     fn save_now(&self) -> String {
         self.state.note_busy();
-        match write_streams(&self.inner) {
+        match write_streams(&self.inner, true) {
             Ok(note) => {
                 self.inner.borrow_mut().note(&note);
                 announce_saved(&self.inner);
@@ -673,7 +699,7 @@ impl IOleObject_Impl for EquationObject_Impl {
             return Ok(());
         }
         drop(inner);
-        match write_streams(&self.inner) {
+        match write_streams(&self.inner, true) {
             Ok(note) => {
                 {
                     let mut inner = self.inner.borrow_mut();
@@ -1224,7 +1250,7 @@ impl IPersistStorage_Impl for EquationObject_Impl {
         trace::log("InitNew");
         // The document has an equation from the moment the object exists, so a host that saves
         // without ever activating it still stores a whole object.
-        match write_streams(&self.inner) {
+        match write_streams(&self.inner, true) {
             Ok(note) => {
                 trace::log(&note);
                 Ok(())
@@ -1264,7 +1290,7 @@ impl IPersistStorage_Impl for EquationObject_Impl {
             self.inner.borrow_mut().storage = Some(storage);
         }
         trace::log(&format!("Save(same as load: {})", fsameasload.as_bool()));
-        match write_streams(&self.inner) {
+        match write_streams(&self.inner, false) {
             Ok(note) => {
                 let mut inner = self.inner.borrow_mut();
                 inner.dirty = false;
