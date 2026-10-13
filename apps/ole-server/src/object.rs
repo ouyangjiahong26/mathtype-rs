@@ -53,7 +53,7 @@ use windows::core::{
     BOOL, Error, GUID, HRESULT, PCWSTR, PWSTR, Ref, Result as WinResult, implement,
 };
 
-use crate::clsid::{CLSID_EQUATION, FRIENDLY_NAME, PROGID, STREAM_LATEX, STREAM_NATIVE};
+use crate::clsid::{self, CLSID_EQUATION, FRIENDLY_NAME, PROGID, STREAM_COMPOBJ, STREAM_LATEX, STREAM_NATIVE};
 use crate::factory::ServerState;
 use crate::formats::{self, FormatEnumerator};
 use crate::handoff::Session;
@@ -453,11 +453,17 @@ fn write_streams(inner: &RefCell<Inner>) -> Result<String, String> {
             });
         (storage, native, state.latex.clone())
     };
+    // The storage says whose it is and carries the class information stream, which is how a
+    // host names the object and finds its way back to this server when the document is opened
+    // again; the equation streams alone leave it reporting "Unknown" and no programmatic
+    // identifier.
+    storage::set_class(&storage, &CLSID_EQUATION)?;
+    storage::write_stream(&storage, STREAM_COMPOBJ, &clsid::compobj())?;
     storage::write_stream(&storage, STREAM_NATIVE, &native)?;
     storage::write_stream(&storage, STREAM_LATEX, latex.as_bytes())?;
     storage::commit(&storage)?;
     Ok(format!(
-        "wrote {STREAM_NATIVE} ({} bytes) and {STREAM_LATEX} ({} bytes)",
+        "wrote {STREAM_COMPOBJ}, {STREAM_NATIVE} ({} bytes) and {STREAM_LATEX} ({} bytes)",
         native.len(),
         latex.len()
     ))
