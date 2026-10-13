@@ -16,11 +16,14 @@
 use std::sync::LazyLock;
 use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
 
-use windows::Win32::System::Com::Marshal::CoMarshalInterThreadInterfaceInStream;
-use windows::Win32::System::Com::StructuredStorage::CoGetInterfaceAndReleaseStream;
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, FORMATETC, IAdviseSink, IStream, STGMEDIUM, STGMEDIUM_0, TYMED_ENHMF, TYMED_MFPICT, TYMED_NULL};
 use windows::Win32::Foundation::HGLOBAL;
 use windows::Win32::Graphics::Gdi::{DeleteEnhMetaFile, HENHMETAFILE};
+use windows::Win32::System::Com::Marshal::CoMarshalInterThreadInterfaceInStream;
+use windows::Win32::System::Com::StructuredStorage::CoGetInterfaceAndReleaseStream;
+use windows::Win32::System::Com::{
+    COINIT_MULTITHREADED, CoInitializeEx, FORMATETC, IAdviseSink, IStream, STGMEDIUM, STGMEDIUM_0,
+    TYMED_ENHMF, TYMED_MFPICT, TYMED_NULL,
+};
 use windows::core::{IUnknown, Interface};
 
 use crate::storage::error_text;
@@ -30,12 +33,13 @@ use crate::trace;
 const QUEUE: usize = 32;
 
 /// One call to make on the host, with the marshalled interface it is for.
+// The variants are named after the sink calls they make, so the names stay.
+#[allow(clippy::enum_variant_names)]
 enum Notice {
     OnSave(Stream),
     OnViewChange(Stream, u32),
     OnDataChange(Stream, u32, u16, Option<PushedPicture>),
 }
-
 
 /// A picture on its way to the worker thread, in one of the two metafile forms a host's cache
 /// may have registered for.
@@ -87,8 +91,16 @@ pub fn on_view_change(sink: &IAdviseSink, aspects: u32) {
 /// the stock data-advice holder does; a bare view change leaves the fetching to a paint that a
 /// hidden or idle host never performs. The medium is this server's to free: the parameters of
 /// the call are inputs, so the host's side releases only its own unmarshalled copy.
-pub fn on_data_change(sink: &IAdviseSink, aspects: u32, format: u16, picture: Option<PushedPicture>) {
-    send(marshal("advise sink", sink).map(|stream| Notice::OnDataChange(stream, aspects, format, picture)));
+pub fn on_data_change(
+    sink: &IAdviseSink,
+    aspects: u32,
+    format: u16,
+    picture: Option<PushedPicture>,
+) {
+    send(
+        marshal("advise sink", sink)
+            .map(|stream| Notice::OnDataChange(stream, aspects, format, picture)),
+    );
 }
 
 /// Hand a notice to the worker thread, dropping it when the host is too far behind to care.

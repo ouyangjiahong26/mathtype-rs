@@ -85,7 +85,10 @@ fn paste_equation(
         }
     }
     Err(last.unwrap_or_else(|| {
-        windows::core::Error::new(E_FAIL, "the equation paste did not take after three attempts")
+        windows::core::Error::new(
+            E_FAIL,
+            "the equation paste did not take after three attempts",
+        )
     }))
 }
 
@@ -538,8 +541,7 @@ fn insert_label(
                 .call("TypeText", vec![Variant::bstr(".")])
                 .map_err(failed("step: separator"))?;
         }
-        insert_field(document, selection, code)
-            .map_err(|error| format!("step: field: {error}"))?;
+        insert_field(document, selection, code).map_err(|error| format!("step: field: {error}"))?;
     }
     selection
         .call("TypeText", vec![Variant::bstr(")")])
@@ -564,7 +566,10 @@ fn insert_label(
         .and_then(|bookmarks| {
             bookmarks.call_object(
                 "Add",
-                vec![Variant::bstr(bookmark), Variant::dispatch(range.as_dispatch())],
+                vec![
+                    Variant::bstr(bookmark),
+                    Variant::dispatch(range.as_dispatch()),
+                ],
             )
         })
         .map_err(failed("step: bookmark"))?;
@@ -713,7 +718,11 @@ pub fn insert_cross_reference(application: &Object) -> Outcome {
     };
     let document =
         word::active_document(application).map_err(failed("the document could not be read"))?;
-    insert_field(&document, &selection, &mt_numbering::reference_code(bookmark))?;
+    insert_field(
+        &document,
+        &selection,
+        &mt_numbering::reference_code(bookmark),
+    )?;
     Ok(format!(
         "cross-reference to equation {number} ({bookmark}) inserted"
     ))

@@ -53,7 +53,9 @@ use windows::core::{
     BOOL, Error, GUID, HRESULT, PCWSTR, PWSTR, Ref, Result as WinResult, implement,
 };
 
-use crate::clsid::{self, CLSID_EQUATION, FRIENDLY_NAME, PROGID, STREAM_COMPOBJ, STREAM_LATEX, STREAM_NATIVE};
+use crate::clsid::{
+    self, CLSID_EQUATION, FRIENDLY_NAME, PROGID, STREAM_COMPOBJ, STREAM_LATEX, STREAM_NATIVE,
+};
 use crate::factory::ServerState;
 use crate::formats::{self, FormatEnumerator};
 use crate::handoff::Session;
@@ -363,7 +365,7 @@ fn announce_visibility(inner: &RefCell<Inner>, visible: bool) {
     let site = inner.borrow().client_site.clone();
     if let Some(site) = site {
         trace::log(&format!("announce OnShowWindow({visible})"));
-        match unsafe { site.OnShowWindow(visible.into()) } {
+        match unsafe { site.OnShowWindow(visible) } {
             Ok(()) => {}
             Err(error) => trace::log(&format!("OnShowWindow({visible}) failed: {error}")),
         }
@@ -527,7 +529,7 @@ fn announce_saved(inner: &RefCell<Inner>) {
         trace::log(&format!("advise connection {connection}: OnSave"));
         crate::notify::on_save(&sink);
         trace::log(&format!("advise connection {connection}: OnViewChange"));
-        crate::notify::on_view_change(&sink, DVASPECT_CONTENT.0 as u32);
+        crate::notify::on_view_change(&sink, DVASPECT_CONTENT.0);
         let pushed = presentation.as_ref().and_then(|picture| {
             if format == CF_METAFILEPICT.0 {
                 picture::metafile_picture(picture).map(crate::notify::PushedPicture::MetaFilePict)
@@ -541,9 +543,13 @@ fn announce_saved(inner: &RefCell<Inner>) {
         if format != 0 {
             trace::log(&format!(
                 "advise connection {connection}: OnDataChange(format {format}, {})",
-                if pushed.is_some() { "with picture" } else { "empty medium" }
+                if pushed.is_some() {
+                    "with picture"
+                } else {
+                    "empty medium"
+                }
             ));
-            crate::notify::on_data_change(&sink, DVASPECT_CONTENT.0 as u32, format, pushed);
+            crate::notify::on_data_change(&sink, DVASPECT_CONTENT.0, format, pushed);
         }
     }
     if let Some((aspects, sink)) = view {
@@ -1072,7 +1078,10 @@ impl IDataObject_Impl for EquationObject_Impl {
         let connection = inner.next_advise;
         inner.next_advise += 1;
         inner.advises.push((connection, format, sink));
-        trace::log(&format!("DAdvise(format {format}, flags {:#x}) -> connection {connection}", _advf));
+        trace::log(&format!(
+            "DAdvise(format {format}, flags {:#x}) -> connection {connection}",
+            _advf
+        ));
         Ok(connection)
     }
 
