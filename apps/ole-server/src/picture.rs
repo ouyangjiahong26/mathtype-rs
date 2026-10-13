@@ -204,6 +204,20 @@ pub fn metafile_picture(presentation: &Presentation) -> Option<HGLOBAL> {
     Some(memory)
 }
 
+/// Drop a `CF_METAFILEPICT` this server built and kept for itself, the counterpart of
+/// [`metafile_picture`]: the host never sees this one, so nothing else frees it.
+pub fn discard_metafile_picture(memory: HGLOBAL) {
+    let target = unsafe { GlobalLock(memory) };
+    if target.is_null() {
+        let _ = unsafe { GlobalFree(Some(memory)) };
+        return;
+    }
+    let picture = unsafe { target.cast::<MetaFilePict>().read() };
+    let _ = unsafe { GlobalUnlock(memory) };
+    let _ = unsafe { DeleteMetaFile(picture.metafile) };
+    let _ = unsafe { GlobalFree(Some(memory)) };
+}
+
 /// Pack an RGBA image as a bottom-up 32-bit `BI_RGB` DIB: header first, then the pixels.
 fn to_dib(image: &Image) -> Vec<u8> {
     let stride = image.width as usize * 4;

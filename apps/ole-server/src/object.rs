@@ -479,21 +479,31 @@ fn write_streams(inner: &RefCell<Inner>) -> Result<String, String> {
 /// object being dirty already says so where the host looks for it (`IsDirty`), and a container
 /// that is told to save while it is saving is a container that stops.
 fn announce_saved(inner: &RefCell<Inner>) {
-    let (sinks, view) = {
+    let (sinks, view, math, extent, size_points) = {
         let state = inner.borrow();
-        (state.sinks(), state.view_advise.clone())
+        (
+            state.sinks(),
+            state.view_advise.clone(),
+            state.math.clone(),
+            state.extent,
+            state.size_points,
+        )
     };
-    // Word advises through `IOleObject::Advise` and never sets the view advise, so the picture
-    // change is said on every sink: `IAdviseSink` carries both notices on one interface. A host
-    // that misses the view change keeps showing the picture it cached when the object was
-    // inserted, which is exactly the stale equation a saved document then freezes in.
+    // The new picture goes with each notice, the way the stock data-advice holder sends it: a
+    // cache that did not ask for NODATA is waiting for the push, not for a fetch of its own.
+    // One recording per connection, because the worker frees the one it sent.
+    let presentation = picture::presentation(&math, size_points, extent);
     for (connection, sink) in sinks {
         trace::log(&format!("advise connection {connection}: OnSave"));
         crate::notify::on_save(&sink);
         trace::log(&format!("advise connection {connection}: OnViewChange"));
         crate::notify::on_view_change(&sink, DVASPECT_CONTENT.0 as u32);
-        trace::log(&format!("advise connection {connection}: OnDataChange(CF_METAFILEPICT)"));
-        crate::notify::on_data_change(&sink, DVASPECT_CONTENT.0 as u32, CF_METAFILEPICT.0);
+        let fresh = presentation.as_ref().and_then(picture::metafile_picture);
+        trace::log(&format!(
+            "advise connection {connection}: OnDataChange(CF_METAFILEPICT, {})",
+            if fresh.is_some() { "with picture" } else { "empty medium" }
+        ));
+        crate::notify::on_data_change(&sink, DVASPECT_CONTENT.0 as u32, CF_METAFILEPICT.0, fresh);
     }
     if let Some((aspects, sink)) = view {
         trace::log("view advise: OnViewChange");
@@ -1024,7 +1034,7 @@ impl IDataObject_Impl for EquationObject_Impl {
         let connection = inner.next_advise;
         inner.next_advise += 1;
         inner.advises.push((connection, sink));
-        trace::log(&format!("DAdvise(format {format}) -> connection {connection}"));
+        trace::log(&format!("DAdvise(format {format}, flags {:#x}) -> connection {connection}", _advf));
         Ok(connection)
     }
 

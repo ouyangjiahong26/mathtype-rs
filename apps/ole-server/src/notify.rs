@@ -18,7 +18,8 @@ use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
 
 use windows::Win32::System::Com::Marshal::CoMarshalInterThreadInterfaceInStream;
 use windows::Win32::System::Com::StructuredStorage::CoGetInterfaceAndReleaseStream;
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, FORMATETC, IAdviseSink, IStream, STGMEDIUM, TYMED_NULL};
+use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, FORMATETC, IAdviseSink, IStream, STGMEDIUM, STGMEDIUM_0, TYMED_MFPICT, TYMED_NULL};
+use windows::Win32::Foundation::HGLOBAL;
 use windows::core::{IUnknown, Interface};
 
 use crate::storage::error_text;
@@ -31,8 +32,16 @@ const QUEUE: usize = 32;
 enum Notice {
     OnSave(Stream),
     OnViewChange(Stream, u32),
-    OnDataChange(Stream, u32, u16),
+    OnDataChange(Stream, u32, u16, Option<OwnedPicture>),
 }
+
+/// A `CF_METAFILEPICT` in global memory on its way to the worker thread.
+///
+/// Global memory and metafile handles belong to the process, not to an apartment, so moving one
+/// between threads is safe; the wrapper only exists to say so.
+struct OwnedPicture(HGLOBAL);
+
+unsafe impl Send for OwnedPicture {}
 
 /// A marshalled interface on its way to the worker thread.
 struct Stream(IStream);
@@ -65,12 +74,15 @@ pub fn on_view_change(sink: &IAdviseSink, aspects: u32) {
     send(marshal("advise sink", sink).map(|stream| Notice::OnViewChange(stream, aspects)));
 }
 
-/// Tell the host's advise sink that the object's data changed, naming the clipboard format.
+/// Tell the host's advise sink that the object's data changed, carrying the new picture.
 ///
-/// This is the notice a presentation cache answers by fetching the data itself, which a bare
-/// view change leaves to a paint that a hidden or idle host never performs.
-pub fn on_data_change(sink: &IAdviseSink, aspects: u32, format: u16) {
-    send(marshal("advise sink", sink).map(|stream| Notice::OnDataChange(stream, aspects, format)));
+/// A cache that registered without `ADVF_NODATA` expects the data to be pushed, which is what
+/// the stock data-advice holder does; a bare view change leaves the fetching to a paint that a
+/// hidden or idle host never performs. The medium is this server's to free: the parameters of
+/// the call are inputs, so the host's side releases only its own unmarshalled copy.
+pub fn on_data_change(sink: &IAdviseSink, aspects: u32, format: u16, picture: Option<HGLOBAL>) {
+    let picture = picture.map(OwnedPicture);
+    send(marshal("advise sink", sink).map(|stream| Notice::OnDataChange(stream, aspects, format, picture)));
 }
 
 /// Hand a notice to the worker thread, dropping it when the host is too far behind to care.
@@ -122,23 +134,33 @@ fn deliver(notice: Notice) {
                 unsafe { sink.OnSave() };
             }
         }
-        Notice::OnDataChange(stream, aspects, format) => {
+        Notice::OnDataChange(stream, aspects, format, picture) => {
             if let Some(sink) = unmarshal::<IAdviseSink>("advise sink", stream) {
-                // The format is named and no medium is carried: the sink that wants the new
-                // picture fetches it, which is exactly the presentation cache's business.
+                // The format is named; the medium carries the new picture when one was built,
+                // and stays empty otherwise so a sink that prefers to pull still can.
+                let tymed = match &picture {
+                    Some(_) => TYMED_MFPICT.0 as u32,
+                    None => TYMED_NULL.0 as u32,
+                };
                 let formatetc = FORMATETC {
                     cfFormat: format,
                     ptd: std::ptr::null_mut(),
                     dwAspect: aspects,
                     lindex: -1,
-                    tymed: TYMED_NULL.0 as u32,
+                    tymed,
                 };
+                let handle = picture
+                    .as_ref()
+                    .map_or(std::ptr::null_mut(), |owned| owned.0 .0 as *mut _);
                 let medium = STGMEDIUM {
-                    tymed: TYMED_NULL.0 as u32,
-                    u: unsafe { std::mem::zeroed() },
+                    tymed,
+                    u: STGMEDIUM_0 { hMetaFilePict: handle },
                     pUnkForRelease: std::mem::ManuallyDrop::new(None),
                 };
                 unsafe { sink.OnDataChange(&formatetc, &medium) };
+            }
+            if let Some(owned) = picture {
+                crate::picture::discard_metafile_picture(owned.0);
             }
         }
         Notice::OnViewChange(stream, aspects) => {
