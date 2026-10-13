@@ -20,7 +20,7 @@ use eframe::egui::{
     Stroke, Vec2, ViewportCommand,
 };
 use mt_core::{Font, MathStyle, Side};
-use mt_edit::{Cursor, Editor, PaletteItem, palettes};
+use mt_edit::{Cursor, Editor, Palette, PaletteItem, palettes};
 use mt_layout::{Box as LayoutBox, LayoutStyle, RowAnchor, layout, layout_with_anchors, to_svg};
 use mt_render::metrics::{FaceMetrics, MATH_FONT};
 use mt_style_preset::StylePreset;
@@ -694,6 +694,8 @@ struct App {
     presets: Vec<StylePreset>,
     /// Which entry of `presets` the style comes from.
     preset_index: usize,
+    /// Which palette's fly-out panel is open, if any.
+    open_palette: Option<usize>,
     /// Whether the style/library side panel is open; closed by default so the canvas has the room.
     show_side_panel: bool,
     /// The formula library the side panel searches and inserts from.
@@ -827,6 +829,7 @@ impl App {
             style,
             presets,
             preset_index: 0,
+            open_palette: None,
             show_side_panel: false,
             library,
             library_name: String::new(),
@@ -1469,33 +1472,26 @@ impl eframe::App for App {
         if self.web_dialog {
             self.show_web_dialog(ui.ctx());
         }
-        // Every palette is a row of its own, expanded in the toolbar the way MathType's palettes
-        // are: the entries are what is visible, there is nothing to open and nothing pops out, so
-        // an entry is recognised by its own glyph or by the shape of its template. The rows are
-        // bounded and scroll, so the canvas keeps its room whatever the window size.
+        // One button per palette, wearing a few of its own entries on its face: clicking it opens
+        // the palette's entries in a panel anchored under the button, the way MathType's palettes
+        // work, so nothing in the toolbar has to be read off a name.
+        let mut anchor: Option<egui::Rect> = None;
         egui::Panel::top("toolbar").show(ui, |ui| {
-            let screen = ui.ctx().input(|state| state.raw.screen_rect);
-            let room = (screen.map_or(720.0, |rect| rect.height()) * 0.45).max(120.0);
-            egui::ScrollArea::vertical()
-                .max_height(room)
-                .id_salt("palette-rows")
-                .show(ui, |ui| {
-                    for palette in palettes() {
-                        ui.horizontal(|ui| {
-                            ui.add_sized(
-                                [96.0, 24.0],
-                                egui::Label::new(egui::RichText::new(palette.name).size(11.0)),
-                            );
-                            for column in palette.columns {
-                                for item in *column {
-                                    if palette_item_button(ui, *item, &self.metrics).clicked() {
-                                        self.apply_palette_item(*item);
-                                    }
-                                }
-                            }
-                        });
+            ui.horizontal_wrapped(|ui| {
+                for (index, palette) in palettes().iter().enumerate() {
+                    let response = palette_button(ui, palette, &self.metrics);
+                    if response.clicked() {
+                        self.open_palette = if self.open_palette == Some(index) {
+                            None
+                        } else {
+                            Some(index)
+                        };
                     }
-                });
+                    if self.open_palette == Some(index) {
+                        anchor = Some(response.rect);
+                    }
+                }
+            });
             ui.separator();
             ui.horizontal_wrapped(|ui| {
                 if ui
@@ -1592,6 +1588,42 @@ impl eframe::App for App {
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| self.draw_side_panel(ui));
                 });
+        }
+
+        // The open palette's entries: a framed panel hanging under its button, in the window
+        // rather than beside it, so it reads as part of the toolbar. A press anywhere outside the
+        // button and the panel closes it.
+        if let (Some(index), Some(anchor)) = (self.open_palette, anchor) {
+            let palette = palettes()[index];
+            let position = egui::pos2(anchor.left(), anchor.bottom() + 4.0);
+            let shown = egui::Area::new(egui::Id::new("palette-fly-out"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(position)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_max_width(620.0);
+                        ui.horizontal_wrapped(|ui| {
+                            for column in palette.columns {
+                                for item in *column {
+                                    if palette_entry_button(ui, *item, &self.metrics).clicked() {
+                                        self.apply_palette_item(*item);
+                                        self.open_palette = None;
+                                    }
+                                }
+                            }
+                        });
+                    });
+                });
+            let panel = shown.response.rect;
+            let pressed = ui.ctx().input(|state| {
+                state
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|point| state.pointer.any_pressed() && !panel.contains(point) && !anchor.contains(point))
+            });
+            if pressed {
+                self.open_palette = None;
+            }
         }
 
         egui::CentralPanel::default().show(ui, |ui| {
@@ -1700,53 +1732,122 @@ impl eframe::App for App {
 /// so clicking far from the equation drops the selection instead of teleporting the caret.
 const MAX_HIT_COST: f32 = 600.0;
 
-/// One palette entry as a button that shows what it would insert: a symbol draws its own glyph, a
-/// template is laid out — empty slots and all — and drawn scaled into the button, and an explicit
-/// space keeps its name. Hovering gives the entry's own description.
-fn palette_item_button(ui: &mut egui::Ui, item: PaletteItem, metrics: &FaceMetrics) -> egui::Response {
+/// One palette entry drawn at `center`: a symbol draws its own glyph, a template is laid out —
+/// empty slots and all — and drawn scaled around the point, and an explicit space keeps its name.
+fn draw_palette_item(
+    painter: &egui::Painter,
+    center: Pos2,
+    item: PaletteItem,
+    metrics: &FaceMetrics,
+    color: egui::Color32,
+    glyph_size: f32,
+) {
+    let math_font = |size: f64| FontId::new(size as f32, FontFamily::Name(MATH_FAMILY.into()));
+    match item {
+        PaletteItem::Symbol { ch, .. } => {
+            painter.text(
+                center,
+                Align2::CENTER_CENTER,
+                ch,
+                math_font(f64::from(glyph_size)),
+                color,
+            );
+        }
+        PaletteItem::Template(template) => {
+            let math = mt_core::Math::new(template.build().0);
+            let style = LayoutStyle::display(f64::from(glyph_size) * 0.62);
+            let boxes = layout(&math, metrics, &style);
+            let origin = Pos2::new(center.x - boxes.width() as f32 / 2.0, center.y);
+            draw_boxes(painter, &boxes, origin, metrics, color, &math_font);
+        }
+        PaletteItem::Space(_) => {
+            painter.text(
+                center,
+                Align2::CENTER_CENTER,
+                item.label(),
+                FontId::new(11.0, FontFamily::Proportional),
+                color,
+            );
+        }
+    }
+}
+
+/// A palette as a toolbar button: its first few entries drawn on the face are what says which
+/// kind of symbols are behind it.
+fn palette_button(ui: &mut egui::Ui, palette: &Palette, metrics: &FaceMetrics) -> egui::Response {
+    // Spaces have no glyph to wear, so the face is taken from the entries that have one; a palette
+    // that is nothing but spaces falls back to naming itself.
+    let face: Vec<PaletteItem> = palette
+        .columns
+        .iter()
+        .flat_map(|column| column.iter().copied())
+        .filter(|item| !matches!(item, PaletteItem::Space(_)))
+        .take(2)
+        .collect();
+    let name_only = face.is_empty();
+    let width = if name_only {
+        64.0
+    } else {
+        34.0 * face.len() as f32 + 14.0
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 48.0), Sense::click());
+    let visuals = ui.style().interact(&response);
+    ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);
+    let painter = ui.painter().with_clip_rect(rect.shrink(1.0));
+    if name_only {
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            palette.name,
+            FontId::new(12.0, FontFamily::Proportional),
+            visuals.text_color(),
+        );
+    }
+    let step = (rect.width() - 14.0) / face.len().max(1) as f32;
+    for (index, item) in face.iter().enumerate() {
+        let center = Pos2::new(
+            rect.left() + 7.0 + step * (index as f32 + 0.5),
+            rect.center().y,
+        );
+        draw_palette_item(
+            &painter,
+            center,
+            *item,
+            metrics,
+            visuals.text_color(),
+            30.0,
+        );
+    }
+    response.on_hover_text(format!("{}：点击展开同类条目", palette.name))
+}
+
+/// One entry inside an open palette panel, at a size that can be told apart at a glance.
+fn palette_entry_button(
+    ui: &mut egui::Ui,
+    item: PaletteItem,
+    metrics: &FaceMetrics,
+) -> egui::Response {
     let size = match item {
-        PaletteItem::Template(_) => egui::vec2(36.0, 24.0),
-        _ => egui::vec2(26.0, 24.0),
+        PaletteItem::Space(_) => egui::vec2(84.0, 52.0),
+        _ => egui::vec2(56.0, 52.0),
     };
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let visuals = ui.style().interact(&response);
     ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);
     let painter = ui.painter().with_clip_rect(rect.shrink(1.0));
-    let math_font = |size: f64| FontId::new(size as f32, FontFamily::Name(MATH_FAMILY.into()));
-    match item {
-        PaletteItem::Symbol { ch, .. } => {
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                ch,
-                math_font(16.0),
-                visuals.text_color(),
-            );
-        }
-        PaletteItem::Template(template) => {
-            let math = mt_core::Math::new(template.build().0);
-            let style = LayoutStyle::display(9.0);
-            let boxes = layout(&math, metrics, &style);
-            let origin = Pos2::new(rect.center().x - boxes.width() as f32 / 2.0, rect.center().y);
-            draw_boxes(
-                &painter,
-                &boxes,
-                origin,
-                metrics,
-                visuals.text_color(),
-                &math_font,
-            );
-        }
-        PaletteItem::Space(_) => {
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                item.label(),
-                FontId::new(11.0, FontFamily::Proportional),
-                visuals.text_color(),
-            );
-        }
-    }
+    let glyph = if matches!(item, PaletteItem::Template(_)) {
+        40.0
+    } else {
+        32.0
+    };
+    draw_palette_item(
+        &painter,
+        rect.center(),
+        item,
+        metrics,
+        visuals.text_color(),
+        glyph,
+    );
     response.on_hover_text(item.label())
 }
 
