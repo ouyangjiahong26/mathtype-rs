@@ -8,13 +8,16 @@
 //!
 //! The field spellings, in OOXML terms:
 //!
-//! * **Numbering** — the composite of the issue, as a complex field: a `MACROBUTTON MTPlaceRef`
-//!   wrapper whose display is `{SEQ MTEqn \h}` (a hidden per-equation index the macro can read)
-//!   followed by the visible label. The label comes in four shapes, one per [`NumberStyle`]:
-//!   plain `(n)`, `chapter` `(c.n)`, `section` `(c.s.n)` — the full triple of the issue — and
-//!   `paragraph` `(n)`, where `\s 1` makes Word restart the counter at every Heading 1.
-//!   Chapter and section counters are read with `\c` (repeat the most recent number without
-//!   incrementing): they are advanced only by the break fields, so the label cannot drift.
+//! * **Numbering** — the visible part is one or more SEQ fields, one per counter the style
+//!   shows, spelled by [`label_field_codes`]: plain `(n)`, `chapter` `(c.n)`, `section`
+//!   `(c.s.n)` — the full triple of the issue — and `paragraph` `(n)`, where `\s 1` makes Word
+//!   restart the counter at every Heading 1. Chapter and section counters are read with `\c`
+//!   (repeat the most recent number without incrementing): they are advanced only by the break
+//!   fields, so the label cannot drift. The codes render two ways, one per way a host takes
+//!   content: real fields through `Fields.Add` (what the Word add-in inserts) and the run
+//!   markup of [`numbered_inline`], whose document-XML spelling wraps the label in a
+//!   `MACROBUTTON MTPlaceRef` whose display is `{SEQ MTEqn \h}`, a hidden per-equation index
+//!   the macro can read.
 //! * **Breaks** — a hidden paragraph of SEQ fields with `\r`: `SEQ MTChap \r k` sets the chapter
 //!   counter, `SEQ MTSec \r k` the section counter, and `SEQ MTEqn \r 0` restarts the equation
 //!   counter, so the first equation after a break is number 1 of the new chapter/section.
@@ -52,7 +55,55 @@ const BOOKMARK_PREFIX: &str = "_RefMTEq";
 const SETTINGS_BOOKMARK: &str = "MTNumberSettings";
 /// Where the number's tab stop sits: the right margin of an A4 page with 3 cm side margins,
 /// in twentieths of a point.
-const MARGIN_TAB: &str = "8296";
+const MARGIN_TAB: i64 = 8296;
+
+/// How the tab stop that carries a number is aligned.
+///
+/// A right-side number sits at the right margin behind a right-aligned stop; a left-side one at
+/// the left edge behind a left-aligned stop. Both renderings of a number take their alignment
+/// from [`tab_alignment`], so the host-field side and the raw-XML side agree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabAlignment {
+    /// At the left edge, the tab's own position.
+    Left,
+    /// At the right margin, the number's right edge on it.
+    Right,
+}
+
+impl TabAlignment {
+    /// The `w:val` spelling in paragraph properties.
+    fn as_str(self) -> &'static str {
+        match self {
+            TabAlignment::Left => "left",
+            TabAlignment::Right => "right",
+        }
+    }
+
+    /// Word's `WdTabAlignment` value, for hosts that set the stop through the object model.
+    pub fn word_value(self) -> i32 {
+        match self {
+            TabAlignment::Left => 0,
+            TabAlignment::Right => 2,
+        }
+    }
+}
+
+/// How the number's tab stop is aligned, per side.
+pub fn tab_alignment(side: Side) -> TabAlignment {
+    match side {
+        Side::Right => TabAlignment::Right,
+        Side::Left => TabAlignment::Left,
+    }
+}
+
+/// The tab stop's position in twentieths of a point, for a paragraph that carries no page of
+/// its own: the right margin for a right-side number, the left edge for a left-side one.
+pub fn tab_position_twips(side: Side) -> i64 {
+    match side {
+        Side::Right => MARGIN_TAB,
+        Side::Left => 0,
+    }
+}
 
 /// How a number is composed. Each style is one spelling of the SEQ fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -217,45 +268,22 @@ fn field_runs(instr: &str, cached: &str, cached_hidden: bool) -> String {
     )
 }
 
-/// One SEQ sub-field of the visible label: ` SEQ <counter> <flags> `.
-fn seq_field(counter: &str, flags: &str, cached: &str) -> String {
-    field_runs(&format!(" SEQ {counter} {flags} "), cached, false)
-}
-
 /// The visible label of a numbering field, per style, without the wrapper.
+///
+/// The codes come from [`label_field_codes`], so the two renderings of a number - real host
+/// fields and this run markup - cannot drift apart. Each code is one field run with `1` as its
+/// cached result, the label's parentheses and dots are text runs.
 fn label_runs(style: NumberStyle) -> String {
-    match style {
-        NumberStyle::Plain => format!(
-            "{}{}{}",
-            text_run("(", false),
-            seq_field(EQN_COUNTER, "\\* ARABIC", "1"),
-            text_run(")", false)
-        ),
-        NumberStyle::Chapter => format!(
-            "{}{}{}{}{}",
-            text_run("(", false),
-            seq_field(CHAPTER_COUNTER, "\\c \\* ARABIC", "1"),
-            text_run(".", false),
-            seq_field(EQN_COUNTER, "\\* ARABIC", "1"),
-            text_run(")", false)
-        ),
-        NumberStyle::Section => format!(
-            "{}{}{}{}{}{}{}",
-            text_run("(", false),
-            seq_field(CHAPTER_COUNTER, "\\c \\* ARABIC", "1"),
-            text_run(".", false),
-            seq_field(SECTION_COUNTER, "\\c \\* ARABIC", "1"),
-            text_run(".", false),
-            seq_field(EQN_COUNTER, "\\* ARABIC", "1"),
-            text_run(")", false)
-        ),
-        NumberStyle::Paragraph => format!(
-            "{}{}{}",
-            text_run("(", false),
-            seq_field(EQN_COUNTER, "\\s 1 \\* ARABIC", "1"),
-            text_run(")", false)
-        ),
-    }
+    let fields: Vec<String> = label_field_codes(style)
+        .iter()
+        .map(|code| field_runs(&format!(" {code} "), "1", false))
+        .collect();
+    format!(
+        "{}{}{}",
+        text_run("(", false),
+        fields.join(&text_run(".", false)),
+        text_run(")", false)
+    )
 }
 
 /// The numbering field of the issue, as runs: a `MACROBUTTON MTPlaceRef` wrapper whose display
@@ -298,11 +326,9 @@ pub fn bookmark_runs(name: &str, id: i32, inner: &str) -> String {
 
 /// The paragraph properties of a numbered paragraph: the tab stop that positions the number.
 fn tabs_properties(side: Side) -> String {
-    let tab = match side {
-        Side::Right => format!("<w:tab w:val=\"right\" w:pos=\"{MARGIN_TAB}\"/>"),
-        Side::Left => "<w:tab w:val=\"left\" w:pos=\"0\"/>".to_string(),
-    };
-    format!("<w:tabs>{tab}</w:tabs>")
+    let alignment = tab_alignment(side).as_str();
+    let position = tab_position_twips(side);
+    format!("<w:tabs><w:tab w:val=\"{alignment}\" w:pos=\"{position}\"/></w:tabs>")
 }
 
 /// The tab-stop properties alone, for splicing into an existing `w:pPr`.
@@ -371,13 +397,15 @@ pub fn numbered_paragraph_standalone(
 /// sets the chapter counter to 1, the second to 2, and so on; the equation counter is reset to
 /// 0 so the next equation is number 1 of the new chapter or section.
 pub fn break_paragraph(kind: BreakKind, index: usize) -> String {
-    let counter = field_runs(
-        &format!(" SEQ {} \\r {index} ", kind.counter()),
-        &index.to_string(),
-        true,
-    );
-    let equation = field_runs(&format!(" SEQ {EQN_COUNTER} \\r 0 "), "0", true);
-    format!("<w:p>{counter}{equation}</w:p>")
+    // The codes come from [`break_field_codes`], so the two renderings cannot drift apart; the
+    // cached results are the reset values the paragraph shows while fields are unupdated.
+    let cached = [index.to_string(), "0".to_string()];
+    let fields: String = break_field_codes(kind, index)
+        .iter()
+        .zip(cached.iter())
+        .map(|(code, cached)| field_runs(&format!(" {code} "), cached, true))
+        .collect();
+    format!("<w:p>{fields}</w:p>")
 }
 
 /// The same break paragraph with namespaces declared, for raw-XML insertion into a host.
@@ -390,10 +418,43 @@ pub fn break_paragraph_standalone(kind: BreakKind, index: usize) -> String {
     )
 }
 
-/// A cross-reference field as runs: ` REF <bookmark> \h ` with the target's number cached.
+/// The field codes behind the visible label of one equation, one per counter the style shows.
+///
+/// The host inserts these as real Word fields and joins them with "." inside parentheses -
+/// markup insertion (`Range.InsertXML`) is not available on every host, fields are.
+pub fn label_field_codes(style: NumberStyle) -> Vec<String> {
+    match style {
+        NumberStyle::Plain => vec![format!("SEQ {EQN_COUNTER} \\* ARABIC")],
+        NumberStyle::Chapter => vec![
+            format!("SEQ {CHAPTER_COUNTER} \\c \\* ARABIC"),
+            format!("SEQ {EQN_COUNTER} \\* ARABIC"),
+        ],
+        NumberStyle::Section => vec![
+            format!("SEQ {CHAPTER_COUNTER} \\c \\* ARABIC"),
+            format!("SEQ {SECTION_COUNTER} \\c \\* ARABIC"),
+            format!("SEQ {EQN_COUNTER} \\* ARABIC"),
+        ],
+        NumberStyle::Paragraph => vec![format!("SEQ {EQN_COUNTER} \\s 1 \\* ARABIC")],
+    }
+}
+
+/// The fields one break paragraph is made of: the counter reset and the equation restart.
+pub fn break_field_codes(kind: BreakKind, index: usize) -> Vec<String> {
+    vec![
+        format!("SEQ {} \\r {index}", kind.counter()),
+        format!("SEQ {EQN_COUNTER} \\r 0"),
+    ]
+}
+
+/// The field code of a cross-reference to a numbered equation's bookmark.
+pub fn reference_code(bookmark: &str) -> String {
+    format!("REF {bookmark} \\h")
+}
+
+/// A cross-reference field as runs: [`reference_code`] with the target's number cached.
 pub fn reference_runs(bookmark: &str, number: usize) -> String {
     field_runs(
-        &format!(" REF {bookmark} \\h "),
+        &format!(" {} ", reference_code(bookmark)),
         &format!("({number})"),
         false,
     )

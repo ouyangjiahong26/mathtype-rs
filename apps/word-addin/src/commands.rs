@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use mt_layout::{ApproxMetrics, LayoutStyle, layout};
 use mt_render::metrics::MATH_FONT;
 use mt_render::{RenderOptions, render_png};
-use windows::Win32::Foundation::{DISP_E_MEMBERNOTFOUND, DISP_E_UNKNOWNNAME};
+use windows::Win32::Foundation::{DISP_E_MEMBERNOTFOUND, DISP_E_UNKNOWNNAME, E_FAIL};
 use windows::Win32::System::Com::CLSIDFromProgID;
 use windows::core::PCWSTR;
 
@@ -45,6 +45,50 @@ fn failed(operation: &'static str) -> impl Fn(windows::core::Error) -> String {
     move |error| format!("{operation}: {error}")
 }
 
+/// Puts the equation on the clipboard and pastes it at the selection, trying a few times.
+///
+/// The clipboard is a shared resource and the paste is only as good as the formats that survive
+/// it: when the HTML fragment loses the race, Word pastes the fallback LaTeX text and reports
+/// success all the same. A paste that did not grow the document's equations is undone and the
+/// pair is tried again.
+fn paste_equation(
+    application: &Object,
+    selection: &Object,
+    omml: &str,
+    latex: &str,
+) -> Result<(), windows::core::Error> {
+    let document = word::active_document(application)?;
+    let count = |document: &Object| -> Result<i32, windows::core::Error> {
+        let equations = word::equations(document)?;
+        word::count(&equations)
+    };
+    let before = count(&document)?;
+    let mut last = None;
+    for _ in 0..3 {
+        let attempt = clipboard::put_equation(omml, latex)
+            .and_then(|_| selection.call("Paste", Vec::new()).map(|_| ()))
+            .and_then(|_| {
+                if count(&document)? == before + 1 {
+                    Ok(())
+                } else {
+                    // The fallback text landed instead of the equation: take the paste back out.
+                    let _ = application.call("Undo", Vec::new());
+                    Err(windows::core::Error::new(
+                        E_FAIL,
+                        "the pasted content was the LaTeX fallback text, not an equation",
+                    ))
+                }
+            });
+        match attempt {
+            Ok(()) => return Ok(()),
+            Err(error) => last = Some(error),
+        }
+    }
+    Err(last.unwrap_or_else(|| {
+        windows::core::Error::new(E_FAIL, "the equation paste did not take after three attempts")
+    }))
+}
+
 /// Turns the selected LaTeX into a native Word equation.
 pub fn to_equation(application: &Object) -> Outcome {
     let selection =
@@ -55,10 +99,7 @@ pub fn to_equation(application: &Object) -> Outcome {
     let latex = selected_latex(&selection)?;
     let math = mt_tex::parse(&latex).map_err(|error| format!("not LaTeX: {error}"))?;
     let markup = mt_omml::write(&math);
-    clipboard::put_equation(&markup, &latex)
-        .map_err(failed("the clipboard could not be filled"))?;
-    selection
-        .call("Paste", Vec::new())
+    paste_equation(application, &selection, &markup, &latex)
         .map_err(failed("the equation could not be pasted"))?;
     Ok(format!("equation inserted: {latex}"))
 }
@@ -445,14 +486,88 @@ fn document_xml(application: &Object) -> Result<String, String> {
         .map_err(failed("the document could not be read"))
 }
 
-/// Inserts raw WordprocessingML at the selection, replacing it.
-fn insert_xml(selection: &Object, xml: &str) -> Result<(), String> {
+/// Inserts one Word field at the selection and leaves the selection just past it.
+///
+/// The type is `wdFieldEmpty`: the code carries the field's own name (`SEQ ...`, `REF ...`).
+fn insert_field(document: &Object, selection: &Object, code: &str) -> Result<(), String> {
+    let fields = document
+        .get_object("Fields")
+        .map_err(failed("the fields could not be read"))?;
     let range = selection
         .get_object("Range")
         .map_err(failed("the selection could not be read"))?;
+    fields
+        .call_object(
+            "Add",
+            vec![
+                Variant::dispatch(range.as_dispatch()),
+                Variant::i32(-1),
+                Variant::bstr(code),
+                Variant::boolean(true),
+            ],
+        )
+        .map_err(failed("the field could not be added"))?;
+    // The caret stays in front of the inserted field, and a field counts as one character: one
+    // step right puts the selection where the label continues. (The `Field` object `Add` returns
+    // answers no names through this dispatch path, so its range is no help.)
+    selection
+        .call("MoveRight", vec![Variant::i32(1), Variant::i32(1)])
+        .map_err(failed("the selection could not be moved"))?;
+    Ok(())
+}
+
+/// Types an equation's label at the selection: an opening parenthesis, one field per counter
+/// the style shows joined by dots, and the closing parenthesis - all wrapped in the bookmark a
+/// cross-reference points at.
+fn insert_label(
+    document: &Object,
+    selection: &Object,
+    codes: &[String],
+    bookmark: &str,
+) -> Result<(), String> {
+    let start = selection
+        .get("Start")
+        .and_then(|value| value.number())
+        .map_err(failed("step: read start"))? as i32;
+    selection
+        .call("TypeText", vec![Variant::bstr("(")])
+        .map_err(failed("step: open parenthesis"))?;
+    for (index, code) in codes.iter().enumerate() {
+        if index > 0 {
+            selection
+                .call("TypeText", vec![Variant::bstr(".")])
+                .map_err(failed("step: separator"))?;
+        }
+        insert_field(document, selection, code)
+            .map_err(|error| format!("step: field: {error}"))?;
+    }
+    selection
+        .call("TypeText", vec![Variant::bstr(")")])
+        .map_err(failed("step: close parenthesis"))?;
+    let end = selection
+        .get("End")
+        .and_then(|value| value.number())
+        .map_err(failed("step: read end"))? as i32;
+    // The label's span comes from a range stretched back to where the "(" landed: `Document.Range`
+    // is a parameterized property and hosts answer a method dispatch on it with "unknown name".
+    let range = selection
+        .get_object("Range")
+        .map_err(failed("step: label range"))?;
     range
-        .call("InsertXML", vec![Variant::bstr(xml)])
-        .map_err(failed("the markup could not be inserted"))?;
+        .put("Start", Variant::i32(start))
+        .map_err(failed("step: stretch start"))?;
+    range
+        .put("End", Variant::i32(end))
+        .map_err(failed("step: stretch end"))?;
+    document
+        .get_object("Bookmarks")
+        .and_then(|bookmarks| {
+            bookmarks.call_object(
+                "Add",
+                vec![Variant::bstr(bookmark), Variant::dispatch(range.as_dispatch())],
+            )
+        })
+        .map_err(failed("step: bookmark"))?;
     Ok(())
 }
 
@@ -460,23 +575,84 @@ fn insert_xml(selection: &Object, xml: &str) -> Result<(), String> {
 /// Word field, wrapped in the bookmark a cross-reference points at (#11).
 ///
 /// The style and side come from the document's numbering settings (the hidden `MTNumberSettings`
-/// marker), so a document numbered in one shape keeps that shape.
+/// marker), so a document numbered in one shape keeps that shape. Nothing here goes through
+/// `Range.InsertXML`: hosts reject block markup there ("XML markup cannot be inserted at the
+/// specified location", at every position tried), so the equation is pasted the way every other
+/// conversion puts one in the document, and the number is built from real fields.
 pub fn insert_numbered_equation(application: &Object) -> Outcome {
     let selection =
         word::selection(application).map_err(failed("the selection could not be read"))?;
     let latex = selected_latex(&selection)?;
     let math = mt_tex::parse(&latex).map_err(|error| format!("not LaTeX: {error}"))?;
+    let markup = mt_omml::write(&math);
     let xml = document_xml(application)?;
     let (style, side) = mt_numbering::parse_settings(&xml);
-    let (bookmark, id) = mt_numbering::unique_bookmark_in_xml(&xml);
-    let markup = mt_numbering::numbered_paragraph_standalone(
-        &mt_omml::write(&math),
-        style,
-        side,
-        &bookmark,
-        id,
-    );
-    insert_xml(&selection, &markup)?;
+    let (bookmark, _id) = mt_numbering::unique_bookmark_in_xml(&xml);
+    let codes = mt_numbering::label_field_codes(style);
+    let document =
+        word::active_document(application).map_err(failed("the document could not be read"))?;
+
+    let paste = || paste_equation(application, &selection, &markup, &latex);
+
+    match side {
+        mt_numbering::Side::Left => {
+            insert_label(&document, &selection, &codes, &bookmark)?;
+            selection
+                .call("TypeText", vec![Variant::bstr("\t")])
+                .map_err(failed("the number could not be inserted"))?;
+            paste().map_err(failed("the equation could not be pasted"))?;
+        }
+        mt_numbering::Side::Right => {
+            paste().map_err(failed("the equation could not be pasted"))?;
+            // One step right leaves the equation: typing that follows an equation otherwise
+            // joins its math zone (the label would become part of the formula), and the fields
+            // inside a math zone are math runs, not the `w:instrText` a host's XML shows.
+            selection
+                .call("MoveRight", vec![Variant::i32(1), Variant::i32(1)])
+                .map_err(failed("the number could not be inserted"))?;
+            selection
+                .call("TypeText", vec![Variant::bstr("\t")])
+                .map_err(failed("the number could not be inserted"))?;
+            insert_label(&document, &selection, &codes, &bookmark)?;
+        }
+    }
+
+    // The number sits behind a tab stop at its side's edge - the right margin for a right-side
+    // number (the default and the shape every paper uses), the left edge for a left-side one.
+    // The alignment and both positions come from `mt-numbering`, so the host-field rendering
+    // and the raw-XML rendering of a number cannot drift apart.
+    let page = document
+        .get_object("PageSetup")
+        .map_err(failed("the page could not be measured"))?;
+    let width = page
+        .get("PageWidth")
+        .and_then(|value| value.number())
+        .map_err(failed("the page could not be measured"))?;
+    let margin = page
+        .get("RightMargin")
+        .and_then(|value| value.number())
+        .map_err(failed("the page could not be measured"))?;
+    let position = match side {
+        mt_numbering::Side::Right => (width - margin).max(0.0),
+        mt_numbering::Side::Left => 0.0,
+    };
+    let stops = selection
+        .get_object("ParagraphFormat")
+        .and_then(|format| format.get_object("TabStops"))
+        .map_err(failed("the number could not be placed"))?;
+    stops
+        .call("ClearAll", Vec::new())
+        .map_err(failed("the number could not be placed"))?;
+    stops
+        .call(
+            "Add",
+            vec![
+                Variant::r8(position),
+                Variant::i32(mt_numbering::tab_alignment(side).word_value()),
+            ],
+        )
+        .map_err(failed("the number could not be placed"))?;
+
     Ok(format!("numbered equation inserted as {bookmark}: {latex}"))
 }
 
@@ -495,8 +671,29 @@ fn insert_break(application: &Object, kind: mt_numbering::BreakKind) -> Outcome 
         word::selection(application).map_err(failed("the selection could not be read"))?;
     let xml = document_xml(application)?;
     let index = mt_numbering::break_count_in_xml(&xml, kind) + 1;
-    let markup = mt_numbering::break_paragraph_standalone(kind, index);
-    insert_xml(&selection, &markup)?;
+    let document =
+        word::active_document(application).map_err(failed("the document could not be read"))?;
+    // The break is a line of hidden reset fields: it restarts the counters and shows nothing.
+    // A line of its own also keeps the typing off the numbered line the caret may sit at the
+    // end of, where it would land inside that equation's bookmark.
+    selection
+        .call("TypeParagraph", Vec::new())
+        .map_err(failed("the break line could not be started"))?;
+    for code in mt_numbering::break_field_codes(kind, index) {
+        insert_field(&document, &selection, &code)?;
+        selection
+            .call("TypeText", vec![Variant::bstr(" ")])
+            .map_err(failed("the reset field could not be inserted"))?;
+    }
+    let paragraph = selection
+        .get_object("Paragraphs")
+        .and_then(|paragraphs| paragraphs.call_object("Item", vec![Variant::i32(1)]))
+        .and_then(|paragraph| paragraph.get_object("Range"))
+        .and_then(|range| range.get_object("Font"))
+        .map_err(failed("the break line could not be read"))?;
+    paragraph
+        .put("Hidden", Variant::boolean(true))
+        .map_err(failed("the break line could not be hidden"))?;
     Ok(format!(
         "{} break {} inserted; update fields to renumber",
         kind.as_str(),
@@ -514,11 +711,9 @@ pub fn insert_cross_reference(application: &Object) -> Outcome {
     let Some((number, bookmark)) = numbered.last() else {
         return Err("the document holds no numbered equation to reference".to_string());
     };
-    let markup = format!(
-        "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{}</w:p>",
-        mt_numbering::reference_runs(bookmark, *number)
-    );
-    insert_xml(&selection, &markup)?;
+    let document =
+        word::active_document(application).map_err(failed("the document could not be read"))?;
+    insert_field(&document, &selection, &mt_numbering::reference_code(bookmark))?;
     Ok(format!(
         "cross-reference to equation {number} ({bookmark}) inserted"
     ))
