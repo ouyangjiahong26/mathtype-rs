@@ -12,7 +12,8 @@
 
       HKLM\Software\Classes\CLSID\{clsid}
           (default)                 "MathType Rs equation"
-          ProgID                    MathTypeRs.Equation.1
+          ProgID\                   (default) MathTypeRs.Equation.1, what maps the class back
+          VersionIndependentProgID\ (default) MathTypeRs.Equation, the unversioned name
           LocalServer32\            (default) "<server.exe>" -Embedding
           DefaultIcon\              (default) "<server.exe>",0
           InProcHandler32\          (default) "ole32.dll", the handler a host loads for a local server
@@ -118,8 +119,16 @@ Set-ItemProperty -Path "$classKey\InProcHandler32" -Name '(default)' -Value 'ole
 New-Item -Path "$classKey\InProcHandler" -Force | Out-Null
 Set-ItemProperty -Path "$classKey\InProcHandler" -Name '(default)' -Value 'ole2.dll'
 
-Set-ItemProperty -Path $classKey -Name 'ProgID' -Value $progId
-Set-ItemProperty -Path $classKey -Name 'VersionIndependentProgID' -Value $unversioned
+# `ProgIDFromCLSID` reads the default value of these two subkeys to map a class back to its
+# programmatic identifiers - the reverse of the ProgID -> CLSID lookup that works already. The
+# same names as values on the class key are inert there too, which is what left Word reporting
+# `OLEFormat.ClassType/ProgID` as "Unknown"/empty for this class while its own classes round-trip.
+New-Item -Path "$classKey\ProgID" -Force | Out-Null
+Set-ItemProperty -Path "$classKey\ProgID" -Name '(default)' -Value $progId
+New-Item -Path "$classKey\VersionIndependentProgID" -Force | Out-Null
+Set-ItemProperty -Path "$classKey\VersionIndependentProgID" -Name '(default)' -Value $unversioned
+Remove-ItemProperty -Path $classKey -Name 'ProgID' -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path $classKey -Name 'VersionIndependentProgID' -ErrorAction SilentlyContinue
 # The flags for the default aspect go in the default value of the `MiscStatus` subkey. All 164
 # classes under HKLM\Software\Classes\CLSID that carry a `MiscStatus` use the subkey this way.
 New-Item -Path "$classKey\MiscStatus" -Force | Out-Null

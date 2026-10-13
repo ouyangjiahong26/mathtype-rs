@@ -62,8 +62,11 @@ $tempDir     = Join-Path $env:TEMP 'mathtype-ole-server'
 $pointer     = Join-Path $tempDir 'current-handoff.txt'
 $handoffLog  = Join-Path $tempDir 'handoff-log.txt'
 $log         = Join-Path $tempDir 'server.log'
-$docx        = Join-Path $tempDir 'verify-equation.docx'
-$bin         = Join-Path $tempDir 'verify-equation.bin'
+# A fresh name every run: the WPS step leaves its window open on the saved document for a person
+# to double-click (its recipe below), and the next run's SaveAs2 must not collide with that.
+$stamp        = Get-Date -Format 'yyyyMMdd-HHmmss'
+$docx         = Join-Path $tempDir "verify-equation-$stamp.docx"
+$bin          = Join-Path $tempDir "verify-equation-$stamp.bin"
 $shot        = Join-Path $tempDir 'wps-window.png'
 $utf8NoBom   = New-Object System.Text.UTF8Encoding($false)
 
@@ -150,7 +153,7 @@ Step '2. register'
 $classes  = if ($Scope -eq 'Machine') { 'HKLM:\Software\Classes' } else { 'HKCU:\Software\Classes' }
 $classKey = Join-Path $classes "CLSID\$classId"
 $localServer = (Get-ItemProperty -LiteralPath "$classKey\LocalServer32").'(default)'
-$registeredProgId = (Get-ItemProperty -LiteralPath $classKey).ProgID
+$registeredProgId = (Get-ItemProperty -LiteralPath (Join-Path $classKey 'ProgID')).'(default)'
 $progIdClass = (Get-ItemProperty -LiteralPath (Join-Path $classes "$progId\CLSID")).'(default)'
 $insertable = Test-Path -LiteralPath "$classKey\Insertable"
 Write-Host "    scope              : $Scope ($classes)"
@@ -172,7 +175,7 @@ $doc = $null
 $shape = $null
 try {
     $word = New-Object -ComObject Word.Application
-    $word.Visible = $false
+    $word.Visible = $true
     $word.DisplayAlerts = 0
     $doc = $word.Documents.Add()
     Ok "Word started, document created (pid $((Get-Process -Name WINWORD -ErrorAction SilentlyContinue |
@@ -187,6 +190,14 @@ try {
         Ok "inserted an inline shape: type=$($shape.Type) width=$([math]::Round($shape.Width,1))pt height=$([math]::Round($shape.Height,1))pt"
         Write-Host "    OLEFormat.ClassType : $($shape.OLEFormat.ClassType)"
         Write-Host "    OLEFormat.ProgID    : $($shape.OLEFormat.ProgID)"
+        # A class whose `ProgID` subkey is missing reports "Unknown"/empty here even though the
+        # ProgID -> CLSID lookup works, because mapping the class back (`ProgIDFromCLSID`) is what
+        # Word does to fill these two; hosts use them to find this class's objects again.
+        if ($shape.OLEFormat.ProgID -eq $progId) {
+            Ok "OLEFormat.ProgID names the class ($progId)"
+        } else {
+            Fail "OLEFormat.ProgID reports '$($shape.OLEFormat.ProgID)' instead of '$progId'"
+        }
     }
 } catch {
     Fail "inserting the object failed: $($_.Exception.Message)"
@@ -334,6 +345,7 @@ if ($null -ne $doc) {
         # same way), so they go in through [ref] on raw typed variables.
         [string] $savePath = $docx
         [int] $saveFormat = 16
+        Write-Host '    asking Word to write the document'
         $doc.SaveAs2([ref] $savePath, [ref] $saveFormat)
         $doc.Close(0)
         $doc = $null
@@ -406,6 +418,11 @@ try {
     if ($count -ge 1) {
         $shape2 = $doc2.InlineShapes.Item(1)
         Write-Host "    ClassType : $($shape2.OLEFormat.ClassType)"
+        if ($shape2.OLEFormat.ProgID -eq $progId) {
+            Ok "the reopened object reports its ProgID ($progId)"
+        } else {
+            Fail "the reopened object reports ProgID '$($shape2.OLEFormat.ProgID)' instead of '$progId'"
+        }
         # As in step 6: keep asking, because the reopened object reads its streams on its own and
         # the first answer can still be the one it had before the document was written.
         $reopened = $null
