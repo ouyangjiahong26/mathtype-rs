@@ -182,7 +182,7 @@ struct Inner {
     /// Storage the host handed over, and the site and sinks to tell about changes.
     storage: Option<IStorage>,
     client_site: Option<IOleClientSite>,
-    advises: Vec<(u32, IAdviseSink)>,
+    advises: Vec<(u32, u16, IAdviseSink)>,
     view_advise: Option<(u32, IAdviseSink)>,
     next_advise: u32,
     /// The editor running on this object, if it is.
@@ -298,7 +298,7 @@ impl Inner {
         self.status = message.to_owned();
     }
 
-    fn sinks(&self) -> Vec<(u32, IAdviseSink)> {
+    fn sinks(&self) -> Vec<(u32, u16, IAdviseSink)> {
         self.advises.clone()
     }
 }
@@ -373,7 +373,7 @@ fn tick(inner: &RefCell<Inner>) {
         let mut state = inner.borrow_mut();
         if let Some(session) = state.session.take() {
             message = match outcome {
-                Ok(text) if text == state.latex => {
+                Ok(text) if text == session.initial => {
                     format!(
                         "session {} closed without changing the equation",
                         session.id
@@ -489,21 +489,33 @@ fn announce_saved(inner: &RefCell<Inner>) {
             state.size_points,
         )
     };
-    // The new picture goes with each notice, the way the stock data-advice holder sends it: a
-    // cache that did not ask for NODATA is waiting for the push, not for a fetch of its own.
-    // One recording per connection, because the worker frees the one it sent.
+    // The new picture goes with each notice, in the format that connection registered for: a
+    // cache that asked for CF_ENHMETAFILE ignores a CF_METAFILEPICT push, and one that asked
+    // for the classic format ignores a metafile handle. One recording per connection, because
+    // the worker frees the one it sent.
     let presentation = picture::presentation(&math, size_points, extent);
-    for (connection, sink) in sinks {
+    for (connection, format, sink) in sinks {
         trace::log(&format!("advise connection {connection}: OnSave"));
         crate::notify::on_save(&sink);
         trace::log(&format!("advise connection {connection}: OnViewChange"));
         crate::notify::on_view_change(&sink, DVASPECT_CONTENT.0 as u32);
-        let fresh = presentation.as_ref().and_then(picture::metafile_picture);
-        trace::log(&format!(
-            "advise connection {connection}: OnDataChange(CF_METAFILEPICT, {})",
-            if fresh.is_some() { "with picture" } else { "empty medium" }
-        ));
-        crate::notify::on_data_change(&sink, DVASPECT_CONTENT.0 as u32, CF_METAFILEPICT.0, fresh);
+        let pushed = presentation.as_ref().and_then(|picture| {
+            if format == CF_METAFILEPICT.0 {
+                picture::metafile_picture(picture).map(crate::notify::PushedPicture::MetaFilePict)
+            } else if format == CF_ENHMETAFILE.0 {
+                let handle = unsafe { SetEnhMetaFileBits(&picture.emf) };
+                (!handle.is_invalid()).then_some(crate::notify::PushedPicture::EnhMetaFile(handle))
+            } else {
+                None
+            }
+        });
+        if format != 0 {
+            trace::log(&format!(
+                "advise connection {connection}: OnDataChange(format {format}, {})",
+                if pushed.is_some() { "with picture" } else { "empty medium" }
+            ));
+            crate::notify::on_data_change(&sink, DVASPECT_CONTENT.0 as u32, format, pushed);
+        }
     }
     if let Some((aspects, sink)) = view {
         trace::log("view advise: OnViewChange");
@@ -826,7 +838,7 @@ impl IOleObject_Impl for EquationObject_Impl {
         let mut inner = self.inner.borrow_mut();
         let connection = inner.next_advise;
         inner.next_advise += 1;
-        inner.advises.push((connection, sink));
+        inner.advises.push((connection, 0, sink));
         trace::log(&format!("Advise -> connection {connection}"));
         Ok(connection)
     }
@@ -836,7 +848,7 @@ impl IOleObject_Impl for EquationObject_Impl {
         let before = inner.advises.len();
         inner
             .advises
-            .retain(|(connection, _)| *connection != dwconnection);
+            .retain(|(connection, _, _)| *connection != dwconnection);
         if inner.advises.len() == before {
             return Err(Error::from_hresult(OLE_E_NOCONNECTION));
         }
@@ -1033,7 +1045,7 @@ impl IDataObject_Impl for EquationObject_Impl {
         let mut inner = self.inner.borrow_mut();
         let connection = inner.next_advise;
         inner.next_advise += 1;
-        inner.advises.push((connection, sink));
+        inner.advises.push((connection, format, sink));
         trace::log(&format!("DAdvise(format {format}, flags {:#x}) -> connection {connection}", _advf));
         Ok(connection)
     }
@@ -1043,7 +1055,7 @@ impl IDataObject_Impl for EquationObject_Impl {
         let before = inner.advises.len();
         inner
             .advises
-            .retain(|(connection, _)| *connection != dwconnection);
+            .retain(|(connection, _, _)| *connection != dwconnection);
         if inner.advises.len() == before {
             return Err(Error::from_hresult(OLE_E_NOCONNECTION));
         }

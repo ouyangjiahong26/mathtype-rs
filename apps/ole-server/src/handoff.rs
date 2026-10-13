@@ -45,6 +45,11 @@ pub struct Session {
     pub path: PathBuf,
     /// Process id of the editor, which is what "double-clicking the equation" shows up as.
     pub editor_pid: u32,
+    /// The text the editor was given, so what it hands back can be told apart from the source it
+    /// started with. An editor opened before the equation was set — which is what an insertion
+    /// does, the editor appearing while the source is still being handed over — writes its own
+    /// copy back on exit and would otherwise revert the equation set underneath it.
+    pub initial: String,
     child: Option<Child>,
 }
 
@@ -78,6 +83,7 @@ impl Session {
             id,
             path,
             editor_pid: child.id(),
+            initial: latex.to_owned(),
             child: Some(child),
         };
         session.record(&editor, "started");

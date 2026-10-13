@@ -18,8 +18,9 @@ use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
 
 use windows::Win32::System::Com::Marshal::CoMarshalInterThreadInterfaceInStream;
 use windows::Win32::System::Com::StructuredStorage::CoGetInterfaceAndReleaseStream;
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, FORMATETC, IAdviseSink, IStream, STGMEDIUM, STGMEDIUM_0, TYMED_MFPICT, TYMED_NULL};
+use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, FORMATETC, IAdviseSink, IStream, STGMEDIUM, STGMEDIUM_0, TYMED_ENHMF, TYMED_MFPICT, TYMED_NULL};
 use windows::Win32::Foundation::HGLOBAL;
+use windows::Win32::Graphics::Gdi::{DeleteEnhMetaFile, HENHMETAFILE};
 use windows::core::{IUnknown, Interface};
 
 use crate::storage::error_text;
@@ -32,16 +33,22 @@ const QUEUE: usize = 32;
 enum Notice {
     OnSave(Stream),
     OnViewChange(Stream, u32),
-    OnDataChange(Stream, u32, u16, Option<OwnedPicture>),
+    OnDataChange(Stream, u32, u16, Option<PushedPicture>),
 }
 
-/// A `CF_METAFILEPICT` in global memory on its way to the worker thread.
-///
-/// Global memory and metafile handles belong to the process, not to an apartment, so moving one
-/// between threads is safe; the wrapper only exists to say so.
-struct OwnedPicture(HGLOBAL);
 
-unsafe impl Send for OwnedPicture {}
+/// A picture on its way to the worker thread, in one of the two metafile forms a host's cache
+/// may have registered for.
+pub enum PushedPicture {
+    /// A `CF_METAFILEPICT` in global memory.
+    MetaFilePict(HGLOBAL),
+    /// A `CF_ENHMETAFILE` as an enhanced-metafile handle.
+    EnhMetaFile(HENHMETAFILE),
+}
+
+// SAFETY: global memory and metafile handles belong to the process, not to an apartment, so
+// moving either between threads hands the worker a value it can use as it is.
+unsafe impl Send for PushedPicture {}
 
 /// A marshalled interface on its way to the worker thread.
 struct Stream(IStream);
@@ -80,8 +87,7 @@ pub fn on_view_change(sink: &IAdviseSink, aspects: u32) {
 /// the stock data-advice holder does; a bare view change leaves the fetching to a paint that a
 /// hidden or idle host never performs. The medium is this server's to free: the parameters of
 /// the call are inputs, so the host's side releases only its own unmarshalled copy.
-pub fn on_data_change(sink: &IAdviseSink, aspects: u32, format: u16, picture: Option<HGLOBAL>) {
-    let picture = picture.map(OwnedPicture);
+pub fn on_data_change(sink: &IAdviseSink, aspects: u32, format: u16, picture: Option<PushedPicture>) {
     send(marshal("advise sink", sink).map(|stream| Notice::OnDataChange(stream, aspects, format, picture)));
 }
 
@@ -136,10 +142,11 @@ fn deliver(notice: Notice) {
         }
         Notice::OnDataChange(stream, aspects, format, picture) => {
             if let Some(sink) = unmarshal::<IAdviseSink>("advise sink", stream) {
-                // The format is named; the medium carries the new picture when one was built,
-                // and stays empty otherwise so a sink that prefers to pull still can.
+                // The medium carries the picture in the form this connection registered for:
+                // global memory wrapping a classic metafile, or an enhanced-metafile handle.
                 let tymed = match &picture {
-                    Some(_) => TYMED_MFPICT.0 as u32,
+                    Some(PushedPicture::MetaFilePict(_)) => TYMED_MFPICT.0 as u32,
+                    Some(PushedPicture::EnhMetaFile(_)) => TYMED_ENHMF.0 as u32,
                     None => TYMED_NULL.0 as u32,
                 };
                 let formatetc = FORMATETC {
@@ -149,18 +156,31 @@ fn deliver(notice: Notice) {
                     lindex: -1,
                     tymed,
                 };
-                let handle = picture
-                    .as_ref()
-                    .map_or(std::ptr::null_mut(), |owned| owned.0 .0 as *mut _);
                 let medium = STGMEDIUM {
                     tymed,
-                    u: STGMEDIUM_0 { hMetaFilePict: handle },
+                    u: match &picture {
+                        Some(PushedPicture::MetaFilePict(memory)) => STGMEDIUM_0 {
+                            hMetaFilePict: memory.0 as *mut _,
+                        },
+                        Some(PushedPicture::EnhMetaFile(handle)) => STGMEDIUM_0 {
+                            hEnhMetaFile: *handle,
+                        },
+                        None => STGMEDIUM_0 {
+                            hMetaFilePict: std::ptr::null_mut(),
+                        },
+                    },
                     pUnkForRelease: std::mem::ManuallyDrop::new(None),
                 };
                 unsafe { sink.OnDataChange(&formatetc, &medium) };
             }
-            if let Some(owned) = picture {
-                crate::picture::discard_metafile_picture(owned.0);
+            match picture {
+                Some(PushedPicture::MetaFilePict(memory)) => {
+                    crate::picture::discard_metafile_picture(memory)
+                }
+                Some(PushedPicture::EnhMetaFile(handle)) => {
+                    let _ = unsafe { DeleteEnhMetaFile(Some(handle)) };
+                }
+                None => {}
             }
         }
         Notice::OnViewChange(stream, aspects) => {
