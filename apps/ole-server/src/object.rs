@@ -483,12 +483,20 @@ fn announce_saved(inner: &RefCell<Inner>) {
         let state = inner.borrow();
         (state.sinks(), state.view_advise.clone())
     };
+    // Word advises through `IOleObject::Advise` and never sets the view advise, so the picture
+    // change is said on every sink: `IAdviseSink` carries both notices on one interface. A host
+    // that misses the view change keeps showing the picture it cached when the object was
+    // inserted, which is exactly the stale equation a saved document then freezes in.
     for (connection, sink) in sinks {
         trace::log(&format!("advise connection {connection}: OnSave"));
         crate::notify::on_save(&sink);
+        trace::log(&format!("advise connection {connection}: OnViewChange"));
+        crate::notify::on_view_change(&sink, DVASPECT_CONTENT.0 as u32);
+        trace::log(&format!("advise connection {connection}: OnDataChange(CF_METAFILEPICT)"));
+        crate::notify::on_data_change(&sink, DVASPECT_CONTENT.0 as u32, CF_METAFILEPICT.0);
     }
     if let Some((aspects, sink)) = view {
-        trace::log("advise connection: OnViewChange");
+        trace::log("view advise: OnViewChange");
         crate::notify::on_view_change(&sink, aspects);
     }
 }
@@ -996,15 +1004,41 @@ impl IDataObject_Impl for EquationObject_Impl {
 
     fn DAdvise(
         &self,
-        _pformatetc: *const FORMATETC,
+        pformatetc: *const FORMATETC,
         _advf: u32,
-        _padvsink: Ref<IAdviseSink>,
+        padvsink: Ref<IAdviseSink>,
     ) -> WinResult<u32> {
-        Err(Error::from_hresult(OLE_E_ADVISENOTSUPPORTED))
+        let Some(sink) = padvsink.cloned() else {
+            return Err(Error::from_hresult(E_POINTER));
+        };
+        if pformatetc.is_null() {
+            return Err(Error::from_hresult(E_POINTER));
+        }
+        let format = unsafe { (*pformatetc).cfFormat };
+        // The host's presentation cache registers here, and it is the only channel through
+        // which it will ever hear that the picture changed: refusing this is why a document
+        // keeps showing the picture it cached when the object was inserted. The format is
+        // recorded for the log and not filtered, matching what the stock data-advice holder
+        // does; the notice the object sends says only that the view changed.
+        let mut inner = self.inner.borrow_mut();
+        let connection = inner.next_advise;
+        inner.next_advise += 1;
+        inner.advises.push((connection, sink));
+        trace::log(&format!("DAdvise(format {format}) -> connection {connection}"));
+        Ok(connection)
     }
 
-    fn DUnadvise(&self, _dwconnection: u32) -> WinResult<()> {
-        Err(Error::from_hresult(OLE_E_NOCONNECTION))
+    fn DUnadvise(&self, dwconnection: u32) -> WinResult<()> {
+        let mut inner = self.inner.borrow_mut();
+        let before = inner.advises.len();
+        inner
+            .advises
+            .retain(|(connection, _)| *connection != dwconnection);
+        if inner.advises.len() == before {
+            return Err(Error::from_hresult(OLE_E_NOCONNECTION));
+        }
+        trace::log(&format!("DUnadvise({dwconnection})"));
+        Ok(())
     }
 
     fn EnumDAdvise(&self) -> WinResult<IEnumSTATDATA> {

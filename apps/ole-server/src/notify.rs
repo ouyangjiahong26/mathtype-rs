@@ -18,7 +18,7 @@ use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
 
 use windows::Win32::System::Com::Marshal::CoMarshalInterThreadInterfaceInStream;
 use windows::Win32::System::Com::StructuredStorage::CoGetInterfaceAndReleaseStream;
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, IAdviseSink, IStream};
+use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, FORMATETC, IAdviseSink, IStream, STGMEDIUM, TYMED_NULL};
 use windows::core::{IUnknown, Interface};
 
 use crate::storage::error_text;
@@ -31,6 +31,7 @@ const QUEUE: usize = 32;
 enum Notice {
     OnSave(Stream),
     OnViewChange(Stream, u32),
+    OnDataChange(Stream, u32, u16),
 }
 
 /// A marshalled interface on its way to the worker thread.
@@ -62,6 +63,14 @@ pub fn on_save(sink: &IAdviseSink) {
 /// Tell the host's advise sink that the object's picture changed.
 pub fn on_view_change(sink: &IAdviseSink, aspects: u32) {
     send(marshal("advise sink", sink).map(|stream| Notice::OnViewChange(stream, aspects)));
+}
+
+/// Tell the host's advise sink that the object's data changed, naming the clipboard format.
+///
+/// This is the notice a presentation cache answers by fetching the data itself, which a bare
+/// view change leaves to a paint that a hidden or idle host never performs.
+pub fn on_data_change(sink: &IAdviseSink, aspects: u32, format: u16) {
+    send(marshal("advise sink", sink).map(|stream| Notice::OnDataChange(stream, aspects, format)));
 }
 
 /// Hand a notice to the worker thread, dropping it when the host is too far behind to care.
@@ -111,6 +120,25 @@ fn deliver(notice: Notice) {
         Notice::OnSave(stream) => {
             if let Some(sink) = unmarshal::<IAdviseSink>("advise sink", stream) {
                 unsafe { sink.OnSave() };
+            }
+        }
+        Notice::OnDataChange(stream, aspects, format) => {
+            if let Some(sink) = unmarshal::<IAdviseSink>("advise sink", stream) {
+                // The format is named and no medium is carried: the sink that wants the new
+                // picture fetches it, which is exactly the presentation cache's business.
+                let formatetc = FORMATETC {
+                    cfFormat: format,
+                    ptd: std::ptr::null_mut(),
+                    dwAspect: aspects,
+                    lindex: -1,
+                    tymed: TYMED_NULL.0 as u32,
+                };
+                let medium = STGMEDIUM {
+                    tymed: TYMED_NULL.0 as u32,
+                    u: unsafe { std::mem::zeroed() },
+                    pUnkForRelease: std::mem::ManuallyDrop::new(None),
+                };
+                unsafe { sink.OnDataChange(&formatetc, &medium) };
             }
         }
         Notice::OnViewChange(stream, aspects) => {
