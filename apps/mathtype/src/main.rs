@@ -1493,24 +1493,224 @@ impl eframe::App for App {
                 }
             });
             ui.separator();
+            // Commands are filed the way MathType files them, so a command's place says what it
+            // does: the toolbar keeps only the few that are reached for constantly, each with its
+            // explanation on hover, and the status bar at the bottom says what is being typed.
             ui.horizontal_wrapped(|ui| {
+                ui.menu_button("文件", |ui| {
+                    if ui.button("保存").on_hover_text("写入公式文件（Ctrl+S）").clicked() {
+                        self.save();
+                        ui.close();
+                    }
+                    ui.separator();
+                    for (format, label) in [
+                        (Format::Svg, "导出 SVG"),
+                        (Format::Png, "导出 PNG"),
+                        (Format::Eps, "导出 EPS"),
+                    ] {
+                        if ui
+                            .button(label)
+                            .on_hover_text("按当前样式预设渲染成图片文件")
+                            .clicked()
+                        {
+                            self.export(format);
+                            ui.close();
+                        }
+                    }
+                    if ui
+                        .button("导出网页…")
+                        .on_hover_text("把公式排成网页（MathML 或图片）")
+                        .clicked()
+                    {
+                        self.web_dialog = true;
+                        ui.close();
+                    }
+                });
+                ui.menu_button("编辑", |ui| {
+                    if ui.button("撤销 (Ctrl+Z)").clicked() {
+                        self.editor.undo();
+                        ui.close();
+                    }
+                    if ui.button("重做 (Ctrl+Shift+Z)").clicked() {
+                        self.editor.redo();
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui
+                        .button("复制")
+                        .on_hover_text("整个公式，四种格式同时进剪贴板")
+                        .clicked()
+                    {
+                        match clipboard::payload(self.editor.math()) {
+                            Ok(payload) => match clipboard::copy(self.editor.math()) {
+                                Ok(()) => self.status = format!("已复制（LaTeX：{}）", payload.latex),
+                                Err(message) => self.status = format!("复制失败：{message}"),
+                            },
+                            Err(message) => self.status = format!("复制失败：{message}"),
+                        }
+                        ui.close();
+                    }
+                    if ui
+                        .button("粘贴")
+                        .on_hover_text("从剪贴板按 MTEF / MathML / 文本顺序识别并替换公式")
+                        .clicked()
+                    {
+                        match clipboard::paste() {
+                            Ok(math) => {
+                                self.editor.set_math(math);
+                                self.dirty = true;
+                                self.save_shape = SaveShape::New;
+                                self.status = "已从剪贴板粘贴".to_owned();
+                            }
+                            Err(message) => self.status = format!("粘贴失败：{message}"),
+                        }
+                        ui.close();
+                    }
+                    ui.separator();
+                    for (format, label) in [
+                        (Format::Latex, "复制为 LaTeX"),
+                        (Format::MathMl, "复制为 MathML"),
+                        (Format::Omml, "复制为 OMML"),
+                    ] {
+                        if ui
+                            .button(label)
+                            .on_hover_text("只把这一种源码格式放进剪贴板")
+                            .clicked()
+                        {
+                            self.copy_as(ui.ctx(), format);
+                            ui.close();
+                        }
+                    }
+                });
+                ui.menu_button("视图", |ui| {
+                    if ui
+                        .checkbox(&mut self.show_side_panel, "样式与库")
+                        .on_hover_text("右侧的样式预设与公式库面板")
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                });
+                ui.menu_button("样式", |ui| {
+                    let shown = current_font(&self.editor);
+                    for (font, name) in FONT_CHOICES {
+                        if ui
+                            .selectable_label(shown == font, name)
+                            .on_hover_text("给选中的字母换字体；没有选区则用于下一个输入的字符")
+                            .clicked()
+                        {
+                            self.dirty |= apply_font_choice(&mut self.editor, font);
+                            ui.close();
+                        }
+                    }
+                });
+                ui.menu_button("大小", |ui| {
+                    let shown = self.editor.typing_style();
+                    for (style, name) in STYLE_CHOICES {
+                        if ui
+                            .selectable_label(shown == Some(style), name)
+                            .on_hover_text("公式的显示尺寸档：标准 / 文本 / 一级脚本 / 二级脚本")
+                            .clicked()
+                        {
+                            self.dirty |= apply_style_choice(&mut self.editor, style);
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    ui.add(
+                        egui::Slider::new(&mut self.style.size, 8.0..=48.0)
+                            .text("显示字号")
+                            .fixed_decimals(0),
+                    )
+                    .on_hover_text("编辑区里公式按多少磅排版（也决定导出的字号）");
+                });
+                ui.menu_button("预置", |ui| {
+                    let shown = self.presets[self.preset_index].name.clone();
+                    let names: Vec<String> =
+                        self.presets.iter().map(|preset| preset.name.clone()).collect();
+                    for (index, name) in names.into_iter().enumerate() {
+                        if ui
+                            .selectable_label(shown == name, name)
+                            .on_hover_text("整套排版参数：字号、间距、字体槽与对齐")
+                            .clicked()
+                        {
+                            self.apply_preset(index);
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    if ui
+                        .button("导入预置…")
+                        .on_hover_text(format!("从 {} 读取样式预设", self.preset_path))
+                        .clicked()
+                    {
+                        self.import_preset();
+                        ui.close();
+                    }
+                    if ui
+                        .button("导出预置…")
+                        .on_hover_text(format!("把当前预设写到 {}", self.preset_path))
+                        .clicked()
+                    {
+                        self.export_preset();
+                        ui.close();
+                    }
+                });
+                ui.menu_button("帮助", |ui| {
+                    if ui
+                        .button("怎么输入")
+                        .on_hover_text("直接敲字符即入公式；\\ 开头写 LaTeX，回车插入")
+                        .clicked()
+                    {
+                        self.status =
+                            "直接敲字符即入公式；\\ 开头为 LaTeX，回车或「插入公式」插到光标处"
+                                .to_owned();
+                        ui.close();
+                    }
+                    if ui
+                        .button("方向键怎么走")
+                        .on_hover_text("在槽位（分母、指数、括号内…）之间移动")
+                        .clicked()
+                    {
+                        self.status =
+                            "左右键在项间移动并进出槽位，上下键在同一构造的上下槽之间移动，Tab 跳到下一个槽位"
+                                .to_owned();
+                        ui.close();
+                    }
+                    if ui
+                        .button("面板怎么用")
+                        .on_hover_text("点面板按钮展开同类条目")
+                        .clicked()
+                    {
+                        self.status =
+                            "工具栏每个按钮是一个面板，点开就是该类的全部符号与模板，点条目即插到光标处"
+                                .to_owned();
+                        ui.close();
+                    }
+                });
+                ui.separator();
                 if ui
-                    .selectable_label(self.show_side_panel, "样式与库")
+                    .button("撤销")
+                    .on_hover_text("撤销上一步（Ctrl+Z）")
                     .clicked()
                 {
-                    self.show_side_panel = !self.show_side_panel;
-                }
-                ui.separator();
-                if ui.button("撤销").clicked() {
                     self.editor.undo();
                 }
-                if ui.button("重做").clicked() {
+                if ui
+                    .button("重做")
+                    .on_hover_text("重做被撤销的一步（Ctrl+Shift+Z）")
+                    .clicked()
+                {
                     self.editor.redo();
                 }
                 ui.separator();
                 let shown_font = current_font(&self.editor);
                 for (font, name) in FONT_CHOICES {
-                    if ui.selectable_label(shown_font == font, name).clicked() {
+                    if ui
+                        .selectable_label(shown_font == font, name)
+                        .on_hover_text("字体：选中则改选区，否则用于下一个字符")
+                        .clicked()
+                    {
                         self.dirty |= apply_font_choice(&mut self.editor, font);
                     }
                 }
@@ -1519,6 +1719,7 @@ impl eframe::App for App {
                 for (style, name) in STYLE_CHOICES {
                     if ui
                         .selectable_label(shown_style == Some(style), name)
+                        .on_hover_text("尺寸档：标准 / 文本 / 一级脚本 / 二级脚本")
                         .clicked()
                     {
                         self.dirty |= apply_style_choice(&mut self.editor, style);
@@ -1529,56 +1730,14 @@ impl eframe::App for App {
                     egui::Slider::new(&mut self.style.size, 8.0..=48.0)
                         .text("显示字号")
                         .fixed_decimals(0),
-                );
-                if ui.button("保存").clicked() {
+                )
+                .on_hover_text("编辑区与导出使用的字号（磅）");
+                if ui
+                    .button("保存")
+                    .on_hover_text("写入公式文件（Ctrl+S）")
+                    .clicked()
+                {
                     self.save();
-                }
-                if ui.button("复制").clicked() {
-                    match clipboard::payload(self.editor.math()) {
-                        Ok(payload) => match clipboard::copy(self.editor.math()) {
-                            Ok(()) => self.status = format!("已复制（LaTeX：{}）", payload.latex),
-                            Err(message) => self.status = format!("复制失败：{message}"),
-                        },
-                        Err(message) => self.status = format!("复制失败：{message}"),
-                    }
-                }
-                if ui.button("粘贴").clicked() {
-                    match clipboard::paste() {
-                        Ok(math) => {
-                            self.editor.set_math(math);
-                            self.dirty = true;
-                            self.save_shape = SaveShape::New;
-                            self.status = "已从剪贴板粘贴".to_owned();
-                        }
-                        Err(message) => self.status = format!("粘贴失败：{message}"),
-                    }
-                }
-                if ui.button("复制 LaTeX").clicked() {
-                    self.copy_as(ui.ctx(), Format::Latex);
-                }
-                if ui.button("复制 MathML").clicked() {
-                    self.copy_as(ui.ctx(), Format::MathMl);
-                }
-                if ui.button("复制 OMML").clicked() {
-                    self.copy_as(ui.ctx(), Format::Omml);
-                }
-                if ui.button("导出 SVG").clicked() {
-                    self.export(Format::Svg);
-                }
-                if ui.button("导出 PNG").clicked() {
-                    self.export(Format::Png);
-                }
-                if ui.button("导出 EPS").clicked() {
-                    self.export(Format::Eps);
-                }
-                if ui.button("导出网页…").clicked() {
-                    self.web_dialog = true;
-                }
-                if self.path.is_some() {
-                    let label = if self.dirty { "保存 *" } else { "保存" };
-                    if ui.button(label).clicked() {
-                        self.save();
-                    }
                 }
             });
         });
@@ -1616,10 +1775,9 @@ impl eframe::App for App {
                 });
             let panel = shown.response.rect;
             let pressed = ui.ctx().input(|state| {
-                state
-                    .pointer
-                    .interact_pos()
-                    .is_some_and(|point| state.pointer.any_pressed() && !panel.contains(point) && !anchor.contains(point))
+                state.pointer.interact_pos().is_some_and(|point| {
+                    state.pointer.any_pressed() && !panel.contains(point) && !anchor.contains(point)
+                })
             });
             if pressed {
                 self.open_palette = None;
@@ -1630,7 +1788,16 @@ impl eframe::App for App {
             // Bottom-up: the footer claims its natural height first, the canvas then takes whatever
             // is left, so neither depends on a hand-computed height.
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                ui.label(&self.status);
+                // The status bar sits at the very bottom, the way MathType's does: what the next
+                // keystroke will be set in, the display size, and the last thing the editor did.
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label(style_status(&self.editor));
+                    ui.separator();
+                    ui.label(format!("显示字号 {:.0} pt", self.style.size));
+                    ui.separator();
+                    ui.label(&self.status);
+                });
                 if let Some(failure) = &self.parse_error {
                     let marker = error_marker(&self.tex_input, failure.offset);
                     ui.monospace(
@@ -1639,7 +1806,6 @@ impl eframe::App for App {
                             .family(egui::FontFamily::Monospace),
                     );
                 }
-                ui.weak(style_status(&self.editor));
                 // One input, one behaviour: characters typed here land in the equation at the
                 // caret and are drawn straight away; `\` at the start of the line means LaTeX
                 // source, which waits in the box until Enter puts the parsed equation where the
@@ -1809,14 +1975,7 @@ fn palette_button(ui: &mut egui::Ui, palette: &Palette, metrics: &FaceMetrics) -
             rect.left() + 7.0 + step * (index as f32 + 0.5),
             rect.center().y,
         );
-        draw_palette_item(
-            &painter,
-            center,
-            *item,
-            metrics,
-            visuals.text_color(),
-            30.0,
-        );
+        draw_palette_item(&painter, center, *item, metrics, visuals.text_color(), 30.0);
     }
     response.on_hover_text(format!("{}：点击展开同类条目", palette.name))
 }
