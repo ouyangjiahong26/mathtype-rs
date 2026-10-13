@@ -63,9 +63,15 @@ impl Session {
             .map_err(|error| format!("cannot write {}: {error}", pointer.display()))?;
 
         let editor = editor_path()?;
+        // The editor is a GUI, so when it dies at startup its reason goes to a stderr nobody
+        // would otherwise see; one file per session keeps the last failure readable.
+        let stderr_path = directory.join(format!("equation-{}-{id}.stderr", std::process::id()));
+        let stderr = std::fs::File::create(&stderr_path)
+            .map_err(|error| format!("cannot create {}: {error}", stderr_path.display()))?;
         let child = Command::new(&editor)
             .arg("--edit")
             .arg(&path)
+            .stderr(stderr)
             .spawn()
             .map_err(|error| format!("cannot start {}: {error}", editor.display()))?;
         let session = Self {

@@ -415,6 +415,9 @@ fn tick(inner: &RefCell<Inner>) {
             // asked to save from here, because it may be inside a save of its own at this very
             // moment: a container told to save while it is saving does not come out of it.
             inner.borrow_mut().note(&note);
+            // Tell the host the picture changed, or it keeps showing the one it cached when the
+            // object was inserted; the notices go out from the worker thread, never from here.
+            announce_saved(inner);
         }
         Err(error) => {
             trace::log(&format!("the new equation is held in memory only: {error}"));

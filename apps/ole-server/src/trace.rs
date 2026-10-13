@@ -34,7 +34,14 @@ static TO_STDERR: LazyLock<SyncSender<String>> = LazyLock::new(|| {
 
 /// Directory holding the log, the hand-off files and the pointer file.
 pub fn directory() -> PathBuf {
-    std::env::temp_dir().join("mathtype-ole-server")
+    if cfg!(test) {
+        // Test binaries get a directory of their own: a test that spawns stand-in editors or
+        // logs through the code under test must not leave lines in the log the verification
+        // script reads. Mixed lines once sent a diagnosis after a failure no host had seen.
+        std::env::temp_dir().join(format!("mathtype-ole-server-test-{}", std::process::id()))
+    } else {
+        std::env::temp_dir().join("mathtype-ole-server")
+    }
 }
 
 /// Log the events of this server's session, appended to across processes.
