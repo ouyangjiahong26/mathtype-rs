@@ -694,6 +694,8 @@ struct App {
     presets: Vec<StylePreset>,
     /// Which entry of `presets` the style comes from.
     preset_index: usize,
+    /// Whether the style/library side panel is open; closed by default so the canvas has the room.
+    show_side_panel: bool,
     /// The formula library the side panel searches and inserts from.
     library: library::Library,
     /// Name the next library save will use.
@@ -825,6 +827,7 @@ impl App {
             style,
             presets,
             preset_index: 0,
+            show_side_panel: false,
             library,
             library_name: String::new(),
             library_query: String::new(),
@@ -1091,20 +1094,42 @@ impl App {
         }
     }
 
-    /// Import whatever the input box holds, picking the format from the text itself.
+    /// Take what was typed into the input box.
     ///
-    /// LaTeX failures keep their byte offset so the input area can point at the offending spot.
-    fn import_text(&mut self) {
-        let text = self.tex_input.clone();
-        let from = detect_format(&text);
+    /// The box has one way in: a plain character goes into the equation at the caret as it is
+    /// typed, so the canvas is showing the result while the key is still going down. A line that
+    /// starts with `\` is LaTeX source and is left in the box until it is committed.
+    fn absorb_typing(&mut self) {
+        if self.tex_input.starts_with('\\') {
+            return;
+        }
+        for ch in std::mem::take(&mut self.tex_input).chars() {
+            self.dirty |= self.editor.insert_char(ch);
+        }
+    }
+
+    /// Commit the LaTeX line the input box holds, at the caret.
+    ///
+    /// The line is inserted where the caret is rather than replacing the equation, which is what
+    /// typing a character does; the format is still recognised from the text itself, so a line of
+    /// MathML or OMML pasted behind the `\` goes in the same way. Failures keep their byte offset
+    /// so the input area can point at the offending spot.
+    fn commit_input(&mut self) {
+        let Some(source) = self.tex_input.trim().strip_prefix('\\') else {
+            return;
+        };
+        if source.trim().is_empty() {
+            return;
+        }
+        let from = detect_format(source);
         if from == Format::Latex {
-            match mt_tex::parse(&text) {
+            match mt_tex::parse(source) {
                 Ok(math) => {
-                    self.editor.set_math(math);
+                    self.editor.insert_node(math.body);
                     self.dirty = true;
                     self.parse_error = None;
-                    self.save_shape = SaveShape::New;
-                    self.status = "已导入（按 LaTeX 解析）".to_owned();
+                    self.tex_input.clear();
+                    self.status = "已插入公式".to_owned();
                 }
                 Err(error) => {
                     self.parse_error = Some(ParseFailure {
@@ -1119,17 +1144,17 @@ impl App {
             }
             return;
         }
-        match read_math(text.as_bytes(), from) {
+        match read_math(source.as_bytes(), from) {
             Ok(math) => {
-                self.editor.set_math(math);
+                self.editor.insert_node(math.body);
                 self.dirty = true;
                 self.parse_error = None;
-                self.save_shape = SaveShape::New;
-                self.status = format!("已导入（按 {} 解析）", from.name());
+                self.tex_input.clear();
+                self.status = format!("已插入公式（按 {} 解析）", from.name());
             }
             Err(message) => {
                 self.parse_error = None;
-                self.status = format!("导入失败：{message}");
+                self.status = format!("插入失败：{message}");
             }
         }
     }
@@ -1444,24 +1469,40 @@ impl eframe::App for App {
         if self.web_dialog {
             self.show_web_dialog(ui.ctx());
         }
+        // Every palette is a row of its own, expanded in the toolbar the way MathType's palettes
+        // are: the entries are what is visible, there is nothing to open and nothing pops out, so
+        // an entry is recognised by its own glyph or by the shape of its template. The rows are
+        // bounded and scroll, so the canvas keeps its room whatever the window size.
         egui::Panel::top("toolbar").show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for palette in palettes() {
-                    ui.menu_button(palette.name, |ui| {
-                        ui.horizontal_top(|ui| {
+            let screen = ui.ctx().input(|state| state.raw.screen_rect);
+            let room = (screen.map_or(720.0, |rect| rect.height()) * 0.45).max(120.0);
+            egui::ScrollArea::vertical()
+                .max_height(room)
+                .id_salt("palette-rows")
+                .show(ui, |ui| {
+                    for palette in palettes() {
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                [96.0, 24.0],
+                                egui::Label::new(egui::RichText::new(palette.name).size(11.0)),
+                            );
                             for column in palette.columns {
-                                ui.vertical(|ui| {
-                                    for item in *column {
-                                        let button = ui.button(item.label());
-                                        if button.clicked() {
-                                            self.apply_palette_item(*item);
-                                            ui.close();
-                                        }
+                                for item in *column {
+                                    if palette_item_button(ui, *item, &self.metrics).clicked() {
+                                        self.apply_palette_item(*item);
                                     }
-                                });
+                                }
                             }
                         });
-                    });
+                    }
+                });
+            ui.separator();
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .selectable_label(self.show_side_panel, "样式与库")
+                    .clicked()
+                {
+                    self.show_side_panel = !self.show_side_panel;
                 }
                 ui.separator();
                 if ui.button("撤销").clicked() {
@@ -1545,17 +1586,18 @@ impl eframe::App for App {
                 }
             });
         });
-        egui::Panel::right("presets")
-            .resizable(true)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.draw_side_panel(ui));
-            });
+        if self.show_side_panel {
+            egui::Panel::right("presets")
+                .resizable(true)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.draw_side_panel(ui));
+                });
+        }
 
         egui::CentralPanel::default().show(ui, |ui| {
             // Bottom-up: the footer claims its natural height first, the canvas then takes whatever
             // is left, so neither depends on a hand-computed height.
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                self.draw_preview(ui);
                 ui.label(&self.status);
                 if let Some(failure) = &self.parse_error {
                     let marker = error_marker(&self.tex_input, failure.offset);
@@ -1566,18 +1608,28 @@ impl eframe::App for App {
                     );
                 }
                 ui.weak(style_status(&self.editor));
+                // One input, one behaviour: characters typed here land in the equation at the
+                // caret and are drawn straight away; `\` at the start of the line means LaTeX
+                // source, which waits in the box until Enter puts the parsed equation where the
+                // caret is.
                 ui.horizontal(|ui| {
                     ui.label("输入");
-                    let input =
-                        egui::TextEdit::singleline(&mut self.tex_input).desired_width(520.0);
+                    let input = egui::TextEdit::singleline(&mut self.tex_input)
+                        .desired_width(520.0)
+                        .hint_text("直接输入字符，或 \\ 后写 LaTeX 再回车");
                     let input_response = ui.add(input);
-                    let convert = ui.button("导入公式").clicked();
+                    let commit = ui.button("插入公式").clicked();
                     let submitted = input_response.lost_focus()
                         && ui.input(|state| state.key_pressed(egui::Key::Enter));
-                    if convert || submitted {
-                        self.import_text();
+                    if commit || submitted {
+                        self.commit_input();
+                    } else if input_response.changed() {
+                        self.absorb_typing();
                     }
                 });
+                if self.tex_input.starts_with('\\') {
+                    self.draw_preview(ui);
+                }
                 ui.separator();
 
                 let (rect, response) =
@@ -1647,6 +1699,56 @@ impl eframe::App for App {
 /// Beyond this weighted distance a point counts as blank canvas rather than a caret position,
 /// so clicking far from the equation drops the selection instead of teleporting the caret.
 const MAX_HIT_COST: f32 = 600.0;
+
+/// One palette entry as a button that shows what it would insert: a symbol draws its own glyph, a
+/// template is laid out — empty slots and all — and drawn scaled into the button, and an explicit
+/// space keeps its name. Hovering gives the entry's own description.
+fn palette_item_button(ui: &mut egui::Ui, item: PaletteItem, metrics: &FaceMetrics) -> egui::Response {
+    let size = match item {
+        PaletteItem::Template(_) => egui::vec2(36.0, 24.0),
+        _ => egui::vec2(26.0, 24.0),
+    };
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let visuals = ui.style().interact(&response);
+    ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);
+    let painter = ui.painter().with_clip_rect(rect.shrink(1.0));
+    let math_font = |size: f64| FontId::new(size as f32, FontFamily::Name(MATH_FAMILY.into()));
+    match item {
+        PaletteItem::Symbol { ch, .. } => {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                ch,
+                math_font(16.0),
+                visuals.text_color(),
+            );
+        }
+        PaletteItem::Template(template) => {
+            let math = mt_core::Math::new(template.build().0);
+            let style = LayoutStyle::display(9.0);
+            let boxes = layout(&math, metrics, &style);
+            let origin = Pos2::new(rect.center().x - boxes.width() as f32 / 2.0, rect.center().y);
+            draw_boxes(
+                &painter,
+                &boxes,
+                origin,
+                metrics,
+                visuals.text_color(),
+                &math_font,
+            );
+        }
+        PaletteItem::Space(_) => {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                item.label(),
+                FontId::new(11.0, FontFamily::Proportional),
+                visuals.text_color(),
+            );
+        }
+    }
+    response.on_hover_text(item.label())
+}
 
 /// Nearest insertion position to `point`, weighted so that staying on the caret's own line wins
 /// over a slightly smaller horizontal distance on a line further away.
