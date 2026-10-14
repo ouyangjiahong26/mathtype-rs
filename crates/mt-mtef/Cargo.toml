@@ -9,8 +9,8 @@ repository.workspace = true
 
 [dependencies]
 mt-core.workspace = true
-cfb = "0.10"
+cfb = "0.15"
 
 [dev-dependencies]
 mt-tex.workspace = true
-cfb = "0.10"
+cfb = "0.15"
