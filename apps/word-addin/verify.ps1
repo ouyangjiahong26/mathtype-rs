@@ -161,13 +161,32 @@ try {
             ($message.Contains($server) -and $message.Contains('install.ps1') -and $document.InlineShapes.Count -eq 0) `
             ("InlineShapes=" + $document.InlineShapes.Count)
     }
+    Write-Host '--- 9. numbered equation ---'
+    Set-SelectedText $document $latex | Out-Null
+    $message = $addinObject.InsertNumberedEquation()
+    Write-Host ("message: " + $message)
+    $seqFields = @($document.Fields | Where-Object { $_.Code.Text -match 'SEQ MTEqn' })
+    Test-It 'the numbered equation carries a SEQ MTEqn field' ($seqFields.Count -ge 1) ("fields=" + $document.Fields.Count)
+    $document.Fields.Update() | Out-Null
+    Test-It 'the number shows on the equation line' ($document.Content.Text -match '\(\d+\)') ("text=[" + $document.Content.Text + "]")
+    $message = $addinObject.InsertChapterBreak()
+    Write-Host ("message: " + $message)
+    $chapFields = @($document.Fields | Where-Object { $_.Code.Text -match 'SEQ MTChap' })
+    Test-It 'the chapter break carries a SEQ MTChap field' ($chapFields.Count -ge 1) ("fields=" + $document.Fields.Count)
+    $message = $addinObject.InsertCrossReference()
+    Write-Host ("message: " + $message)
+    $refFields = @($document.Fields | Where-Object { $_.Code.Text -match 'REF _RefMTEq' })
+    Test-It 'the cross-reference carries a REF field' ($refFields.Count -ge 1) ("fields=" + $document.Fields.Count)
 }
 catch {
     Write-Host ("the run stopped early: " + $_.Exception.Message)
     Test-It 'the test ran to completion' $false $_.Exception.Message
 }
 finally {
-    Write-Host '--- 9. clean up ---'
+    Write-Host '--- 10. clean up ---'
+    # Every equation object opens its editor when it is inserted; the ones this run started
+    # must not be left open behind the script.
+    Get-Process mathtype, mathtype-ole-server -ErrorAction SilentlyContinue | Stop-Process -Force
     if ($null -ne $document) {
         try { $document.Close(0) } catch { Write-Host ("closing the document failed: " + $_.Exception.Message) }
     }

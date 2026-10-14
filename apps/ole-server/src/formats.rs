@@ -10,10 +10,22 @@ use std::ptr;
 use windows::Win32::Foundation::{DV_E_DVASPECT, DV_E_FORMATETC, DV_E_TYMED, S_FALSE};
 use windows::Win32::System::Com::{
     DATADIR_GET, DVASPECT_CONTENT, FORMATETC, IEnumFORMATETC, IEnumFORMATETC_Impl, TYMED_ENHMF,
-    TYMED_HGLOBAL,
+    TYMED_HGLOBAL, TYMED_MFPICT,
 };
-use windows::Win32::System::Ole::{CF_DIB, CF_ENHMETAFILE};
+use windows::Win32::System::Ole::{CF_DIB, CF_ENHMETAFILE, CF_METAFILEPICT};
 use windows::core::{HRESULT, implement};
+
+/// The presentation the classic hosts ask for: the picture in the older metafile format.
+pub fn metafile_pict_format() -> FORMATETC {
+    FORMATETC {
+        cfFormat: CF_METAFILEPICT.0,
+        ptd: ptr::null_mut(),
+        dwAspect: DVASPECT_CONTENT.0,
+        lindex: -1,
+        // A `METAFILEPICT` in global memory, not a bare metafile handle.
+        tymed: TYMED_MFPICT.0 as u32,
+    }
+}
 
 /// The presentation the object offers: a device-independent bitmap of the equation.
 pub fn dib_format() -> FORMATETC {
@@ -45,6 +57,8 @@ fn medium_of(cf_format: u16) -> Option<u32> {
         Some(TYMED_HGLOBAL.0 as u32)
     } else if cf_format == CF_ENHMETAFILE.0 {
         Some(TYMED_ENHMF.0 as u32)
+    } else if cf_format == CF_METAFILEPICT.0 {
+        Some(TYMED_MFPICT.0 as u32)
     } else {
         None
     }
@@ -78,6 +92,18 @@ pub fn rejection(format: &FORMATETC) -> HRESULT {
     DV_E_FORMATETC
 }
 
+/// The canonical form of a request: the same format without the caller's target device.
+///
+/// `DATA_S_SAMEFORMATETC` says the input already describes what the object has, and the contract
+/// then asks for the input copied to the output with `ptd` cleared. The target device belongs to
+/// the caller's own argument, so handing that pointer back is not the object's to do.
+pub fn canonical(format: &FORMATETC) -> FORMATETC {
+    FORMATETC {
+        ptd: ptr::null_mut(),
+        ..*format
+    }
+}
+
 /// Enumerator over the formats the object can produce.
 #[implement(IEnumFORMATETC, Agile = false)]
 pub struct FormatEnumerator {
@@ -96,9 +122,9 @@ impl FormatEnumerator {
 
     /// The formats the object offers to a host that is asking for data.
     pub fn for_get() -> IEnumFORMATETC {
-        // The metafile comes first: hosts that take the first format they recognise get the
-        // vector picture, and everything else falls through to the bitmap.
-        Self::new(vec![emf_format(), dib_format()]).into()
+        // The classic metafile picture comes first: hosts that only know the older format take
+        // the first entry they recognise, and the vector picture is what they want.
+        Self::new(vec![metafile_pict_format(), emf_format(), dib_format()]).into()
     }
 }
 
@@ -152,9 +178,46 @@ pub fn unsupported_direction(direction: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{dib_format, emf_format, rejection, supported};
-    use windows::Win32::System::Com::{DVASPECT_CONTENT, FORMATETC, TYMED_ENHMF, TYMED_HGLOBAL};
+    use super::{canonical, dib_format, emf_format, metafile_pict_format, rejection, supported};
+    use windows::Win32::System::Com::{
+        DVASPECT_CONTENT, DVTARGETDEVICE, FORMATETC, TYMED_ENHMF, TYMED_HGLOBAL, TYMED_MFPICT,
+    };
     use windows::Win32::System::Ole::CF_DIB;
+
+    #[test]
+    fn every_offered_format_is_one_the_object_answers() {
+        // The registry advertises these three (`DataFormats\GetSet` in install.ps1), and a host
+        // that asks for an advertised format and is refused is what stops Word's insertion.
+        for format in [metafile_pict_format(), emf_format(), dib_format()] {
+            assert!(supported(&format), "{format:?}");
+        }
+    }
+
+    #[test]
+    fn the_classic_picture_is_only_served_as_a_metafile_picture() {
+        let mut format = metafile_pict_format();
+        assert_eq!(format.tymed, TYMED_MFPICT.0 as u32);
+        // The same clipboard format under a bare global memory handle is a different medium.
+        format.tymed = TYMED_HGLOBAL.0 as u32;
+        assert!(!supported(&format));
+        assert_eq!(rejection(&format).0, super::DV_E_TYMED.0);
+    }
+
+    #[test]
+    fn the_canonical_form_drops_the_callers_target_device() {
+        let requested = FORMATETC {
+            ptd: 0x1000 as *mut DVTARGETDEVICE,
+            ..emf_format()
+        };
+        let canonical = canonical(&requested);
+        // Handing the caller's own target device back is what made Word's OLE insertion end the
+        // server process, so the cleared pointer is the part of this that matters.
+        assert!(canonical.ptd.is_null());
+        assert_eq!(canonical.cfFormat, requested.cfFormat);
+        assert_eq!(canonical.dwAspect, requested.dwAspect);
+        assert_eq!(canonical.lindex, requested.lindex);
+        assert_eq!(canonical.tymed, requested.tymed);
+    }
 
     #[test]
     fn the_offered_formats_are_the_ones_that_are_accepted() {

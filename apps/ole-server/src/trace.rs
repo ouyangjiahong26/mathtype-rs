@@ -7,13 +7,41 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::LazyLock;
+use std::sync::mpsc::{SyncSender, sync_channel};
 
 use windows::Win32::Foundation::SYSTEMTIME;
 use windows::Win32::System::SystemInformation::GetLocalTime;
 
+/// How many lines may be waiting for standard error before new ones are dropped there.
+const STDERR_QUEUE: usize = 64;
+
+/// Lines waiting for standard error, drained by a thread of their own.
+///
+/// The queue is bounded on purpose: a reader that stops reading must never be able to block the
+/// thread that writes the log, because that thread is the apartment answering the host's calls. A
+/// line that does not fit is dropped from standard error and kept in the file, which is the record
+/// that has to survive.
+static TO_STDERR: LazyLock<SyncSender<String>> = LazyLock::new(|| {
+    let (sender, receiver) = sync_channel::<String>(STDERR_QUEUE);
+    std::thread::spawn(move || {
+        for line in receiver {
+            eprintln!("[mathtype-ole-server] {line}");
+        }
+    });
+    sender
+});
+
 /// Directory holding the log, the hand-off files and the pointer file.
 pub fn directory() -> PathBuf {
-    std::env::temp_dir().join("mathtype-ole-server")
+    if cfg!(test) {
+        // Test binaries get a directory of their own: a test that spawns stand-in editors or
+        // logs through the code under test must not leave lines in the log the verification
+        // script reads. Mixed lines once sent a diagnosis after a failure no host had seen.
+        std::env::temp_dir().join(format!("mathtype-ole-server-test-{}", std::process::id()))
+    } else {
+        std::env::temp_dir().join("mathtype-ole-server")
+    }
 }
 
 /// Log the events of this server's session, appended to across processes.
@@ -21,11 +49,15 @@ pub fn log_path() -> PathBuf {
     directory().join("server.log")
 }
 
-/// Write one line, both to the log file and to standard error.
+/// Write one line to the log file and, without waiting for it, to standard error.
+///
+/// The file comes first and is written synchronously: whatever happens to the process afterwards,
+/// the line is on disk. Standard error goes through a queue drained by another thread, so a console
+/// or a wrapper sees the line live while a pipe whose reader has gone away cannot stall the object.
 pub fn log(message: &str) {
     let line = format!("{} pid={} {message}", timestamp(), std::process::id());
-    eprintln!("[mathtype-ole-server] {line}");
     let _ = append(&line);
+    let _ = TO_STDERR.try_send(line);
 }
 
 /// The tail of the log, for a report.

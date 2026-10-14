@@ -30,7 +30,7 @@ MathType 的功能面与文档互通能力。
 | 字体槽 (style slot) | 功能样式（文本/函数/变量/希腊/符号/向量/数字）各自使用的字体 | `mt_layout::StyleFonts` |
 | 数学字母变体 (math variant) | 字母在某字体下的 Unicode 数学字母数字区码位，单一数学字体面内取字形 | `mt_layout::math_variant` |
 | 公式库 (formula library) | 用户数据目录下可检索、可插入的命名公式集 | `apps/mathtype/src/library.rs` |
-| 编号 (numbering) | 公式右侧（或左侧）制表位上的序号，由 Word 域（MACROBUTTON+SEQ）生成，更新域即重排 | `mt-numbering` |
+| 编号 (numbering) | 公式右侧（或左侧）制表位上的序号，由 Word SEQ 域生成。域码以 `label_field_codes` 为单一来源，宿主的真实域与文档级 XML 两种形态都由它渲染，更新域即重排 | `mt-numbering` |
 | 章节断点 (break) | 复位计数器的隐藏域段落：MTChap/MTSec 计数加一、MTEqn 清零 | `mt-numbering` |
 | 交叉引用 (cross-reference) | 指向编号书签 `_RefMTEqN` 的 REF 域（\h 超链接），编号变化后更新域同步 | `mt-numbering` |
 

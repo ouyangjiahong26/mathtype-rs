@@ -17,7 +17,7 @@ use windows::Win32::System::Com::{
     IStream, STATSTG, STGC_DEFAULT, STGM_CREATE, STGM_READ, STGM_SHARE_DENY_WRITE,
     STGM_SHARE_EXCLUSIVE, STGM_WRITE, STGTY_STORAGE, STGTY_STREAM,
 };
-use windows::core::PCWSTR;
+use windows::core::{GUID, PCWSTR};
 
 /// `STG_E_FILENOTFOUND`, how a storage says a stream is not there.
 const STG_E_FILENOTFOUND: i32 = 0x8003_0002u32 as i32;
@@ -57,6 +57,14 @@ pub fn write_stream(storage: &IStorage, name: &str, bytes: &[u8]) -> Result<(), 
             .map_err(|error| error_text(&error))?;
     }
     Ok(())
+}
+
+/// Name the storage after the class whose data it holds, the way `ole32`'s storage helpers do.
+///
+/// This is how a saved document knows which server to hand the storage to when it is opened
+/// again, and it is what a host reads when it names the object without asking it.
+pub fn set_class(storage: &IStorage, clsid: &GUID) -> Result<(), String> {
+    unsafe { storage.SetClass(clsid).map_err(|error| error_text(&error)) }
 }
 
 /// Read a stream of `storage`, or `None` when it does not have one under that name.

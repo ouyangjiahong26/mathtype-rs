@@ -4,12 +4,19 @@
 //! `HIMETRIC` is the unit OLE measures embedded objects in: one unit is 0.01 mm, so a size in
 //! points is multiplied by `2540 / 72` to reach it.
 
+use std::ffi::c_void;
 use std::mem::size_of;
 
 use mt_core::Math;
 use mt_layout::{Box as LayoutBox, LayoutStyle, layout};
 use mt_render::{Image, RenderOptions, render, render_emf};
-use windows::Win32::Graphics::Gdi::{BI_RGB, BITMAPINFOHEADER};
+use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
+use windows::Win32::Graphics::Gdi::{
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CloseMetaFile, CreateMetaFileW, DIB_RGB_COLORS,
+    DeleteMetaFile, HMETAFILE, MM_ANISOTROPIC, SRCCOPY, StretchDIBits,
+};
+use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
+use windows::core::PCWSTR;
 
 use mt_render::metrics::{FaceMetrics, MATH_FONT};
 
@@ -117,6 +124,100 @@ pub fn pixel_offset() -> usize {
     size_of::<BITMAPINFOHEADER>()
 }
 
+/// A `METAFILEPICT`: the structure `CF_METAFILEPICT` carries in global memory.
+///
+/// The metafile handle is in the older Windows format, because that is what the format means and
+/// because the host deletes it with `DeleteMetaFile` when it releases the medium.
+#[repr(C)]
+pub struct MetaFilePict {
+    /// The mapping mode the picture was created in, `MM_ANISOTROPIC` here.
+    pub mapping_mode: i32,
+    /// Suggested size in `MM_HIMETRIC` units.
+    pub x_extent: i32,
+    pub y_extent: i32,
+    pub metafile: HMETAFILE,
+}
+
+/// The picture as a `CF_METAFILEPICT`: the same equation in the older Windows metafile format,
+/// wrapped in a [`MetaFilePict`] the caller owns.
+///
+/// Hosts that predate `CF_ENHMETAFILE` ask for this format, and Word refuses to embed an object
+/// that cannot answer it. The picture is recorded from the bitmap rather than converted out of the
+/// enhanced metafile: a Windows-format metafile has no record for the Bézier paths the equation is
+/// drawn with, and `GetWinMetaFileBits` refuses the whole conversion because of them.
+/// Hands over a handle the host frees with `ReleaseStgMedium`, which deletes the metafile and the
+/// memory together.
+pub fn metafile_picture(presentation: &Presentation) -> Option<HGLOBAL> {
+    let units = |points: f64| (points * HIMETRIC_PER_POINT).round().max(1.0) as i32;
+    let dc = unsafe { CreateMetaFileW(PCWSTR::null()) };
+    if dc.is_invalid() {
+        return None;
+    }
+    let (width, height) = (presentation.pixels.0 as i32, presentation.pixels.1 as i32);
+    let bits = presentation.dib[pixel_offset()..].as_ptr().cast::<c_void>();
+    let info = presentation.dib.as_ptr().cast::<BITMAPINFO>();
+    let drawn = unsafe {
+        StretchDIBits(
+            dc,
+            0,
+            0,
+            width,
+            height,
+            0,
+            0,
+            width,
+            height,
+            Some(bits),
+            info,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        )
+    };
+    let metafile = unsafe { CloseMetaFile(dc) };
+    if metafile.is_invalid() || drawn <= 0 {
+        if !metafile.is_invalid() {
+            let _ = unsafe { DeleteMetaFile(metafile) };
+        }
+        return None;
+    }
+    let picture = MetaFilePict {
+        mapping_mode: MM_ANISOTROPIC.0,
+        x_extent: units(presentation.width_pt),
+        y_extent: units(presentation.height_pt),
+        metafile,
+    };
+    let memory = match unsafe { GlobalAlloc(GMEM_MOVEABLE, size_of::<MetaFilePict>()) } {
+        Ok(memory) => memory,
+        Err(_) => {
+            let _ = unsafe { DeleteMetaFile(metafile) };
+            return None;
+        }
+    };
+    let target = unsafe { GlobalLock(memory) };
+    if target.is_null() {
+        let _ = unsafe { GlobalFree(Some(memory)) };
+        let _ = unsafe { DeleteMetaFile(metafile) };
+        return None;
+    }
+    unsafe { target.cast::<MetaFilePict>().write(picture) };
+    let _ = unsafe { GlobalUnlock(memory) };
+    Some(memory)
+}
+
+/// Drop a `CF_METAFILEPICT` this server built and kept for itself, the counterpart of
+/// [`metafile_picture`]: the host never sees this one, so nothing else frees it.
+pub fn discard_metafile_picture(memory: HGLOBAL) {
+    let target = unsafe { GlobalLock(memory) };
+    if target.is_null() {
+        let _ = unsafe { GlobalFree(Some(memory)) };
+        return;
+    }
+    let picture = unsafe { target.cast::<MetaFilePict>().read() };
+    let _ = unsafe { GlobalUnlock(memory) };
+    let _ = unsafe { DeleteMetaFile(picture.metafile) };
+    let _ = unsafe { GlobalFree(Some(memory)) };
+}
+
 /// Pack an RGBA image as a bottom-up 32-bit `BI_RGB` DIB: header first, then the pixels.
 fn to_dib(image: &Image) -> Vec<u8> {
     let stride = image.width as usize * 4;
@@ -152,6 +253,9 @@ fn to_dib(image: &Image) -> Vec<u8> {
 mod tests {
     use super::{HIMETRIC_PER_POINT, himetric_size, presentation};
     use mt_tex::parse;
+    use windows::Win32::Foundation::GlobalFree;
+    use windows::Win32::Graphics::Gdi::{DeleteMetaFile, GetObjectType, HGDIOBJ, OBJ_METAFILE};
+    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 
     #[test]
     fn the_size_in_himetric_units_matches_the_points_it_was_laid_out_at() {
@@ -170,6 +274,32 @@ mod tests {
             "width was {} points",
             points(width)
         );
+    }
+
+    #[test]
+    fn the_metafile_picture_holds_a_windows_format_metafile() {
+        let math = parse(r"x^2").unwrap();
+        let picture = presentation(&math, 18.0, None).unwrap();
+        let memory = super::metafile_picture(&picture).expect("a metafile picture");
+        let target = unsafe { GlobalLock(memory) };
+        assert!(!target.is_null());
+        let pict = unsafe { &*target.cast::<super::MetaFilePict>() };
+        // The host deletes this handle when it releases the medium, so it has to be a
+        // Windows-format metafile rather than the enhanced one it was built from.
+        assert_eq!(
+            unsafe { GetObjectType(HGDIOBJ(pict.metafile.0)) },
+            OBJ_METAFILE.0 as u32
+        );
+        assert!(
+            pict.x_extent > 0 && pict.y_extent > 0,
+            "extent was {}x{}",
+            pict.x_extent,
+            pict.y_extent
+        );
+        // What `ReleaseStgMedium` does for this medium, done here so the test owns nothing.
+        let _ = unsafe { DeleteMetaFile(pict.metafile) };
+        let _ = unsafe { GlobalUnlock(memory) };
+        let _ = unsafe { GlobalFree(Some(memory)) };
     }
 
     #[test]
