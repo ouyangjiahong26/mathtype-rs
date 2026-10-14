@@ -36,8 +36,10 @@ pub fn run() -> Result<(), String> {
     let state = Arc::new(ServerState::new());
     let (factory, cookie) = factory::register(state.clone())
         .map_err(|error| format!("CoRegisterClassObject failed: {}", error_text(&error)))?;
+    trace::log(&format!("registered the class factory (cookie {cookie})"));
     unsafe { CoResumeClassObjects() }
         .map_err(|error| format!("CoResumeClassObjects failed: {}", error_text(&error)))?;
+    trace::log("resumed the registered class objects");
     // A host that starts this server without ever asking for an object must not leave it running.
     state.note_idle(STARTUP_GRACE);
 
@@ -87,7 +89,13 @@ pub fn run() -> Result<(), String> {
 fn on_timer(state: &ServerState) {
     object::tick_all();
     if state.may_quit() {
-        trace::log("no objects and nothing pending; ending the message loop");
+        trace::log(&format!(
+            "nothing left: objects {}, factory locks {}, anything ever arrived: {}; ending the \
+             message loop",
+            state.live(),
+            state.locks(),
+            state.ever_busy()
+        ));
         unsafe { PostQuitMessage(0) };
     }
 }

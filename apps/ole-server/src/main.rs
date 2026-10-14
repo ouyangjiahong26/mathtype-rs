@@ -30,9 +30,13 @@ mod clsid;
 #[cfg(windows)]
 mod factory;
 #[cfg(windows)]
+mod fatal;
+#[cfg(windows)]
 mod formats;
 #[cfg(windows)]
 mod handoff;
+#[cfg(windows)]
+mod notify;
 #[cfg(windows)]
 mod object;
 #[cfg(windows)]
@@ -66,11 +70,14 @@ environment variable MATHTYPE_RS_EDITOR.
 
 #[cfg(windows)]
 fn main() -> ExitCode {
+    // Before anything else: a fault in a COM call would otherwise end this process silently.
+    fatal::install();
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     if arguments
         .iter()
         .any(|argument| is_embedding_switch(argument))
     {
+        trace::log(&format!("started with arguments {arguments:?}"));
         return match server::run() {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
