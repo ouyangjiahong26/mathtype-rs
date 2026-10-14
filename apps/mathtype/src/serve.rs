@@ -1439,7 +1439,9 @@ mod tests {
             .rsplit_once("\"docx\":\"")
             .unwrap()
             .1
-            .trim_end_matches('\"');
+            .split('"')
+            .next()
+            .unwrap();
         let decoded = base64_decode(encoded);
         let document = mt_docx::Document::open(&decoded).expect("the returned container opens");
         assert!(
