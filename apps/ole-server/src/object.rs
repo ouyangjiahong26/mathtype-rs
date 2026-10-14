@@ -37,15 +37,15 @@ use windows::Win32::System::Com::{
     DISPATCH_PROPERTYPUTREF, DISPPARAMS, DVASPECT, DVASPECT_CONTENT, DVTARGETDEVICE, EXCEPINFO,
     FORMATETC, IAdviseSink, IDataObject, IDataObject_Impl, IDispatch, IDispatch_Impl,
     IEnumFORMATETC, IEnumSTATDATA, IMoniker, IPersist_Impl, ITypeInfo, STGMEDIUM, STGMEDIUM_0,
-    TYMED_ENHMF, TYMED_HGLOBAL,
+    TYMED_ENHMF, TYMED_HGLOBAL, TYMED_MFPICT,
 };
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::{
-    ACTIVEOBJECT_WEAK, CF_ENHMETAFILE, IEnumOLEVERB, IOleClientSite, IOleObject, IOleObject_Impl,
-    IViewObject_Impl, IViewObject2, IViewObject2_Impl, OLECLOSE, OLECLOSE_SAVEIFDIRTY,
-    OLEGETMONIKER, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY, OLEIVERB_SHOW, OLEMISC,
-    OLEMISC_RECOMPOSEONRESIZE, OLEMISC_RENDERINGISDEVICEINDEPENDENT, OLEWHICHMK,
-    RegisterActiveObject, RevokeActiveObject, USERCLASSTYPE, USERCLASSTYPE_APPNAME,
+    ACTIVEOBJECT_WEAK, CF_ENHMETAFILE, CF_METAFILEPICT, IEnumOLEVERB, IOleClientSite, IOleObject,
+    IOleObject_Impl, IViewObject_Impl, IViewObject2, IViewObject2_Impl, OLECLOSE,
+    OLECLOSE_SAVEIFDIRTY, OLEGETMONIKER, OLEIVERB_HIDE, OLEIVERB_OPEN, OLEIVERB_PRIMARY,
+    OLEIVERB_SHOW, OLEMISC, OLEMISC_RECOMPOSEONRESIZE, OLEMISC_RENDERINGISDEVICEINDEPENDENT,
+    OLEWHICHMK, RegisterActiveObject, RevokeActiveObject, USERCLASSTYPE, USERCLASSTYPE_APPNAME,
     USERCLASSTYPE_SHORT,
 };
 use windows::Win32::System::Variant::VARIANT;
@@ -53,7 +53,9 @@ use windows::core::{
     BOOL, Error, GUID, HRESULT, PCWSTR, PWSTR, Ref, Result as WinResult, implement,
 };
 
-use crate::clsid::{CLSID_EQUATION, FRIENDLY_NAME, PROGID, STREAM_LATEX, STREAM_NATIVE};
+use crate::clsid::{
+    self, CLSID_EQUATION, FRIENDLY_NAME, PROGID, STREAM_COMPOBJ, STREAM_LATEX, STREAM_NATIVE,
+};
 use crate::factory::ServerState;
 use crate::formats::{self, FormatEnumerator};
 use crate::handoff::Session;
@@ -182,7 +184,7 @@ struct Inner {
     /// Storage the host handed over, and the site and sinks to tell about changes.
     storage: Option<IStorage>,
     client_site: Option<IOleClientSite>,
-    advises: Vec<(u32, IAdviseSink)>,
+    advises: Vec<(u32, u16, IAdviseSink)>,
     view_advise: Option<(u32, IAdviseSink)>,
     next_advise: u32,
     /// The editor running on this object, if it is.
@@ -298,7 +300,7 @@ impl Inner {
         self.status = message.to_owned();
     }
 
-    fn sinks(&self) -> Vec<(u32, IAdviseSink)> {
+    fn sinks(&self) -> Vec<(u32, u16, IAdviseSink)> {
         self.advises.clone()
     }
 }
@@ -340,6 +342,8 @@ impl EquationObject {
                     session.path.display()
                 ));
                 inner.session = Some(session);
+                drop(inner);
+                announce_visibility(&self.inner, true);
                 Ok(())
             }
             Err(message) => {
@@ -348,6 +352,22 @@ impl EquationObject {
                 trace::log(&format!("cannot start the editor: {message}"));
                 Err(Error::new(E_FAIL, message))
             }
+        }
+    }
+}
+
+/// Tell the host's site whether the object's window is showing.
+///
+/// An out-of-place server reports its editor opening and closing this way. A host that is never
+/// told the editor is gone keeps believing the object is still being edited, and a document
+/// whose object is "being edited" never finishes saving.
+fn announce_visibility(inner: &RefCell<Inner>, visible: bool) {
+    let site = inner.borrow().client_site.clone();
+    if let Some(site) = site {
+        trace::log(&format!("announce OnShowWindow({visible})"));
+        match unsafe { site.OnShowWindow(visible) } {
+            Ok(()) => {}
+            Err(error) => trace::log(&format!("OnShowWindow({visible}) failed: {error}")),
         }
     }
 }
@@ -373,7 +393,7 @@ fn tick(inner: &RefCell<Inner>) {
         let mut state = inner.borrow_mut();
         if let Some(session) = state.session.take() {
             message = match outcome {
-                Ok(text) if text == state.latex => {
+                Ok(text) if text == session.initial => {
                     format!(
                         "session {} closed without changing the equation",
                         session.id
@@ -402,19 +422,25 @@ fn tick(inner: &RefCell<Inner>) {
         }
     }
     trace::log(&message);
+    // The editor window is gone now, whatever the session wrote: the host may stop waiting for
+    // the object it believes is being edited and save the document.
+    announce_visibility(inner, false);
     if !changed {
         return;
     }
 
-    match write_streams(inner) {
+    match write_streams(inner, true) {
         Ok(note) => {
             trace::log(&note);
-            {
-                let mut state = inner.borrow_mut();
-                state.dirty = false;
-                state.note(&note);
-            }
-            notify_saved(inner);
+            // The streams are in the host's storage, but the host has not saved the document that
+            // holds them, so the object stays dirty: `IsDirty` is where the host asks whether its
+            // document has changes, and that is what makes it save. The host is deliberately not
+            // asked to save from here, because it may be inside a save of its own at this very
+            // moment: a container told to save while it is saving does not come out of it.
+            inner.borrow_mut().note(&note);
+            // Tell the host the picture changed, or it keeps showing the one it cached when the
+            // object was inserted; the notices go out from the worker thread, never from here.
+            announce_saved(inner);
         }
         Err(error) => {
             trace::log(&format!("the new equation is held in memory only: {error}"));
@@ -434,8 +460,14 @@ fn opens_editor(iverb: i32) -> bool {
     iverb == OLEIVERB_PRIMARY.0 || iverb == OLEIVERB_SHOW.0 || iverb == OLEIVERB_OPEN.0 || iverb > 0
 }
 
-/// Write both streams into the host's storage and commit them.
-fn write_streams(inner: &RefCell<Inner>) -> Result<String, String> {
+/// Write both streams into the host's storage, and commit when `commit` is true.
+///
+/// `IPersistStorage::Save` MUST pass `commit = false`: during a Save call the host owns the
+/// storage and will commit it after `SaveCompleted` returns. Calling `IStorage::Commit` from
+/// inside Save violates the OLE spec and deadlocks against Word, which waits for SaveCompleted
+/// while the server blocks on Commit. Every other caller (tick, Close, InitNew, save_now) passes
+/// `commit = true` to flush the streams into the compound file immediately.
+fn write_streams(inner: &RefCell<Inner>, commit: bool) -> Result<String, String> {
     let (storage, native, latex) = {
         let state = inner.borrow();
         let Some(storage) = state.storage.clone() else {
@@ -453,42 +485,76 @@ fn write_streams(inner: &RefCell<Inner>) -> Result<String, String> {
             });
         (storage, native, state.latex.clone())
     };
+    // The storage says whose it is and carries the class information stream, which is how a
+    // host names the object and finds its way back to this server when the document is opened
+    // again; the equation streams alone leave it reporting "Unknown" and no programmatic
+    // identifier.
+    storage::set_class(&storage, &CLSID_EQUATION)?;
+    storage::write_stream(&storage, STREAM_COMPOBJ, &clsid::compobj())?;
     storage::write_stream(&storage, STREAM_NATIVE, &native)?;
     storage::write_stream(&storage, STREAM_LATEX, latex.as_bytes())?;
-    storage::commit(&storage)?;
+    if commit {
+        storage::commit(&storage)?;
+    }
     Ok(format!(
-        "wrote {STREAM_NATIVE} ({} bytes) and {STREAM_LATEX} ({} bytes)",
+        "wrote {STREAM_COMPOBJ}, {STREAM_NATIVE} ({} bytes) and {STREAM_LATEX} ({} bytes)",
         native.len(),
         latex.len()
     ))
 }
 
-/// Tell the host the object changed and needs saving.
-fn notify_saved(inner: &RefCell<Inner>) {
-    let (site, sinks, view) = {
+/// Tell the host's advise sinks that the object was saved and that its picture may have changed.
+///
+/// This is what the sinks are for, and it is deliberately all that is said to the host from here:
+/// asking the host to save its document is not this object's business at this point, because the
+/// object being dirty already says so where the host looks for it (`IsDirty`), and a container
+/// that is told to save while it is saving is a container that stops.
+fn announce_saved(inner: &RefCell<Inner>) {
+    let (sinks, view, math, extent, size_points) = {
         let state = inner.borrow();
         (
-            state.client_site.clone(),
             state.sinks(),
             state.view_advise.clone(),
+            state.math.clone(),
+            state.extent,
+            state.size_points,
         )
     };
-    if let Some(site) = site {
-        trace::log("asking the host to save the object");
-        if let Err(error) = unsafe { site.SaveObject() } {
+    // The new picture goes with each notice, in the format that connection registered for: a
+    // cache that asked for CF_ENHMETAFILE ignores a CF_METAFILEPICT push, and one that asked
+    // for the classic format ignores a metafile handle. One recording per connection, because
+    // the worker frees the one it sent.
+    let presentation = picture::presentation(&math, size_points, extent);
+    for (connection, format, sink) in sinks {
+        trace::log(&format!("advise connection {connection}: OnSave"));
+        crate::notify::on_save(&sink);
+        trace::log(&format!("advise connection {connection}: OnViewChange"));
+        crate::notify::on_view_change(&sink, DVASPECT_CONTENT.0);
+        let pushed = presentation.as_ref().and_then(|picture| {
+            if format == CF_METAFILEPICT.0 {
+                picture::metafile_picture(picture).map(crate::notify::PushedPicture::MetaFilePict)
+            } else if format == CF_ENHMETAFILE.0 {
+                let handle = unsafe { SetEnhMetaFileBits(&picture.emf) };
+                (!handle.is_invalid()).then_some(crate::notify::PushedPicture::EnhMetaFile(handle))
+            } else {
+                None
+            }
+        });
+        if format != 0 {
             trace::log(&format!(
-                "the host refused to save the object: {}",
-                storage::error_text(&error)
+                "advise connection {connection}: OnDataChange(format {format}, {})",
+                if pushed.is_some() {
+                    "with picture"
+                } else {
+                    "empty medium"
+                }
             ));
+            crate::notify::on_data_change(&sink, DVASPECT_CONTENT.0, format, pushed);
         }
     }
-    for (connection, sink) in sinks {
-        trace::log(&format!("advise connection {connection}: OnSave"));
-        unsafe { sink.OnSave() };
-    }
     if let Some((aspects, sink)) = view {
-        trace::log("advise connection: OnViewChange");
-        unsafe { sink.OnViewChange(aspects, -1) };
+        trace::log("view advise: OnViewChange");
+        crate::notify::on_view_change(&sink, aspects);
     }
 }
 
@@ -536,18 +602,14 @@ impl EquationObject {
             "the text was kept but does not parse as LaTeX".to_owned()
         }
     }
-
-    /// Write the streams on demand, the way the automation `Save` member does.
+    /// The object stays dirty afterwards: its streams are in the host's storage, but the host has
+    /// not saved the document that holds them, and `IsDirty` is what asks it to.
     fn save_now(&self) -> String {
         self.state.note_busy();
-        match write_streams(&self.inner) {
+        match write_streams(&self.inner, true) {
             Ok(note) => {
-                {
-                    let mut inner = self.inner.borrow_mut();
-                    inner.dirty = false;
-                    inner.note(&note);
-                }
-                notify_saved(&self.inner);
+                self.inner.borrow_mut().note(&note);
+                announce_saved(&self.inner);
                 String::new()
             }
             Err(error) => error,
@@ -603,6 +665,7 @@ impl IOleObject_Impl for EquationObject_Impl {
     }
 
     fn GetClientSite(&self) -> WinResult<IOleClientSite> {
+        trace::log("call GetClientSite");
         self.inner
             .borrow()
             .client_site
@@ -642,7 +705,7 @@ impl IOleObject_Impl for EquationObject_Impl {
             return Ok(());
         }
         drop(inner);
-        match write_streams(&self.inner) {
+        match write_streams(&self.inner, true) {
             Ok(note) => {
                 {
                     let mut inner = self.inner.borrow_mut();
@@ -652,7 +715,7 @@ impl IOleObject_Impl for EquationObject_Impl {
                     inner.note(&note);
                 }
                 trace::log(&format!("Close(save={}): {note}", dwsaveoption.0));
-                notify_saved(&self.inner);
+                announce_saved(&self.inner);
                 self.state.object_closed();
                 Ok(())
             }
@@ -742,18 +805,22 @@ impl IOleObject_Impl for EquationObject_Impl {
     }
 
     fn Update(&self) -> WinResult<()> {
+        trace::log("call Update");
         Ok(())
     }
 
     fn IsUpToDate(&self) -> WinResult<()> {
+        trace::log("call IsUpToDate");
         Ok(())
     }
 
     fn GetUserClassID(&self) -> WinResult<GUID> {
+        trace::log("call GetUserClassID");
         Ok(CLSID_EQUATION)
     }
 
     fn GetUserType(&self, dwformoftype: &USERCLASSTYPE) -> WinResult<PWSTR> {
+        trace::log("call GetUserType");
         let text = if *dwformoftype == USERCLASSTYPE_SHORT {
             "Equation"
         } else if *dwformoftype == USERCLASSTYPE_APPNAME {
@@ -765,6 +832,7 @@ impl IOleObject_Impl for EquationObject_Impl {
     }
 
     fn SetExtent(&self, dwdrawaspect: DVASPECT, psizel: *const SIZE) -> WinResult<()> {
+        trace::log("call SetExtent");
         self.state.note_busy();
         if dwdrawaspect != DVASPECT_CONTENT || psizel.is_null() {
             return Ok(());
@@ -786,6 +854,7 @@ impl IOleObject_Impl for EquationObject_Impl {
     }
 
     fn GetExtent(&self, dwdrawaspect: DVASPECT) -> WinResult<SIZE> {
+        trace::log("call GetExtent");
         if dwdrawaspect != DVASPECT_CONTENT {
             return Err(Error::from_hresult(DV_E_DVASPECT));
         }
@@ -801,7 +870,7 @@ impl IOleObject_Impl for EquationObject_Impl {
         let mut inner = self.inner.borrow_mut();
         let connection = inner.next_advise;
         inner.next_advise += 1;
-        inner.advises.push((connection, sink));
+        inner.advises.push((connection, 0, sink));
         trace::log(&format!("Advise -> connection {connection}"));
         Ok(connection)
     }
@@ -811,7 +880,7 @@ impl IOleObject_Impl for EquationObject_Impl {
         let before = inner.advises.len();
         inner
             .advises
-            .retain(|(connection, _)| *connection != dwconnection);
+            .retain(|(connection, _, _)| *connection != dwconnection);
         if inner.advises.len() == before {
             return Err(Error::from_hresult(OLE_E_NOCONNECTION));
         }
@@ -824,6 +893,7 @@ impl IOleObject_Impl for EquationObject_Impl {
     }
 
     fn GetMiscStatus(&self, dwaspect: DVASPECT) -> WinResult<OLEMISC> {
+        trace::log("call GetMiscStatus");
         if dwaspect != DVASPECT_CONTENT {
             return Ok(OLEMISC(0));
         }
@@ -838,6 +908,7 @@ impl IOleObject_Impl for EquationObject_Impl {
 
 impl IDataObject_Impl for EquationObject_Impl {
     fn GetData(&self, pformatetcin: *const FORMATETC) -> WinResult<STGMEDIUM> {
+        trace::log("call GetData");
         if pformatetcin.is_null() {
             return Err(Error::from_hresult(DV_E_FORMATETC));
         }
@@ -845,12 +916,34 @@ impl IDataObject_Impl for EquationObject_Impl {
         if !formats::supported(&format) {
             let reason = formats::rejection(&format);
             trace::log(&format!(
-                "GetData(cf={}) -> refused {:#010X}",
-                format.cfFormat, reason.0 as u32
+                "GetData(cf={}, aspect={}, tymed={}, lindex={}) -> refused {:#010X}",
+                format.cfFormat, format.dwAspect, format.tymed, format.lindex, reason.0 as u32
             ));
             return Err(Error::from_hresult(reason));
         }
         let picture = self.picture()?;
+        if format.cfFormat == CF_METAFILEPICT.0 {
+            // The classic picture: the same equation as a Windows-format metafile inside a
+            // `METAFILEPICT` the host frees with `ReleaseStgMedium`.
+            let Some(memory) = picture::metafile_picture(&picture) else {
+                trace::log("GetData -> CF_METAFILEPICT could not be built");
+                return Err(Error::new(
+                    E_FAIL,
+                    "the equation metafile picture could not be built",
+                ));
+            };
+            trace::log(&format!(
+                "GetData -> CF_METAFILEPICT ({:.1}x{:.1} points)",
+                picture.width_pt, picture.height_pt
+            ));
+            return Ok(STGMEDIUM {
+                tymed: TYMED_MFPICT.0 as u32,
+                u: STGMEDIUM_0 {
+                    hMetaFilePict: memory.0,
+                },
+                pUnkForRelease: ManuallyDrop::new(None),
+            });
+        }
         if format.cfFormat == CF_ENHMETAFILE.0 {
             // The vector picture: the metafile bytes become a GDI handle the host plays back at
             // whatever size it is drawing, so zooming stays sharp.
@@ -910,6 +1003,7 @@ impl IDataObject_Impl for EquationObject_Impl {
     }
 
     fn QueryGetData(&self, pformatetc: *const FORMATETC) -> HRESULT {
+        trace::log("call QueryGetData");
         if pformatetc.is_null() {
             return DV_E_FORMATETC;
         }
@@ -926,13 +1020,14 @@ impl IDataObject_Impl for EquationObject_Impl {
         pformatectin: *const FORMATETC,
         pformatetcout: *mut FORMATETC,
     ) -> HRESULT {
+        trace::log("call GetCanonicalFormatEtc");
         if pformatectin.is_null() || pformatetcout.is_null() {
             return E_NOTIMPL;
         }
         let format = unsafe { *pformatectin };
-        unsafe { pformatetcout.write(format) };
         // The object has one presentation, so what came in is what goes out, without a target
         // device, which is what `DATA_S_SAMEFORMATETC` means.
+        unsafe { pformatetcout.write(formats::canonical(&format)) };
         DATA_S_SAMEFORMATETC
     }
 
@@ -963,15 +1058,44 @@ impl IDataObject_Impl for EquationObject_Impl {
 
     fn DAdvise(
         &self,
-        _pformatetc: *const FORMATETC,
+        pformatetc: *const FORMATETC,
         _advf: u32,
-        _padvsink: Ref<IAdviseSink>,
+        padvsink: Ref<IAdviseSink>,
     ) -> WinResult<u32> {
-        Err(Error::from_hresult(OLE_E_ADVISENOTSUPPORTED))
+        let Some(sink) = padvsink.cloned() else {
+            return Err(Error::from_hresult(E_POINTER));
+        };
+        if pformatetc.is_null() {
+            return Err(Error::from_hresult(E_POINTER));
+        }
+        let format = unsafe { (*pformatetc).cfFormat };
+        // The host's presentation cache registers here, and it is the only channel through
+        // which it will ever hear that the picture changed: refusing this is why a document
+        // keeps showing the picture it cached when the object was inserted. The format is
+        // recorded for the log and not filtered, matching what the stock data-advice holder
+        // does; the notice the object sends says only that the view changed.
+        let mut inner = self.inner.borrow_mut();
+        let connection = inner.next_advise;
+        inner.next_advise += 1;
+        inner.advises.push((connection, format, sink));
+        trace::log(&format!(
+            "DAdvise(format {format}, flags {:#x}) -> connection {connection}",
+            _advf
+        ));
+        Ok(connection)
     }
 
-    fn DUnadvise(&self, _dwconnection: u32) -> WinResult<()> {
-        Err(Error::from_hresult(OLE_E_NOCONNECTION))
+    fn DUnadvise(&self, dwconnection: u32) -> WinResult<()> {
+        let mut inner = self.inner.borrow_mut();
+        let before = inner.advises.len();
+        inner
+            .advises
+            .retain(|(connection, _, _)| *connection != dwconnection);
+        if inner.advises.len() == before {
+            return Err(Error::from_hresult(OLE_E_NOCONNECTION));
+        }
+        trace::log(&format!("DUnadvise({dwconnection})"));
+        Ok(())
     }
 
     fn EnumDAdvise(&self) -> WinResult<IEnumSTATDATA> {
@@ -993,6 +1117,7 @@ impl IViewObject_Impl for EquationObject_Impl {
         _pfncontinue: isize,
         _dwcontinue: usize,
     ) -> WinResult<()> {
+        trace::log("call Draw");
         if dwdrawaspect != DVASPECT_CONTENT || lprcbounds.is_null() || hdcdraw.is_invalid() {
             return Err(Error::from_hresult(DV_E_DVASPECT));
         }
@@ -1074,6 +1199,7 @@ impl IViewObject_Impl for EquationObject_Impl {
         _advf: u32,
         padvsink: Ref<IAdviseSink>,
     ) -> WinResult<()> {
+        trace::log("call SetAdvise");
         let mut inner = self.inner.borrow_mut();
         inner.view_advise = padvsink.cloned().map(|sink| (aspects.0, sink));
         trace::log(&format!("SetAdvise(aspects={:#X})", aspects.0));
@@ -1097,6 +1223,7 @@ impl IViewObject2_Impl for EquationObject_Impl {
         _lindex: i32,
         _ptd: *const DVTARGETDEVICE,
     ) -> WinResult<SIZE> {
+        trace::log("call GetExtent (IViewObject2)");
         if dwdrawaspect != DVASPECT_CONTENT {
             return Err(Error::from_hresult(DV_E_DVASPECT));
         }
@@ -1113,6 +1240,7 @@ impl IPersist_Impl for EquationObject_Impl {
 
 impl IPersistStorage_Impl for EquationObject_Impl {
     fn IsDirty(&self) -> HRESULT {
+        trace::log("call IsDirty");
         if self.inner.borrow().dirty {
             HRESULT(0)
         } else {
@@ -1131,7 +1259,7 @@ impl IPersistStorage_Impl for EquationObject_Impl {
         trace::log("InitNew");
         // The document has an equation from the moment the object exists, so a host that saves
         // without ever activating it still stores a whole object.
-        match write_streams(&self.inner) {
+        match write_streams(&self.inner, true) {
             Ok(note) => {
                 trace::log(&note);
                 Ok(())
@@ -1171,7 +1299,7 @@ impl IPersistStorage_Impl for EquationObject_Impl {
             self.inner.borrow_mut().storage = Some(storage);
         }
         trace::log(&format!("Save(same as load: {})", fsameasload.as_bool()));
-        match write_streams(&self.inner) {
+        match write_streams(&self.inner, false) {
             Ok(note) => {
                 let mut inner = self.inner.borrow_mut();
                 inner.dirty = false;

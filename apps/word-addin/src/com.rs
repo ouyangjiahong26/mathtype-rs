@@ -50,6 +50,11 @@ impl Variant {
         Self::holding(VT_I4, VARIANT_0_0_0 { lVal: value })
     }
 
+    /// A double precision number; tab stops and positions live in points.
+    pub fn r8(value: f64) -> Self {
+        Self::holding(VT_R8, VARIANT_0_0_0 { dblVal: value })
+    }
+
     /// A string; the variant owns a copy of it.
     pub fn bstr(value: &str) -> Self {
         Self::holding(
@@ -208,6 +213,11 @@ unsafe fn variant_payload(value: &VARIANT) -> &VARIANT_0_0_0 {
 pub struct Object(IDispatch);
 
 impl Object {
+    /// The interface pointer this wraps, for arguments that must carry the object itself.
+    pub fn as_dispatch(&self) -> &IDispatch {
+        &self.0
+    }
+
     /// Wraps an interface pointer that is already owned.
     pub fn from_dispatch(dispatch: IDispatch) -> Self {
         Self(dispatch)

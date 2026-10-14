@@ -560,3 +560,75 @@ fn replacing_a_number_with_text_leaves_the_rest_numbered() {
     );
     assert!(document.document_xml().contains("(固定)"));
 }
+
+// ------------------------------------------------------------------ field codes
+
+#[test]
+fn the_label_codes_are_one_per_counter_the_style_shows() {
+    assert_eq!(
+        label_field_codes(NumberStyle::Plain),
+        vec!["SEQ MTEqn \\* ARABIC"]
+    );
+    assert_eq!(
+        label_field_codes(NumberStyle::Chapter),
+        vec!["SEQ MTChap \\c \\* ARABIC", "SEQ MTEqn \\* ARABIC"]
+    );
+    assert_eq!(
+        label_field_codes(NumberStyle::Section),
+        vec![
+            "SEQ MTChap \\c \\* ARABIC",
+            "SEQ MTSec \\c \\* ARABIC",
+            "SEQ MTEqn \\* ARABIC"
+        ]
+    );
+    assert_eq!(
+        label_field_codes(NumberStyle::Paragraph),
+        vec!["SEQ MTEqn \\s 1 \\* ARABIC"]
+    );
+}
+
+/// The run markup and the host fields come from the same codes, so a change to one spelling
+/// shows up in both renderings.
+#[test]
+fn the_runs_render_the_field_codes() {
+    for style in [
+        NumberStyle::Plain,
+        NumberStyle::Chapter,
+        NumberStyle::Section,
+        NumberStyle::Paragraph,
+    ] {
+        let runs = numbering_field_runs(style);
+        for code in label_field_codes(style) {
+            assert!(
+                runs.contains(&format!(" {code} ")),
+                "{style:?} misses `{code}` in {runs}"
+            );
+        }
+        well_formed(&runs);
+    }
+
+    let paragraph = break_paragraph(BreakKind::Chapter, 2);
+    for code in break_field_codes(BreakKind::Chapter, 2) {
+        assert!(paragraph.contains(&format!(" {code} ")), "{paragraph}");
+    }
+    well_formed(&paragraph);
+
+    let runs = reference_runs("_RefMTEq7", 7);
+    assert!(
+        runs.contains(&format!(" {} ", reference_code("_RefMTEq7"))),
+        "{runs}"
+    );
+    well_formed(&runs);
+}
+
+#[test]
+fn the_number_tab_sits_at_the_side_edge() {
+    assert_eq!(tab_alignment(Side::Right), TabAlignment::Right);
+    assert_eq!(tab_alignment(Side::Left), TabAlignment::Left);
+    assert_eq!(tab_alignment(Side::Right).word_value(), 2);
+    assert_eq!(tab_alignment(Side::Left).word_value(), 0);
+    assert_eq!(tab_position_twips(Side::Right), 8296);
+    assert_eq!(tab_position_twips(Side::Left), 0);
+    assert!(tabs_paragraph_properties(Side::Right).contains("w:val=\"right\""));
+    assert!(tabs_paragraph_properties(Side::Left).contains("w:val=\"left\""));
+}
