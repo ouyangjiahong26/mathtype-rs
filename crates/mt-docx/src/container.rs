@@ -46,7 +46,7 @@ impl Package {
         let mut entries = Vec::with_capacity(archive.len());
         for index in 0..archive.len() {
             let file = archive.by_index_raw(index).map_err(zip_error)?;
-            let name = file.name().to_owned();
+            let name = file.name().map_err(zip_error)?.into_owned();
             if entries.iter().any(|entry: &Entry| entry.name == name) {
                 continue;
             }
@@ -159,7 +159,7 @@ mod tests {
                 let mut file = archive.by_index(index).unwrap();
                 let mut data = Vec::new();
                 file.read_to_end(&mut data).unwrap();
-                (file.name().to_owned(), data)
+                (file.name().unwrap().into_owned(), data)
             })
             .collect()
     }
