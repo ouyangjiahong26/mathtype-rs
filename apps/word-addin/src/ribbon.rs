@@ -129,7 +129,12 @@ mod tests {
                 "ConvertSelectionToLatex",
                 "TeXToggle",
                 "ExportSelectionPng",
-                "ExportDocumentHtml"
+                "ExportDocumentHtml",
+                "BatchConvertDocument",
+                "InsertNumberedEquation",
+                "InsertChapterBreak",
+                "InsertSectionBreak",
+                "InsertCrossReference",
             ]
         );
     }
