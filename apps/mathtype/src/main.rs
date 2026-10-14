@@ -20,7 +20,7 @@ use eframe::egui::{
     Stroke, Vec2, ViewportCommand,
 };
 use mt_core::{Font, MathStyle, Side};
-use mt_edit::{Cursor, Editor, PaletteItem, palettes};
+use mt_edit::{Cursor, Editor, Palette, PaletteItem, palettes};
 use mt_layout::{Box as LayoutBox, LayoutStyle, RowAnchor, layout, layout_with_anchors, to_svg};
 use mt_render::metrics::{FaceMetrics, MATH_FONT};
 use mt_style_preset::StylePreset;
@@ -694,6 +694,10 @@ struct App {
     presets: Vec<StylePreset>,
     /// Which entry of `presets` the style comes from.
     preset_index: usize,
+    /// Which palette's fly-out panel is open, if any.
+    open_palette: Option<usize>,
+    /// Whether the style/library side panel is open; closed by default so the canvas has the room.
+    show_side_panel: bool,
     /// The formula library the side panel searches and inserts from.
     library: library::Library,
     /// Name the next library save will use.
@@ -825,6 +829,8 @@ impl App {
             style,
             presets,
             preset_index: 0,
+            open_palette: None,
+            show_side_panel: false,
             library,
             library_name: String::new(),
             library_query: String::new(),
@@ -1091,20 +1097,42 @@ impl App {
         }
     }
 
-    /// Import whatever the input box holds, picking the format from the text itself.
+    /// Take what was typed into the input box.
     ///
-    /// LaTeX failures keep their byte offset so the input area can point at the offending spot.
-    fn import_text(&mut self) {
-        let text = self.tex_input.clone();
-        let from = detect_format(&text);
+    /// The box has one way in: a plain character goes into the equation at the caret as it is
+    /// typed, so the canvas is showing the result while the key is still going down. A line that
+    /// starts with `\` is LaTeX source and is left in the box until it is committed.
+    fn absorb_typing(&mut self) {
+        if self.tex_input.starts_with('\\') {
+            return;
+        }
+        for ch in std::mem::take(&mut self.tex_input).chars() {
+            self.dirty |= self.editor.insert_char(ch);
+        }
+    }
+
+    /// Commit the LaTeX line the input box holds, at the caret.
+    ///
+    /// The line is inserted where the caret is rather than replacing the equation, which is what
+    /// typing a character does; the format is still recognised from the text itself, so a line of
+    /// MathML or OMML pasted behind the `\` goes in the same way. Failures keep their byte offset
+    /// so the input area can point at the offending spot.
+    fn commit_input(&mut self) {
+        let Some(source) = self.tex_input.trim().strip_prefix('\\') else {
+            return;
+        };
+        if source.trim().is_empty() {
+            return;
+        }
+        let from = detect_format(source);
         if from == Format::Latex {
-            match mt_tex::parse(&text) {
+            match mt_tex::parse(source) {
                 Ok(math) => {
-                    self.editor.set_math(math);
+                    self.editor.insert_node(math.body);
                     self.dirty = true;
                     self.parse_error = None;
-                    self.save_shape = SaveShape::New;
-                    self.status = "已导入（按 LaTeX 解析）".to_owned();
+                    self.tex_input.clear();
+                    self.status = "已插入公式".to_owned();
                 }
                 Err(error) => {
                     self.parse_error = Some(ParseFailure {
@@ -1119,17 +1147,17 @@ impl App {
             }
             return;
         }
-        match read_math(text.as_bytes(), from) {
+        match read_math(source.as_bytes(), from) {
             Ok(math) => {
-                self.editor.set_math(math);
+                self.editor.insert_node(math.body);
                 self.dirty = true;
                 self.parse_error = None;
-                self.save_shape = SaveShape::New;
-                self.status = format!("已导入（按 {} 解析）", from.name());
+                self.tex_input.clear();
+                self.status = format!("已插入公式（按 {} 解析）", from.name());
             }
             Err(message) => {
                 self.parse_error = None;
-                self.status = format!("导入失败：{message}");
+                self.status = format!("插入失败：{message}");
             }
         }
     }
@@ -1444,36 +1472,245 @@ impl eframe::App for App {
         if self.web_dialog {
             self.show_web_dialog(ui.ctx());
         }
+        // One button per palette, wearing a few of its own entries on its face: clicking it opens
+        // the palette's entries in a panel anchored under the button, the way MathType's palettes
+        // work, so nothing in the toolbar has to be read off a name.
+        let mut anchor: Option<egui::Rect> = None;
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                for palette in palettes() {
-                    ui.menu_button(palette.name, |ui| {
-                        ui.horizontal_top(|ui| {
-                            for column in palette.columns {
-                                ui.vertical(|ui| {
-                                    for item in *column {
-                                        let button = ui.button(item.label());
-                                        if button.clicked() {
-                                            self.apply_palette_item(*item);
-                                            ui.close();
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    });
+                for (index, palette) in palettes().iter().enumerate() {
+                    let response = palette_button(ui, palette, &self.metrics);
+                    if response.clicked() {
+                        self.open_palette = if self.open_palette == Some(index) {
+                            None
+                        } else {
+                            Some(index)
+                        };
+                    }
+                    if self.open_palette == Some(index) {
+                        anchor = Some(response.rect);
+                    }
                 }
+            });
+            ui.separator();
+            // Commands are filed the way MathType files them, so a command's place says what it
+            // does: the toolbar keeps only the few that are reached for constantly, each with its
+            // explanation on hover, and the status bar at the bottom says what is being typed.
+            ui.horizontal_wrapped(|ui| {
+                ui.menu_button("文件", |ui| {
+                    if ui.button("保存").on_hover_text("写入公式文件（Ctrl+S）").clicked() {
+                        self.save();
+                        ui.close();
+                    }
+                    ui.separator();
+                    for (format, label) in [
+                        (Format::Svg, "导出 SVG"),
+                        (Format::Png, "导出 PNG"),
+                        (Format::Eps, "导出 EPS"),
+                    ] {
+                        if ui
+                            .button(label)
+                            .on_hover_text("按当前样式预设渲染成图片文件")
+                            .clicked()
+                        {
+                            self.export(format);
+                            ui.close();
+                        }
+                    }
+                    if ui
+                        .button("导出网页…")
+                        .on_hover_text("把公式排成网页（MathML 或图片）")
+                        .clicked()
+                    {
+                        self.web_dialog = true;
+                        ui.close();
+                    }
+                });
+                ui.menu_button("编辑", |ui| {
+                    if ui.button("撤销 (Ctrl+Z)").clicked() {
+                        self.editor.undo();
+                        ui.close();
+                    }
+                    if ui.button("重做 (Ctrl+Shift+Z)").clicked() {
+                        self.editor.redo();
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui
+                        .button("复制")
+                        .on_hover_text("整个公式，四种格式同时进剪贴板")
+                        .clicked()
+                    {
+                        match clipboard::payload(self.editor.math()) {
+                            Ok(payload) => match clipboard::copy(self.editor.math()) {
+                                Ok(()) => self.status = format!("已复制（LaTeX：{}）", payload.latex),
+                                Err(message) => self.status = format!("复制失败：{message}"),
+                            },
+                            Err(message) => self.status = format!("复制失败：{message}"),
+                        }
+                        ui.close();
+                    }
+                    if ui
+                        .button("粘贴")
+                        .on_hover_text("从剪贴板按 MTEF / MathML / 文本顺序识别并替换公式")
+                        .clicked()
+                    {
+                        match clipboard::paste() {
+                            Ok(math) => {
+                                self.editor.set_math(math);
+                                self.dirty = true;
+                                self.save_shape = SaveShape::New;
+                                self.status = "已从剪贴板粘贴".to_owned();
+                            }
+                            Err(message) => self.status = format!("粘贴失败：{message}"),
+                        }
+                        ui.close();
+                    }
+                    ui.separator();
+                    for (format, label) in [
+                        (Format::Latex, "复制为 LaTeX"),
+                        (Format::MathMl, "复制为 MathML"),
+                        (Format::Omml, "复制为 OMML"),
+                    ] {
+                        if ui
+                            .button(label)
+                            .on_hover_text("只把这一种源码格式放进剪贴板")
+                            .clicked()
+                        {
+                            self.copy_as(ui.ctx(), format);
+                            ui.close();
+                        }
+                    }
+                });
+                ui.menu_button("视图", |ui| {
+                    if ui
+                        .checkbox(&mut self.show_side_panel, "样式与库")
+                        .on_hover_text("右侧的样式预设与公式库面板")
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                });
+                ui.menu_button("样式", |ui| {
+                    let shown = current_font(&self.editor);
+                    for (font, name) in FONT_CHOICES {
+                        if ui
+                            .selectable_label(shown == font, name)
+                            .on_hover_text("给选中的字母换字体；没有选区则用于下一个输入的字符")
+                            .clicked()
+                        {
+                            self.dirty |= apply_font_choice(&mut self.editor, font);
+                            ui.close();
+                        }
+                    }
+                });
+                ui.menu_button("大小", |ui| {
+                    let shown = self.editor.typing_style();
+                    for (style, name) in STYLE_CHOICES {
+                        if ui
+                            .selectable_label(shown == Some(style), name)
+                            .on_hover_text("公式的显示尺寸档：标准 / 文本 / 一级脚本 / 二级脚本")
+                            .clicked()
+                        {
+                            self.dirty |= apply_style_choice(&mut self.editor, style);
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    ui.add(
+                        egui::Slider::new(&mut self.style.size, 8.0..=48.0)
+                            .text("显示字号")
+                            .fixed_decimals(0),
+                    )
+                    .on_hover_text("编辑区里公式按多少磅排版（也决定导出的字号）");
+                });
+                ui.menu_button("预置", |ui| {
+                    let shown = self.presets[self.preset_index].name.clone();
+                    let names: Vec<String> =
+                        self.presets.iter().map(|preset| preset.name.clone()).collect();
+                    for (index, name) in names.into_iter().enumerate() {
+                        if ui
+                            .selectable_label(shown == name, name)
+                            .on_hover_text("整套排版参数：字号、间距、字体槽与对齐")
+                            .clicked()
+                        {
+                            self.apply_preset(index);
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    if ui
+                        .button("导入预置…")
+                        .on_hover_text(format!("从 {} 读取样式预设", self.preset_path))
+                        .clicked()
+                    {
+                        self.import_preset();
+                        ui.close();
+                    }
+                    if ui
+                        .button("导出预置…")
+                        .on_hover_text(format!("把当前预设写到 {}", self.preset_path))
+                        .clicked()
+                    {
+                        self.export_preset();
+                        ui.close();
+                    }
+                });
+                ui.menu_button("帮助", |ui| {
+                    if ui
+                        .button("怎么输入")
+                        .on_hover_text("直接敲字符即入公式；\\ 开头写 LaTeX，回车插入")
+                        .clicked()
+                    {
+                        self.status =
+                            "直接敲字符即入公式；\\ 开头为 LaTeX，回车或「插入公式」插到光标处"
+                                .to_owned();
+                        ui.close();
+                    }
+                    if ui
+                        .button("方向键怎么走")
+                        .on_hover_text("在槽位（分母、指数、括号内…）之间移动")
+                        .clicked()
+                    {
+                        self.status =
+                            "左右键在项间移动并进出槽位，上下键在同一构造的上下槽之间移动，Tab 跳到下一个槽位"
+                                .to_owned();
+                        ui.close();
+                    }
+                    if ui
+                        .button("面板怎么用")
+                        .on_hover_text("点面板按钮展开同类条目")
+                        .clicked()
+                    {
+                        self.status =
+                            "工具栏每个按钮是一个面板，点开就是该类的全部符号与模板，点条目即插到光标处"
+                                .to_owned();
+                        ui.close();
+                    }
+                });
                 ui.separator();
-                if ui.button("撤销").clicked() {
+                if ui
+                    .button("撤销")
+                    .on_hover_text("撤销上一步（Ctrl+Z）")
+                    .clicked()
+                {
                     self.editor.undo();
                 }
-                if ui.button("重做").clicked() {
+                if ui
+                    .button("重做")
+                    .on_hover_text("重做被撤销的一步（Ctrl+Shift+Z）")
+                    .clicked()
+                {
                     self.editor.redo();
                 }
                 ui.separator();
                 let shown_font = current_font(&self.editor);
                 for (font, name) in FONT_CHOICES {
-                    if ui.selectable_label(shown_font == font, name).clicked() {
+                    if ui
+                        .selectable_label(shown_font == font, name)
+                        .on_hover_text("字体：选中则改选区，否则用于下一个字符")
+                        .clicked()
+                    {
                         self.dirty |= apply_font_choice(&mut self.editor, font);
                     }
                 }
@@ -1482,6 +1719,7 @@ impl eframe::App for App {
                 for (style, name) in STYLE_CHOICES {
                     if ui
                         .selectable_label(shown_style == Some(style), name)
+                        .on_hover_text("尺寸档：标准 / 文本 / 一级脚本 / 二级脚本")
                         .clicked()
                     {
                         self.dirty |= apply_style_choice(&mut self.editor, style);
@@ -1492,71 +1730,74 @@ impl eframe::App for App {
                     egui::Slider::new(&mut self.style.size, 8.0..=48.0)
                         .text("显示字号")
                         .fixed_decimals(0),
-                );
-                if ui.button("保存").clicked() {
+                )
+                .on_hover_text("编辑区与导出使用的字号（磅）");
+                if ui
+                    .button("保存")
+                    .on_hover_text("写入公式文件（Ctrl+S）")
+                    .clicked()
+                {
                     self.save();
-                }
-                if ui.button("复制").clicked() {
-                    match clipboard::payload(self.editor.math()) {
-                        Ok(payload) => match clipboard::copy(self.editor.math()) {
-                            Ok(()) => self.status = format!("已复制（LaTeX：{}）", payload.latex),
-                            Err(message) => self.status = format!("复制失败：{message}"),
-                        },
-                        Err(message) => self.status = format!("复制失败：{message}"),
-                    }
-                }
-                if ui.button("粘贴").clicked() {
-                    match clipboard::paste() {
-                        Ok(math) => {
-                            self.editor.set_math(math);
-                            self.dirty = true;
-                            self.save_shape = SaveShape::New;
-                            self.status = "已从剪贴板粘贴".to_owned();
-                        }
-                        Err(message) => self.status = format!("粘贴失败：{message}"),
-                    }
-                }
-                if ui.button("复制 LaTeX").clicked() {
-                    self.copy_as(ui.ctx(), Format::Latex);
-                }
-                if ui.button("复制 MathML").clicked() {
-                    self.copy_as(ui.ctx(), Format::MathMl);
-                }
-                if ui.button("复制 OMML").clicked() {
-                    self.copy_as(ui.ctx(), Format::Omml);
-                }
-                if ui.button("导出 SVG").clicked() {
-                    self.export(Format::Svg);
-                }
-                if ui.button("导出 PNG").clicked() {
-                    self.export(Format::Png);
-                }
-                if ui.button("导出 EPS").clicked() {
-                    self.export(Format::Eps);
-                }
-                if ui.button("导出网页…").clicked() {
-                    self.web_dialog = true;
-                }
-                if self.path.is_some() {
-                    let label = if self.dirty { "保存 *" } else { "保存" };
-                    if ui.button(label).clicked() {
-                        self.save();
-                    }
                 }
             });
         });
-        egui::Panel::right("presets")
-            .resizable(true)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.draw_side_panel(ui));
+        if self.show_side_panel {
+            egui::Panel::right("presets")
+                .resizable(true)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.draw_side_panel(ui));
+                });
+        }
+
+        // The open palette's entries: a framed panel hanging under its button, in the window
+        // rather than beside it, so it reads as part of the toolbar. A press anywhere outside the
+        // button and the panel closes it.
+        if let (Some(index), Some(anchor)) = (self.open_palette, anchor) {
+            let palette = palettes()[index];
+            let position = egui::pos2(anchor.left(), anchor.bottom() + 4.0);
+            let shown = egui::Area::new(egui::Id::new("palette-fly-out"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(position)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_max_width(620.0);
+                        ui.horizontal_wrapped(|ui| {
+                            for column in palette.columns {
+                                for item in *column {
+                                    if palette_entry_button(ui, *item, &self.metrics).clicked() {
+                                        self.apply_palette_item(*item);
+                                        self.open_palette = None;
+                                    }
+                                }
+                            }
+                        });
+                    });
+                });
+            let panel = shown.response.rect;
+            let pressed = ui.ctx().input(|state| {
+                state.pointer.interact_pos().is_some_and(|point| {
+                    state.pointer.any_pressed() && !panel.contains(point) && !anchor.contains(point)
+                })
             });
+            if pressed {
+                self.open_palette = None;
+            }
+        }
 
         egui::CentralPanel::default().show(ui, |ui| {
             // Bottom-up: the footer claims its natural height first, the canvas then takes whatever
             // is left, so neither depends on a hand-computed height.
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                self.draw_preview(ui);
-                ui.label(&self.status);
+                // The status bar sits at the very bottom, the way MathType's does: what the next
+                // keystroke will be set in, the display size, and the last thing the editor did.
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label(style_status(&self.editor));
+                    ui.separator();
+                    ui.label(format!("显示字号 {:.0} pt", self.style.size));
+                    ui.separator();
+                    ui.label(&self.status);
+                });
                 if let Some(failure) = &self.parse_error {
                     let marker = error_marker(&self.tex_input, failure.offset);
                     ui.monospace(
@@ -1565,19 +1806,28 @@ impl eframe::App for App {
                             .family(egui::FontFamily::Monospace),
                     );
                 }
-                ui.weak(style_status(&self.editor));
+                // One input, one behaviour: characters typed here land in the equation at the
+                // caret and are drawn straight away; `\` at the start of the line means LaTeX
+                // source, which waits in the box until Enter puts the parsed equation where the
+                // caret is.
                 ui.horizontal(|ui| {
                     ui.label("输入");
-                    let input =
-                        egui::TextEdit::singleline(&mut self.tex_input).desired_width(520.0);
+                    let input = egui::TextEdit::singleline(&mut self.tex_input)
+                        .desired_width(520.0)
+                        .hint_text("直接输入字符，或 \\ 后写 LaTeX 再回车");
                     let input_response = ui.add(input);
-                    let convert = ui.button("导入公式").clicked();
+                    let commit = ui.button("插入公式").clicked();
                     let submitted = input_response.lost_focus()
                         && ui.input(|state| state.key_pressed(egui::Key::Enter));
-                    if convert || submitted {
-                        self.import_text();
+                    if commit || submitted {
+                        self.commit_input();
+                    } else if input_response.changed() {
+                        self.absorb_typing();
                     }
                 });
+                if self.tex_input.starts_with('\\') {
+                    self.draw_preview(ui);
+                }
                 ui.separator();
 
                 let (rect, response) =
@@ -1647,6 +1897,118 @@ impl eframe::App for App {
 /// Beyond this weighted distance a point counts as blank canvas rather than a caret position,
 /// so clicking far from the equation drops the selection instead of teleporting the caret.
 const MAX_HIT_COST: f32 = 600.0;
+
+/// One palette entry drawn at `center`: a symbol draws its own glyph, a template is laid out —
+/// empty slots and all — and drawn scaled around the point, and an explicit space keeps its name.
+fn draw_palette_item(
+    painter: &egui::Painter,
+    center: Pos2,
+    item: PaletteItem,
+    metrics: &FaceMetrics,
+    color: egui::Color32,
+    glyph_size: f32,
+) {
+    let math_font = |size: f64| FontId::new(size as f32, FontFamily::Name(MATH_FAMILY.into()));
+    match item {
+        PaletteItem::Symbol { ch, .. } => {
+            painter.text(
+                center,
+                Align2::CENTER_CENTER,
+                ch,
+                math_font(f64::from(glyph_size)),
+                color,
+            );
+        }
+        PaletteItem::Template(template) => {
+            let math = mt_core::Math::new(template.build().0);
+            let style = LayoutStyle::display(f64::from(glyph_size) * 0.62);
+            let boxes = layout(&math, metrics, &style);
+            let origin = Pos2::new(center.x - boxes.width() as f32 / 2.0, center.y);
+            draw_boxes(painter, &boxes, origin, metrics, color, &math_font);
+        }
+        PaletteItem::Space(_) => {
+            painter.text(
+                center,
+                Align2::CENTER_CENTER,
+                item.label(),
+                FontId::new(11.0, FontFamily::Proportional),
+                color,
+            );
+        }
+    }
+}
+
+/// A palette as a toolbar button: its first few entries drawn on the face are what says which
+/// kind of symbols are behind it.
+fn palette_button(ui: &mut egui::Ui, palette: &Palette, metrics: &FaceMetrics) -> egui::Response {
+    // Spaces have no glyph to wear, so the face is taken from the entries that have one; a palette
+    // that is nothing but spaces falls back to naming itself.
+    let face: Vec<PaletteItem> = palette
+        .columns
+        .iter()
+        .flat_map(|column| column.iter().copied())
+        .filter(|item| !matches!(item, PaletteItem::Space(_)))
+        .take(2)
+        .collect();
+    let name_only = face.is_empty();
+    let width = if name_only {
+        64.0
+    } else {
+        34.0 * face.len() as f32 + 14.0
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 48.0), Sense::click());
+    let visuals = ui.style().interact(&response);
+    ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);
+    let painter = ui.painter().with_clip_rect(rect.shrink(1.0));
+    if name_only {
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            palette.name,
+            FontId::new(12.0, FontFamily::Proportional),
+            visuals.text_color(),
+        );
+    }
+    let step = (rect.width() - 14.0) / face.len().max(1) as f32;
+    for (index, item) in face.iter().enumerate() {
+        let center = Pos2::new(
+            rect.left() + 7.0 + step * (index as f32 + 0.5),
+            rect.center().y,
+        );
+        draw_palette_item(&painter, center, *item, metrics, visuals.text_color(), 30.0);
+    }
+    response.on_hover_text(format!("{}：点击展开同类条目", palette.name))
+}
+
+/// One entry inside an open palette panel, at a size that can be told apart at a glance.
+fn palette_entry_button(
+    ui: &mut egui::Ui,
+    item: PaletteItem,
+    metrics: &FaceMetrics,
+) -> egui::Response {
+    let size = match item {
+        PaletteItem::Space(_) => egui::vec2(84.0, 52.0),
+        _ => egui::vec2(56.0, 52.0),
+    };
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let visuals = ui.style().interact(&response);
+    ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);
+    let painter = ui.painter().with_clip_rect(rect.shrink(1.0));
+    let glyph = if matches!(item, PaletteItem::Template(_)) {
+        40.0
+    } else {
+        32.0
+    };
+    draw_palette_item(
+        &painter,
+        rect.center(),
+        item,
+        metrics,
+        visuals.text_color(),
+        glyph,
+    );
+    response.on_hover_text(item.label())
+}
 
 /// Nearest insertion position to `point`, weighted so that staying on the caret's own line wins
 /// over a slightly smaller horizontal distance on a line further away.
