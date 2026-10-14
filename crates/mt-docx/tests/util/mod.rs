@@ -228,7 +228,7 @@ pub fn parts_of(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
             let mut file = archive.by_index(index).expect("read entry");
             let mut data = Vec::new();
             file.read_to_end(&mut data).expect("read data");
-            (file.name().to_owned(), data)
+            (file.name().unwrap().into_owned(), data)
         })
         .collect()
 }
