@@ -62,14 +62,20 @@ $tempDir     = Join-Path $env:TEMP 'mathtype-ole-server'
 $pointer     = Join-Path $tempDir 'current-handoff.txt'
 $handoffLog  = Join-Path $tempDir 'handoff-log.txt'
 $log         = Join-Path $tempDir 'server.log'
-$docx        = Join-Path $tempDir 'verify-equation.docx'
-$bin         = Join-Path $tempDir 'verify-equation.bin'
+# A fresh name every run: the WPS step leaves its window open on the saved document for a person
+# to double-click (its recipe below), and the next run's SaveAs2 must not collide with that.
+$stamp        = Get-Date -Format 'yyyyMMdd-HHmmss'
+$docx         = Join-Path $tempDir "verify-equation-$stamp.docx"
+$bin          = Join-Path $tempDir "verify-equation-$stamp.bin"
 $shot        = Join-Path $tempDir 'wps-window.png'
 $utf8NoBom   = New-Object System.Text.UTF8Encoding($false)
 
 $script:Failures = New-Object System.Collections.Generic.List[string]
 $script:Notes    = New-Object System.Collections.Generic.List[string]
 $script:StartedEditors = New-Object System.Collections.Generic.List[int]
+# The `mathtype` processes that were running when the run started, so the editor this run opens can
+# be told apart from the editor a machine that also has MathType 7 already has up.
+$script:EditorsBefore = @()
 
 function Ok([string]$m)   { Write-Host "[ok]   $m" -ForegroundColor Green }
 function Fail([string]$m) { $script:Failures.Add($m) | Out-Null; Write-Host "[FAIL] $m" -ForegroundColor Red }
@@ -147,7 +153,7 @@ Step '2. register'
 $classes  = if ($Scope -eq 'Machine') { 'HKLM:\Software\Classes' } else { 'HKCU:\Software\Classes' }
 $classKey = Join-Path $classes "CLSID\$classId"
 $localServer = (Get-ItemProperty -LiteralPath "$classKey\LocalServer32").'(default)'
-$registeredProgId = (Get-ItemProperty -LiteralPath $classKey).ProgID
+$registeredProgId = (Get-ItemProperty -LiteralPath (Join-Path $classKey 'ProgID')).'(default)'
 $progIdClass = (Get-ItemProperty -LiteralPath (Join-Path $classes "$progId\CLSID")).'(default)'
 $insertable = Test-Path -LiteralPath "$classKey\Insertable"
 Write-Host "    scope              : $Scope ($classes)"
@@ -169,11 +175,14 @@ $doc = $null
 $shape = $null
 try {
     $word = New-Object -ComObject Word.Application
-    $word.Visible = $false
+    $word.Visible = $true
     $word.DisplayAlerts = 0
     $doc = $word.Documents.Add()
     Ok "Word started, document created (pid $((Get-Process -Name WINWORD -ErrorAction SilentlyContinue |
         Sort-Object StartTime -Descending | Select-Object -First 1).Id))"
+    # Word asks the object to show itself (`OLEIVERB_SHOW`) while it inserts it, so this run's
+    # editor can already be up before step 4 asks for one. This is what "this run's editor" means.
+    $script:EditorsBefore = @(Get-Process -Name mathtype -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
     $shape = $doc.InlineShapes.AddOLEObject($progId)
     if ($null -eq $shape) {
         Fail 'AddOLEObject returned nothing'
@@ -181,6 +190,14 @@ try {
         Ok "inserted an inline shape: type=$($shape.Type) width=$([math]::Round($shape.Width,1))pt height=$([math]::Round($shape.Height,1))pt"
         Write-Host "    OLEFormat.ClassType : $($shape.OLEFormat.ClassType)"
         Write-Host "    OLEFormat.ProgID    : $($shape.OLEFormat.ProgID)"
+        # A class whose `ProgID` subkey is missing reports "Unknown"/empty here even though the
+        # ProgID -> CLSID lookup works, because mapping the class back (`ProgIDFromCLSID`) is what
+        # Word does to fill these two; hosts use them to find this class's objects again.
+        if ($shape.OLEFormat.ProgID -eq $progId) {
+            Ok "OLEFormat.ProgID names the class ($progId)"
+        } else {
+            Fail "OLEFormat.ProgID reports '$($shape.OLEFormat.ProgID)' instead of '$progId'"
+        }
     }
 } catch {
     Fail "inserting the object failed: $($_.Exception.Message)"
@@ -211,6 +228,17 @@ if ($null -ne $shape) {
             else { Start-Sleep -Milliseconds 200 }
         }
         if ($null -eq $editor) {
+            # The insertion itself may have opened the editor: it is this run's editor even though
+            # it appeared before this step, and the hand-off file it is editing belongs to the
+            # object this run inserted.
+            $opened = @(Get-Process -Name mathtype -ErrorAction SilentlyContinue |
+                Where-Object { $script:EditorsBefore -notcontains $_.Id })
+            if ($opened.Count -gt 0) {
+                $editor = $opened[0]
+                Note "the editor was already running from the insertion: mathtype pid=$($editor.Id)"
+            }
+        }
+        if ($null -eq $editor) {
             Fail "no mathtype editor process appeared within $EditorTimeoutSeconds seconds of DoVerb($verb)"
         } else {
             $script:StartedEditors.Add($editor.Id) | Out-Null
@@ -239,6 +267,14 @@ if ($null -ne $editor) {
             [IO.File]::WriteAllText($handoff, $targetLatex, $utf8NoBom)
             Ok "wrote the new equation into the hand-off file: $targetLatex"
 
+            # The window has to exist before it can be asked to close: `CloseMainWindow` does
+            # nothing while the editor is still starting up, and an editor that had to be killed
+            # looks to the object like one that failed, whose hand-off file it will not read.
+            $windowDeadline = (Get-Date).AddSeconds(15)
+            while ((Get-Date) -lt $windowDeadline -and $editor.MainWindowHandle -eq 0) {
+                Start-Sleep -Milliseconds 200
+                $editor.Refresh()
+            }
             $null = $editor.CloseMainWindow()
             if (-not $editor.WaitForExit($EditorTimeoutSeconds * 1000)) {
                 Note 'the editor ignored the close request and was stopped instead'
@@ -264,21 +300,23 @@ Step '6. read the equation back through automation'
 $observed = $null
 $route = $null
 if ($null -ne $shape) {
+    # The object reads the hand-off file on its own timer, which runs every 200 ms, so the value is
+    # asked for again on every turn rather than once: the first answer can still be the old
+    # equation.
     $deadline = (Get-Date).AddSeconds($ObjectTimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if ($null -eq $route) {
+        $observed = $null
+        try {
+            $observed = $shape.OLEFormat.Object.GetLatex()
+            $route = '$shape.OLEFormat.Object.GetLatex()'
+        } catch {
+            if ($null -eq $route) { Note "OLEFormat.Object is not reachable: $($_.Exception.Message)" }
             try {
-                $observed = $shape.OLEFormat.Object.GetLatex()
-                $route = '$shape.OLEFormat.Object.GetLatex()'
+                $active = [Runtime.InteropServices.Marshal]::GetActiveObject($progId)
+                $observed = $active.GetLatex()
+                $route = "GetActiveObject('$progId').GetLatex()"
             } catch {
-                Note "OLEFormat.Object is not reachable: $($_.Exception.Message)"
-                try {
-                    $active = [Runtime.InteropServices.Marshal]::GetActiveObject($progId)
-                    $observed = $active.GetLatex()
-                    $route = "GetActiveObject('$progId').GetLatex()"
-                } catch {
-                    Note "GetActiveObject('$progId') is not reachable either: $($_.Exception.Message)"
-                }
+                if ($null -eq $route) { Note "GetActiveObject('$progId') is not reachable either: $($_.Exception.Message)" }
             }
         }
         if ($null -ne $route -and (Normalize $observed) -eq (Normalize $targetLatex)) { break }
@@ -302,7 +340,13 @@ Step '7. save, close, reopen'
 if ($null -ne $doc) {
     try {
         if (Test-Path -LiteralPath $docx) { Remove-Item -LiteralPath $docx -Force }
-        $doc.SaveAs2($docx, 16)
+        # SaveAs2's FileName and FileFormat are by-reference optional parameters; passing them
+        # positionally makes PowerShell's COM binder block forever (a plain document hangs the
+        # same way), so they go in through [ref] on raw typed variables.
+        [string] $savePath = $docx
+        [int] $saveFormat = 16
+        Write-Host '    asking Word to write the document'
+        $doc.SaveAs2([ref] $savePath, [ref] $saveFormat)
         $doc.Close(0)
         $doc = $null
         Ok "the document was saved to $docx"
@@ -374,17 +418,30 @@ try {
     if ($count -ge 1) {
         $shape2 = $doc2.InlineShapes.Item(1)
         Write-Host "    ClassType : $($shape2.OLEFormat.ClassType)"
+        if ($shape2.OLEFormat.ProgID -eq $progId) {
+            Ok "the reopened object reports its ProgID ($progId)"
+        } else {
+            Fail "the reopened object reports ProgID '$($shape2.OLEFormat.ProgID)' instead of '$progId'"
+        }
+        # As in step 6: keep asking, because the reopened object reads its streams on its own and
+        # the first answer can still be the one it had before the document was written.
         $reopened = $null
         $reopenRoute = $null
         $deadline = (Get-Date).AddSeconds($ObjectTimeoutSeconds)
-        while ((Get-Date) -lt $deadline -and $null -eq $reopenRoute) {
-            try { $reopened = $shape2.OLEFormat.Object.GetLatex(); $reopenRoute = 'OLEFormat.Object.GetLatex()' }
-            catch {
+        while ((Get-Date) -lt $deadline) {
+            try {
+                $reopened = $shape2.OLEFormat.Object.GetLatex()
+                $reopenRoute = 'OLEFormat.Object.GetLatex()'
+            } catch {
                 try {
                     $reopened = [Runtime.InteropServices.Marshal]::GetActiveObject($progId).GetLatex()
                     $reopenRoute = "GetActiveObject('$progId').GetLatex()"
-                } catch { Start-Sleep -Milliseconds 300 }
+                } catch {
+                    if ($null -eq $reopenRoute) { Note "the reopened object is not reachable yet: $($_.Exception.Message)" }
+                }
             }
+            if ($null -ne $reopenRoute -and (Normalize $reopened) -eq (Normalize $targetLatex)) { break }
+            Start-Sleep -Milliseconds 300
         }
         if ($null -eq $reopenRoute) {
             Note 'the reopened object was not reachable through automation; the streams read above stand as the evidence'
