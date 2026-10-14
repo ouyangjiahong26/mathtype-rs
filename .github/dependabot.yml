@@ -11,6 +11,11 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    ignore:
+      # windows-core 须与 windows crate 的版本配套（windows 0.62.2 锁定 windows-core 0.62.2）。
+      # 单独升级会让依赖图并存两个 windows_core，COM 宏展开的类型与接口的类型不属同一个
+      # crate，构建必坏。跟随 windows 一起升级时手工改这两处版本。
+      - dependency-name: "windows-core"
 
   - package-ecosystem: "github-actions"
     directory: "/"
