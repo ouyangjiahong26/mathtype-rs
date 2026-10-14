@@ -1144,7 +1144,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "mathtype"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ctrlc",
  "eframe",
@@ -1168,7 +1168,7 @@ dependencies = [
 
 [[package]]
 name = "mathtype-ole-server"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
  "mt-layout",
@@ -1181,7 +1181,7 @@ dependencies = [
 
 [[package]]
 name = "mathtype-word-addin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-batch",
  "mt-core",
@@ -1244,7 +1244,7 @@ dependencies = [
 
 [[package]]
 name = "mt-batch"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
  "mt-docx",
@@ -1258,11 +1258,11 @@ dependencies = [
 
 [[package]]
 name = "mt-core"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "mt-docx"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
  "mt-mtef",
@@ -1274,14 +1274,14 @@ dependencies = [
 
 [[package]]
 name = "mt-edit"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
 ]
 
 [[package]]
 name = "mt-html"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
  "mt-docx",
@@ -1296,14 +1296,14 @@ dependencies = [
 
 [[package]]
 name = "mt-layout"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
 ]
 
 [[package]]
 name = "mt-mathml"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
  "quick-xml 0.42.0",
@@ -1311,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "mt-mtef"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "cfb",
  "mt-core",
@@ -1320,7 +1320,7 @@ dependencies = [
 
 [[package]]
 name = "mt-numbering"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
  "mt-docx",
@@ -1332,7 +1332,7 @@ dependencies = [
 
 [[package]]
 name = "mt-omml"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
  "quick-xml 0.42.0",
@@ -1340,7 +1340,7 @@ dependencies = [
 
 [[package]]
 name = "mt-render"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
  "mt-layout",
@@ -1350,7 +1350,7 @@ dependencies = [
 
 [[package]]
 name = "mt-style-preset"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
  "mt-layout",
@@ -1359,7 +1359,7 @@ dependencies = [
 
 [[package]]
 name = "mt-tex"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mt-core",
 ]

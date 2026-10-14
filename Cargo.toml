@@ -5,26 +5,26 @@ members = ["crates/*", "apps/*"]
 exclude = ["apps/wps-addin"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ouyangjiahong26/mathtype-rs"
 
 [workspace.dependencies]
-mt-core = { path = "crates/mt-core", version = "0.1.1" }
-mt-tex = { path = "crates/mt-tex", version = "0.1.1" }
-mt-mathml = { path = "crates/mt-mathml", version = "0.1.1" }
-mt-omml = { path = "crates/mt-omml", version = "0.1.1" }
-mt-layout = { path = "crates/mt-layout", version = "0.1.1" }
-mt-edit = { path = "crates/mt-edit", version = "0.1.1" }
-mt-render = { path = "crates/mt-render", version = "0.1.1" }
-mt-mtef = { path = "crates/mt-mtef", version = "0.1.1" }
-mt-docx = { path = "crates/mt-docx", version = "0.1.1" }
-mt-html = { path = "crates/mt-html", version = "0.1.1" }
-mt-style-preset = { path = "crates/mt-style-preset", version = "0.1.1" }
-mt-batch = { path = "crates/mt-batch", version = "0.1.1" }
-mt-numbering = { path = "crates/mt-numbering", version = "0.1.1" }
+mt-core = { path = "crates/mt-core", version = "0.1.2" }
+mt-tex = { path = "crates/mt-tex", version = "0.1.2" }
+mt-mathml = { path = "crates/mt-mathml", version = "0.1.2" }
+mt-omml = { path = "crates/mt-omml", version = "0.1.2" }
+mt-layout = { path = "crates/mt-layout", version = "0.1.2" }
+mt-edit = { path = "crates/mt-edit", version = "0.1.2" }
+mt-render = { path = "crates/mt-render", version = "0.1.2" }
+mt-mtef = { path = "crates/mt-mtef", version = "0.1.2" }
+mt-docx = { path = "crates/mt-docx", version = "0.1.2" }
+mt-html = { path = "crates/mt-html", version = "0.1.2" }
+mt-style-preset = { path = "crates/mt-style-preset", version = "0.1.2" }
+mt-batch = { path = "crates/mt-batch", version = "0.1.2" }
+mt-numbering = { path = "crates/mt-numbering", version = "0.1.2" }
 
 [profile.release]
 lto = "thin"
